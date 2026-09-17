@@ -740,7 +740,8 @@ mod tests {
             }
         });
         assert!(
-            text.iter().any(|line| line == "Sharing src/video.rs — Neovim"),
+            text.iter()
+                .any(|line| line == "Sharing src/video.rs — Neovim"),
             "{text:?}"
         );
 

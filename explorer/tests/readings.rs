@@ -282,12 +282,20 @@ fn a_search_that_lost_a_source_names_it_and_keeps_no_chip_for_it() {
     );
     assert_eq!(whole.partial, "");
     assert_eq!(
-        whole.kinds.iter().map(|chip| chip.kind.as_str()).collect::<Vec<_>>(),
+        whole
+            .kinds
+            .iter()
+            .map(|chip| chip.kind.as_str())
+            .collect::<Vec<_>>(),
         SOURCES.map(|(kind, _)| kind)
     );
     assert!(whole.kinds.iter().all(|chip| chip.count == 1));
     assert_eq!(
-        whole.hits.iter().map(|hit| hit.kind.as_str()).collect::<Vec<_>>(),
+        whole
+            .hits
+            .iter()
+            .map(|hit| hit.kind.as_str())
+            .collect::<Vec<_>>(),
         SOURCES.map(|(kind, _)| kind),
         "the fold keeps the order the screen shows"
     );
@@ -322,10 +330,12 @@ fn a_search_that_lost_a_source_names_it_and_keeps_no_chip_for_it() {
     let two = fold_search(
         SOURCES
             .iter()
-            .map(|(kind, label)| match *kind == "message" || *kind == "page" {
-                true => silent(kind, label),
-                false => answered(kind, label),
-            })
+            .map(
+                |(kind, label)| match *kind == "message" || *kind == "page" {
+                    true => silent(kind, label),
+                    false => answered(kind, label),
+                },
+            )
             .collect(),
     );
     assert_eq!(

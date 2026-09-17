@@ -243,7 +243,6 @@ pub fn picture(bytes: impl AsRef<[u8]>) -> (u64, Option<Vec<u8>>) {
     (hash, first.then(|| bytes.to_vec()))
 }
 
-
 /// Registers a message in the frame currently being built.
 pub fn message<M: 'static>(message: M) -> u32 {
     let tables = tables();
@@ -599,7 +598,6 @@ pub(crate) fn editor_pending() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     #[test]
     fn nested_contexts_restore_typed_routes_and_picture_history() {

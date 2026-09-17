@@ -380,10 +380,10 @@ mod tests {
                             // `host.finish` carries no payload, and a test that
                             // panics on parsing it cannot report which
                             // assertion the session ending actually broke.
-                            let payload: Value = serde_json::from_slice(&request.payload)
-                                .unwrap_or(Value::Null);
-                            let beacon = request.kind == "net.send"
-                                && payload["frame"]["text"].is_string();
+                            let payload: Value =
+                                serde_json::from_slice(&request.payload).unwrap_or(Value::Null);
+                            let beacon =
+                                request.kind == "net.send" && payload["frame"]["text"].is_string();
                             let refused = beacon && self.refuse_beacon;
                             let result = match refused {
                                 true => Err(wire::Refusal::new(

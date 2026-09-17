@@ -57,10 +57,13 @@ impl super::ForgeView {
             return ::ducktape_view_guest::Task::none();
         }
         let next = item.next.clone();
-        let connection_changed = self.connected_rpc != next.connected_rpc || self.connected != next.connected;
+        let connection_changed =
+            self.connected_rpc != next.connected_rpc || self.connected != next.connected;
         if connection_changed {
             self.upload_handles.clear();
-            for draft in self.composers.values_mut() { draft.retire_device_requests(); }
+            for draft in self.composers.values_mut() {
+                draft.retire_device_requests();
+            }
         }
 
         self.connection_serial = crate::host::connection_serial_after(

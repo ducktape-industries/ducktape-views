@@ -486,9 +486,13 @@ pub fn view<M: Clone + 'static>(
             .map(|held| {
                 let at = format!("{key}/attachment/{}", held.token);
                 let (note, tone) = match &held.state {
-                    super::AttachmentState::Uploading => ("Uploading…".to_owned(), kit::Tone::Neutral),
+                    super::AttachmentState::Uploading => {
+                        ("Uploading…".to_owned(), kit::Tone::Neutral)
+                    }
                     super::AttachmentState::Ready { uri } => (uri.clone(), kit::Tone::Neutral),
-                    super::AttachmentState::Failed { reason } => (reason.clone(), kit::Tone::Danger),
+                    super::AttachmentState::Failed { reason } => {
+                        (reason.clone(), kit::Tone::Danger)
+                    }
                     super::AttachmentState::Unavailable => {
                         ("Select the file again".to_owned(), kit::Tone::Warning)
                     }
@@ -537,7 +541,10 @@ pub fn view<M: Clone + 'static>(
                     kit::centered_row(
                         format!("{key}/failed/row"),
                         [
-                            kit::text(format!("{key}/failed/note"), "An earlier message wasn’t sent"),
+                            kit::text(
+                                format!("{key}/failed/note"),
+                                "An earlier message wasn’t sent",
+                            ),
                             kit::spacer(),
                             kit::button(
                                 format!("{key}/restore"),
@@ -558,9 +565,19 @@ pub fn view<M: Clone + 'static>(
     // mark is a sign rather than a word: five words in a row read as a
     // sentence, five signs read as a toolbar.
     let mut controls = vec![
-        mark(format!("{key}/attach"), "+", "Attach a file", press("attach".into())),
+        mark(
+            format!("{key}/attach"),
+            "+",
+            "Attach a file",
+            press("attach".into()),
+        ),
         mark(format!("{key}/bold"), "B", "Bold", press("bold".into())),
-        mark(format!("{key}/italic"), "I", "Italic", press("italic".into())),
+        mark(
+            format!("{key}/italic"),
+            "I",
+            "Italic",
+            press("italic".into()),
+        ),
         // Latin punctuation only: the product face carries it. A dingbat
         // quote mark (❞) or an angle-quote pair (‹›) falls out of Inter and
         // lands in whatever the system has, which is a tofu box on a host
@@ -579,7 +596,10 @@ pub fn view<M: Clone + 'static>(
         kit::spaced(kit::centered_row(format!("{key}/toolbar"), controls), 2.),
         CONTROL_INSET,
     ));
-    plate(key, kit::spaced(kit::column(format!("{key}/rows"), rows), 6.))
+    plate(
+        key,
+        kit::spaced(kit::column(format!("{key}/rows"), rows), 6.),
+    )
 }
 
 /// The box the whole draft lives in: the window's own colour inside a

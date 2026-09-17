@@ -168,7 +168,7 @@ fn connected_dashboard() -> (Frame, Vec<(String, u64)>) {
             "files" => {
                 let history: serde_json::Value = serde_json::from_slice(&history()).unwrap();
                 serde_json::to_vec(&serde_json::json!({"history":history["snapshots"]})).unwrap()
-            },
+            }
             other => panic!("unexpected query target {other}"),
         };
         events.push(answer(id, &reply));

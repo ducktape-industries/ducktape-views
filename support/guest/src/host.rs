@@ -141,10 +141,7 @@ pub fn log(message: impl AsRef<str>) {
 /// opened is the host's answer, not this view's business.
 pub fn open_link(link: &str) {
     let ask = serde_json::json!({ "link": link });
-    notify(
-        "host.open_link",
-        ask.to_string().as_bytes(),
-    );
+    notify("host.open_link", ask.to_string().as_bytes());
 }
 
 /// The host's colour mode, now and whenever it changes: every item is

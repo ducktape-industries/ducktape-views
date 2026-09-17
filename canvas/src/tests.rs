@@ -923,10 +923,7 @@ fn loose_arrow(run: [[i32; 2]; 2]) -> BoardsView {
             y: low[1],
             width: (run[1][0] - run[0][0]).abs(),
             height: (run[1][1] - run[0][1]).abs(),
-            points: run
-                .iter()
-                .map(|p| [p[0] - low[0], p[1] - low[1]])
-                .collect(),
+            points: run.iter().map(|p| [p[0] - low[0], p[1] - low[1]]).collect(),
             ..Default::default()
         },
     });
@@ -983,8 +980,7 @@ fn an_arrows_start_takes_a_card_exactly_where_its_end_would() {
              at {by_the_end:?} by its end and {by_the_start:?} by its start"
         );
         assert!(
-            (by_the_end[0] - expected[0]).abs() < 1.
-                && (by_the_end[1] - expected[1]).abs() < 1.,
+            (by_the_end[0] - expected[0]).abs() < 1. && (by_the_end[1] - expected[1]).abs() < 1.,
             "an arrow standing at {standing:?} should reach the card at \
              {expected:?}, not {by_the_end:?}"
         );
@@ -2320,7 +2316,10 @@ fn every_way_out_of_a_card_keeps_what_you_wrote() {
     view.finish_text();
     assert!(view.inline.is_some(), "the board refuses text this long");
     view.on_cancel();
-    assert!(view.inline.is_none(), "an unsaveable card could not be left");
+    assert!(
+        view.inline.is_none(),
+        "an unsaveable card could not be left"
+    );
     assert_eq!(
         view.visible().unwrap().shapes["a"].shape.text,
         "written",
@@ -2463,7 +2462,10 @@ fn the_box_you_type_in_wraps_where_the_card_wraps_whatever_the_words_measured() 
     view.begin_text();
     let board = view.visible().unwrap();
     let shape = board.shapes["a"].shape.clone();
-    let room = [shape.width as f32 * view.zoom, shape.height as f32 * view.zoom];
+    let room = [
+        shape.width as f32 * view.zoom,
+        shape.height as f32 * view.zoom,
+    ];
     let pos = view.screen(shape.x as f32, shape.y as f32);
     let letters = view.lettering(&shape, room);
     let column = super::presentation::column(shape.kind, room[0], &letters, view.zoom);

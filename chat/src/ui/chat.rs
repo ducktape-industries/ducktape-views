@@ -455,9 +455,15 @@ impl ChatView {
                 self.composer(
                     format!("{key}/composer"),
                     crate::host::composer_scope(&self.endpoint, &self.active_channel),
-                    ducktape_view_composer::host::Target::Post { channel: self.active_channel.clone(), thread: None },
+                    ducktape_view_composer::host::Target::Post {
+                        channel: self.active_channel.clone(),
+                        thread: None,
+                    },
                     &self.composer_hint(),
-                    !self.loading && self.connected && !self.active_channel.is_empty() && self.post_refusal.is_empty(),
+                    !self.loading
+                        && self.connected
+                        && !self.active_channel.is_empty()
+                        && self.post_refusal.is_empty(),
                 ),
             ),
             COMPOSER_MARGIN,
@@ -1030,8 +1036,15 @@ impl ChatView {
                 format!("{key}/reply_composer-room"),
                 self.composer(
                     format!("{key}/reply_composer"),
-                    crate::host::thread_scope(&self.endpoint, &self.active_channel, self.active_thread_seq),
-                    ducktape_view_composer::host::Target::Post { channel: self.active_channel.clone(), thread: Some(self.active_thread_seq as u64) },
+                    crate::host::thread_scope(
+                        &self.endpoint,
+                        &self.active_channel,
+                        self.active_thread_seq,
+                    ),
+                    ducktape_view_composer::host::Target::Post {
+                        channel: self.active_channel.clone(),
+                        thread: Some(self.active_thread_seq as u64),
+                    },
                     "Reply in thread",
                     !self.thread_loading && self.connected && self.post_refusal.is_empty(),
                 ),
@@ -1397,7 +1410,15 @@ impl ChatView {
                 children.push(self.composer(
                     format!("{key}/{prefix}edit-composer"),
                     crate::host::edit_scope(&self.endpoint, &self.active_channel, seq),
-                    ducktape_view_composer::host::Target::Edit { channel: self.active_channel.clone(), seq: seq as u64, base_rev: if thread { self.thread_selected_rev } else { self.selected_message_rev } as u32 },
+                    ducktape_view_composer::host::Target::Edit {
+                        channel: self.active_channel.clone(),
+                        seq: seq as u64,
+                        base_rev: if thread {
+                            self.thread_selected_rev
+                        } else {
+                            self.selected_message_rev
+                        } as u32,
+                    },
                     "Edit message",
                     !self.busy,
                 ));
@@ -1569,7 +1590,11 @@ impl ChatView {
             true => wire::Node::Surface {
                 key: format!("{key}/markdown"),
                 name: "markdown".into(),
-                args: vec![Str(preview.text.clone()), Str(String::new()), Bool(self.dark)],
+                args: vec![
+                    Str(preview.text.clone()),
+                    Str(String::new()),
+                    Bool(self.dark),
+                ],
                 on_event: Some(slots::handler::<wire::SurfaceValue, Message>(Box::new(
                     |value| match value {
                         Str(link) => Some(Message::OpenMessageLink(link)),

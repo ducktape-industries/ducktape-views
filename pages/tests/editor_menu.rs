@@ -557,7 +557,9 @@ fn ask_ai_lists_the_agents_and_addresses_the_comment_to_the_one_picked() {
     nobody.format(&selection);
     let (_, nobody) = nobody.pick(&selection, "more");
     let (_, picker) = nobody.pick(&selection, "ai");
-    let view = picker.current(&selection).expect("the picker opens on its one row");
+    let view = picker
+        .current(&selection)
+        .expect("the picker opens on its one row");
     assert_eq!(tags(&view), vec!["none"]);
     assert_eq!(view.items[0].1, "No active agents");
     let intent = picker.intent(&selection, "none");

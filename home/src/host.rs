@@ -122,9 +122,13 @@ async fn view(target: &str, query: serde_json::Value) -> Result<serde_json::Valu
 }
 
 async fn files_get(lane: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
-    let reply = ask("rpc.query", &serde_json::json!({
-        "target": "files", "query": {lane: params}
-    })).await?;
+    let reply = ask(
+        "rpc.query",
+        &serde_json::json!({
+            "target": "files", "query": {lane: params}
+        }),
+    )
+    .await?;
     let value = reply.get(lane).cloned().ok_or("unexpected Files reply")?;
     match lane {
         "history" => Ok(serde_json::json!({"snapshots": value})),
