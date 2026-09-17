@@ -787,7 +787,7 @@ fn avatar_tone(member: &host::MemberRow) -> ducktape_view_guest::kit::Tone {
 
 /// Presence, in the vocabulary `host::presence_label` chose: a live member
 /// is a success badge, an agent's registration state a neutral one, and
-/// absence a faint caption — offline is not a state worth a colour.
+/// a missing link a faint caption — no link is not a state worth a colour.
 fn presence_chip(key: String, member: &host::MemberRow) -> ducktape_view_guest::wire::Node {
     use ducktape_view_guest::kit::{self, Tone};
     let word = host::sentence_case(host::presence_label(member));

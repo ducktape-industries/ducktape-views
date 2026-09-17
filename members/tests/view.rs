@@ -487,3 +487,22 @@ fn an_admin_opens_a_ballot_over_a_resident_and_a_non_admin_reads_the_rule() {
         texts(&frame)
     );
 }
+
+/// THE PEER SAMPLE IS THIS NODE'S LINK, NOT A REPORT ON THE PERSON.
+///
+/// `live` on a human row is folded from `rpc.peers` filtered on
+/// `connected` — what this node has dialled. A member absent from that
+/// sample may be up and serving the rest of the mesh, so the badge names
+/// the missing link and never claims the person is down.
+#[test]
+fn a_member_this_node_has_no_link_to_is_not_called_offline() {
+    // the unseated roster lists the stranger, whom the peer sample does
+    // not carry: the one human row with `live == false`
+    let (frame, _) = connected_roster(false);
+    assert!(has_text(&frame, STRANGER), "{:?}", texts(&frame));
+    assert!(has_text(&frame, "Not linked"), "{:?}", texts(&frame));
+    let tree = format!("{:?}", frame.root);
+    for word in ["offline", "Offline"] {
+        assert!(!tree.contains(word), "{word:?} is still drawn: {tree}");
+    }
+}
