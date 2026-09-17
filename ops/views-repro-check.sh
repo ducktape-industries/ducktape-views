@@ -20,7 +20,9 @@ for place in here there; do
   else
     view_target="$work/outside-target"
   fi
-  CARGO_TARGET_DIR="$view_target" make -C "$work/$place" views WASM_TOOLS_ROOT="$wasm_tools_root"
+  view_packages=$(awk '/^\[/{ in_package = ($0 == "[package]") } in_package && /^name *= *"/ { split($0, part, "\""); printf "-p %s ", part[2] }' "$work/$place"/*/Cargo.toml)
+  (cd "$work/$place" && CARGO_TARGET_DIR="$view_target" PATH="$wasm_tools_root/bin:$PATH" \
+    bash ops/build-views.sh $view_packages)
   (cd "$work/$place/target/views" && printf '%s\n' *.wasm | sort) > "$work/$place.names"
 done
 cmp "$work/here.names" "$work/there.names"

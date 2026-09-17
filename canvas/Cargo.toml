@@ -7,7 +7,7 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 [dependencies]
 # the board FORMAT, not the module that runs one
-boards-wire = { path = "../../modules/apps/boards/wire" }
+boards-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "boards-wire" }
 ducktape-view-guest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

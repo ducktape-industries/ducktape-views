@@ -9,8 +9,8 @@ futures = "0.3"
 ducktape-view-guest = { path = "support/guest" }
 ducktape-view-composer = { path = "support/composer" }
 ducktape-view-files = { path = "support/files" }
-design = { path = "../design" }
-view-wire = { path = "../view-wire" }
+design = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "design" }
+view-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "view-wire" }
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

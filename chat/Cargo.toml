@@ -18,7 +18,7 @@ serde_json.workspace = true
 ducktape-view-guest.workspace = true
 ducktape-view-composer.workspace = true
 sha2 = "0.10"
-chat-message = { path = "../../modules/apps/chat/message" }
+chat-message = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "chat-message" }
 
 [dev-dependencies]
 # The snapshot tag is a digest of this view's own state layout; the tracer

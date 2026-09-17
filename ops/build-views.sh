@@ -12,13 +12,12 @@ mkdir -p "$view_target"
 view_target=$(cd "$view_target" && pwd -P)
 # Cargo hashes a path dependency's ABSOLUTE location into that package's
 # `-C metadata` whenever the package sits outside the workspace root, and
-# `-C metadata` seeds every symbol hash the crate emits. Views reach module
-# crates outside `crates/views` (boards, chat-message, duckfs-core, runs,
-# agent), so a view's bytes would otherwise depend on where the checkout
-# lives — and two hosts could not build one founding set. Compile through one
-# constant path so that location is the same string everywhere. The path is a
-# single global name, so one build owns it at a time; `ops/views-repro-check.sh`
-# names it too, to prove it never reaches a component's bytes.
+# `-C metadata` seeds every symbol hash the crate emits. A view's bytes would
+# otherwise depend on where the checkout lives — and two hosts could not
+# build one founding set. Compile through one constant path so that location
+# is the same string everywhere. The path is a single global name, so one
+# build owns it at a time; `ops/views-repro-check.sh` names it too, to prove
+# it never reaches a component's bytes.
 source_root=/var/tmp/ducktape-view-root
 lock="$source_root.lock"
 # The holder's pid reclaims the lock after a build dies without its trap.
@@ -54,7 +53,7 @@ done
 (("${#packages[@]}")) || { echo "no view packages selected" >&2; exit 1; }
 arguments=()
 for package in "${packages[@]}"; do arguments+=(-p "$package"); done
-"${CARGO:-cargo}" build --locked --manifest-path "$source_root/crates/views/Cargo.toml" --release \
+"${CARGO:-cargo}" build --locked --manifest-path "$source_root/Cargo.toml" --release \
   --target wasm32-unknown-unknown "${arguments[@]}"
 mkdir -p "$repo/target/views"
 for package in "${packages[@]}"; do
