@@ -37,10 +37,11 @@ pub struct MemberRow {
     pub is_agent: bool,
     /// an agent's capability tag; empty for a human member.
     pub model: String,
-    /// a HUMAN row: the mesh reports this key as a live peer (this node is
-    /// live by definition). An AGENT row: the registry says active rather
-    /// than paused — the record renders the two vocabularies apart on
-    /// `is_agent`.
+    /// a HUMAN row: THIS NODE holds a link to this key in its own peer
+    /// sample (it is linked to itself by definition) — not a reading of
+    /// that person's own health. An AGENT row: the registry says active
+    /// rather than paused — the record renders the two vocabularies apart
+    /// on `is_agent`.
     pub live: bool,
 }
 
@@ -491,14 +492,17 @@ pub(crate) fn sentence_case(word: &str) -> String {
     }
 }
 
-/// A human is `live`/`offline` on the mesh; an agent is `active`/`paused`
-/// in the registry.
+/// A human row says what THIS NODE measured — a link it holds, or none:
+/// the peer sample is this node's own dial list, and a member missing from
+/// it may be up and serving the rest of the mesh, so the absent word names
+/// the link and never the person. An agent is `active`/`paused` in the
+/// registry, which is a fact the record itself carries.
 pub(crate) fn presence_label(row: &MemberRow) -> &'static str {
     match (row.is_agent, row.live) {
         (true, true) => "active",
         (true, false) => "paused",
         (false, true) => "live",
-        (false, false) => "offline",
+        (false, false) => "not linked",
     }
 }
 
