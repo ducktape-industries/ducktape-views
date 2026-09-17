@@ -146,6 +146,16 @@ enum Gesture {
 struct Inline {
     id: String,
     original: String,
+    /// The card's revision at the words in `original` — the version of the
+    /// card this writer has read and is writing over. It travels with the
+    /// baseline and not with the sitting: a close that is refused because
+    /// somebody else got there first takes their words as the new baseline,
+    /// and the revision those words are at has to move with them or the
+    /// consenting close would name a revision the card is already past.
+    ///
+    /// Sent as `Change::Text::base_revision`, which is what makes the save a
+    /// compare-and-set rather than a blind overwrite.
+    revision: u64,
     #[serde(with = "editor_codec")]
     document: Editor,
     /// The height in board units the words in this card need, as the host
@@ -303,10 +313,14 @@ pub struct BoardsView {
 pub enum Message {
     Session(Result<host::Session, String>),
     Read(u64, String, Result<host::Reading, String>),
+    /// The board's answer to one submitted operation, and the board as it read
+    /// afterwards. A refusal arrives whole rather than as its sentence: which
+    /// refusal it is decides whether the words in it go back in front of the
+    /// writer or the edit simply waits for Retry.
     Delivered(
         u64,
         String,
-        Result<(), String>,
+        Result<(), ducktape_view_guest::host::Refusal>,
         Result<host::Reading, String>,
     ),
     Minted(u64, String, Shape, Result<String, String>),
@@ -642,7 +656,7 @@ impl BoardsView {
         &mut self,
         epoch: u64,
         id: String,
-        result: Result<(), String>,
+        result: Result<(), ducktape_view_guest::host::Refusal>,
         reading: Result<host::Reading, String>,
     ) -> Task<Message> {
         let standing = epoch == self.epoch && id == self.current;
@@ -690,11 +704,102 @@ impl BoardsView {
                 }
                 self.pump()
             }
-            Err(error) => {
-                self.delivery = Delivery::Failed(error);
-                Task::none()
+            Err(refusal) => {
+                // Two of the module's tokens are about words that are still on
+                // this writer's screen, and the view already has a banner for
+                // each. `stale_text` carries the card's current text verbatim,
+                // which is what the writer would have written over.
+                //
+                // Every other token leaves the edit standing in the queue for
+                // Retry and shows the sentence, which is what a refusal did
+                // before there were tokens to tell them apart — and what an app
+                // or node too old to forward the module's own token still
+                // arrives here as. A refusal nobody has read is not a refusal to
+                // guess about: "Not saved" and the module's own words.
+                match refusal.reason.as_str() {
+                    "stale_text" => {
+                        self.take_the_words_back(epoch, id, Some(refusal.sentence), reading)
+                    }
+                    "text_target_gone" => self.take_the_words_back(epoch, id, None, reading),
+                    _ => {
+                        self.delivery = Delivery::Failed(refusal.sentence);
+                        Task::none()
+                    }
+                }
             }
         }
+    }
+    /// A text edit the board would not take, with the words in it still the
+    /// writer's. `theirs` is what the card says instead — the words this edit
+    /// would have written over — or nothing when the card has gone.
+    ///
+    /// The refused edit leaves the queue rather than standing in it for Retry.
+    /// It names a revision the card is past, or a card that is not there, so
+    /// nothing can come of re-sending it AS WRITTEN, and everything queued
+    /// behind it would wait on it for good.
+    ///
+    /// What is left is the clash [`Self::finish_text`] already answers when the
+    /// other writer's board reaches this view first — the same clash one round
+    /// trip later, so it ends in the same two banners: the draft back in the
+    /// card with their words quoted beside it and taken as the new baseline,
+    /// or, with no card left to put it in, the words kept and one press from a
+    /// card of their own.
+    fn take_the_words_back(
+        &mut self,
+        epoch: u64,
+        id: String,
+        theirs: Option<String>,
+        reading: Result<host::Reading, String>,
+    ) -> Task<Message> {
+        // The board as our own edits left it, read before the fresh one
+        // arrives: the card this edit was for is still on it, in its place.
+        let before = self.settled();
+        let refused = self.pending.pop_front();
+        self.delivery = Delivery::Idle;
+        self.on_read(epoch, id, reading);
+        let Some((card, draft)) = refused.as_ref().and_then(written) else {
+            return self.pump();
+        };
+        let standing = self
+            .settled()
+            .and_then(|board| board.shapes.get(card).cloned());
+        match theirs.zip(standing) {
+            Some((theirs, standing)) => {
+                let mut document = Editor::new(draft);
+                // The caret goes where the writer left it — at the end of their
+                // own words, with nothing selected. Opening a card SELECTS what
+                // it says because you go in to replace a label; this is the
+                // same sitting continued, and the next key belongs after the
+                // draft rather than instead of it.
+                document.move_to(wire::EditorCursor {
+                    position: wire::EditorPosition {
+                        line: u32::MAX,
+                        column: u32::MAX,
+                    },
+                    selection: None,
+                });
+                self.read_this_first(Inline {
+                    id: card.to_owned(),
+                    original: theirs,
+                    revision: standing.revision,
+                    document,
+                    grown: None,
+                    wide: None,
+                });
+            }
+            // No card to put the draft back into, so the words are kept beside
+            // the board instead — in the card's own place, which `before` still
+            // has even though the fresh board does not.
+            None => {
+                if let Some(place) = before.and_then(|board| board.shapes.get(card).cloned()) {
+                    self.keep_the_words_that_did_not_land(Shape {
+                        text: draft.to_owned(),
+                        ..place.shape
+                    });
+                }
+            }
+        }
+        self.pump()
     }
     fn pump(&mut self) -> Task<Message> {
         let ready = self.session.connected && matches!(self.delivery, Delivery::Idle);
@@ -816,7 +921,7 @@ impl BoardsView {
             return Task::none();
         };
         if let Err(error) = board.changed_many(&changes) {
-            self.error = error;
+            self.error = error.sentence;
             return Task::none();
         }
         self.say_nothing();
@@ -828,6 +933,33 @@ impl BoardsView {
     }
     fn edit(&mut self, change: Change) -> Task<Message> {
         self.edit_many(vec![change])
+    }
+    /// A step off the history stack, against the board it is about to be
+    /// applied to.
+    ///
+    /// A text change names the revision it writes over, and the one it was
+    /// built with is the revision the card had when the step was recorded —
+    /// which every edit since has moved past, our own included. What an undo
+    /// means is "put these words back over what is there NOW", so that is the
+    /// revision it names. It is read here and not at the record, because a step
+    /// sits on the stack for as long as the writer leaves it there.
+    ///
+    /// A card written in by somebody else in the meantime is refused, and so it
+    /// should be: an undo that rubbed their words out would be the same silent
+    /// overwrite from the other direction.
+    fn replayed(&self, changes: &[Change]) -> Vec<Change> {
+        let board = self.visible();
+        let mut changes = changes.to_vec();
+        for change in &mut changes {
+            if let Change::Text {
+                id, base_revision, ..
+            } = change
+                && let Some(record) = board.as_ref().and_then(|board| board.shapes.get(id))
+            {
+                *base_revision = record.revision;
+            }
+        }
+        changes
     }
     fn edit_many(&mut self, changes: Vec<Change>) -> Task<Message> {
         if changes.is_empty() {
@@ -843,7 +975,7 @@ impl BoardsView {
             return Task::none();
         };
         if let Err(error) = board.changed_many(&changes) {
-            self.error = error;
+            self.error = error.sentence;
             return Task::none();
         }
         let mut undo = Vec::new();
@@ -974,7 +1106,7 @@ impl BoardsView {
         let board = match Board::new(title.clone(), String::new()) {
             Ok(board) => board,
             Err(error) => {
-                self.error = error;
+                self.error = error.sentence;
                 return Task::none();
             }
         };
@@ -1013,7 +1145,7 @@ impl BoardsView {
         let renamed = match board.renamed(title.clone()) {
             Ok(renamed) => renamed,
             Err(error) => {
-                self.error = error;
+                self.error = error.sentence;
                 return Task::none();
             }
         };
@@ -1113,6 +1245,26 @@ fn edited(change: &Change) -> Option<&str> {
         | Change::Route { id, .. } => Some(id),
     }
 }
+/// What an operation does to the shapes on a board, which for the two that are
+/// about the board itself is nothing.
+fn shape_changes(operation: &Operation) -> &[Change] {
+    match operation {
+        Operation::Edit { change, .. } => std::slice::from_ref(change),
+        Operation::Batch { changes, .. } => changes,
+        Operation::Create { .. } | Operation::Rename { .. } | Operation::Remove { .. } => &[],
+    }
+}
+/// The words an operation was going to write and the card it was going to write
+/// them on. One text change at most: a close sends the card it had open, and
+/// nothing else in this view writes words.
+fn written(operation: &Operation) -> Option<(&str, &str)> {
+    shape_changes(operation)
+        .iter()
+        .find_map(|change| match change {
+            Change::Text { id, text, .. } => Some((id.as_str(), text.as_str())),
+            _ => None,
+        })
+}
 /// The card an acknowledged operation edited that the board no longer has, as
 /// our own edits last left it — our words and its place still in it.
 ///
@@ -1120,12 +1272,7 @@ fn edited(change: &Change) -> Option<&str> {
 /// so nothing downstream can tell an edit that landed from one that reached
 /// a card somebody else had already removed. This is where they part.
 fn went_nowhere(operation: &Operation, before: &Board, after: &Board) -> Option<Shape> {
-    let changes: &[Change] = match operation {
-        Operation::Edit { change, .. } => std::slice::from_ref(change),
-        Operation::Batch { changes, .. } => changes,
-        Operation::Create { .. } | Operation::Rename { .. } | Operation::Remove { .. } => &[],
-    };
-    let id = changes
+    let id = shape_changes(operation)
         .iter()
         .filter_map(edited)
         .find(|id| !after.shapes.contains_key(*id))?;
@@ -1163,6 +1310,7 @@ fn inverse(board: &Board, change: &Change) -> Vec<Change> {
                 vec![Change::Text {
                     id: id.clone(),
                     text: r.shape.text.clone(),
+                    base_revision: r.revision,
                 }]
             })
             .unwrap_or_default(),
@@ -1316,7 +1464,7 @@ ducktape_view_guest::export_app!(
 #[cfg(test)]
 mod tests;
 
-fn apply_operation(board: &Board, operation: &Operation) -> Result<Board, String> {
+fn apply_operation(board: &Board, operation: &Operation) -> Result<Board, boards_wire::Refused> {
     match operation {
         Operation::Edit { change, .. } => board.changed(change),
         Operation::Batch { changes, .. } => board.changed_many(changes),

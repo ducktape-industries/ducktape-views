@@ -1561,6 +1561,7 @@ impl BoardsView {
         self.inline = Some(Inline {
             id: id.clone(),
             original: text,
+            revision: record.revision,
             document,
             grown: None,
             wide: None,
@@ -1681,14 +1682,21 @@ impl BoardsView {
             self.inline = Some(inline);
             return Task::none();
         }
-        // What the card says on the board NOW, which need not be what this
-        // editor opened on: anybody else can have finished their own sitting in
-        // it while ours stood open, and a card gone from under us is nobody's
-        // words to keep.
-        let standing = board
+        // The card on the board NOW, which need not be what this editor opened
+        // on: anybody else can have finished their own sitting in it while ours
+        // stood open, and a card gone from under us is nobody's words to keep.
+        let record = board
             .as_ref()
-            .and_then(|board| board.shapes.get(&inline.id))
-            .map_or_else(|| inline.original.clone(), |r| r.shape.text.clone());
+            .and_then(|board| board.shapes.get(&inline.id));
+        let standing = record.map_or_else(|| inline.original.clone(), |r| r.shape.text.clone());
+        // The revision those standing words are at, which is the one this save
+        // writes over. Read here and not carried from the opening, because a
+        // card can take a revision without taking a word — somebody recolouring
+        // it does that — and the baseline is about the WORDS. With the card off
+        // the board there is nothing to read it from, so the revision this
+        // writer did open on stands: the module answers `text_target_gone` to
+        // that, which is the honest answer and not a revision we invented.
+        let revision = record.map_or(inline.revision, |r| r.revision);
         // Saving writes the card's WHOLE text, so those words go with no trace
         // and no undo of ours standing behind them — they are not ours to undo.
         // Refuse the first close and quote what is there. Taking it as the new
@@ -1697,13 +1705,9 @@ impl BoardsView {
         // from being shut inside a card that answers nothing.
         let erases_their_words = changed && standing != inline.original && standing != text;
         if erases_their_words {
-            self.error = format!(
-                "Somebody else changed this card while you had it open — {}. Close it again to \
-                 replace their words with yours.",
-                now_reading(&standing)
-            );
             inline.original = standing;
-            self.inline = Some(inline);
+            inline.revision = revision;
+            self.read_this_first(inline);
             return Task::none();
         }
         // Words are the whole of a text shape. One left with none is an empty
@@ -1724,10 +1728,30 @@ impl BoardsView {
             changes.push(Change::Text {
                 id: inline.id,
                 text,
+                base_revision: revision,
             });
         }
         changes.extend(grow);
         Task::batch([self.edit_many(changes), self.hand_back_focus()])
+    }
+    /// The card put back in front of the writer with their draft still in it,
+    /// and the words they were about to replace quoted beside it.
+    ///
+    /// Taking `theirs` as the new baseline — the words AND the revision they
+    /// are at — is what makes the next close the writer saying they have read
+    /// them and mean to replace them anyway, and is also what keeps them from
+    /// being shut inside a card that answers nothing.
+    ///
+    /// Two clashes end here: one this view could already see when the editor
+    /// closed, and one only the module could see, a round trip later. They are
+    /// the same clash and the writer is owed the same answer to both.
+    pub(super) fn read_this_first(&mut self, inline: Inline) {
+        self.error = format!(
+            "Somebody else changed this card while you had it open — {}. Close it again to \
+             replace their words with yours.",
+            now_reading(&inline.original)
+        );
+        self.inline = Some(inline);
     }
     /// ⌘Enter out of a sticky: finish it and open the next one.
     ///
@@ -2024,7 +2048,7 @@ impl BoardsView {
             return Task::none();
         };
         let before = self.pending.len();
-        let task = self.enqueue_many(history.undo.clone());
+        let task = self.enqueue_many(self.replayed(&history.undo));
         if self.pending.len() > before {
             self.undo.pop();
             self.redo.push(history);
@@ -2039,7 +2063,7 @@ impl BoardsView {
             return Task::none();
         };
         let before = self.pending.len();
-        let task = self.enqueue_many(history.redo.clone());
+        let task = self.enqueue_many(self.replayed(&history.redo));
         if self.pending.len() > before {
             self.redo.pop();
             self.undo.push(history);
