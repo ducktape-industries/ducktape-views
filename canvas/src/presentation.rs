@@ -1063,6 +1063,23 @@ impl BoardsView {
             }
         };
         let mut children = vec![kit::wrapping(kit::text("boards/error", notice))];
+        // Words that reached no card have exactly one thing to be done about
+        // them, and the banner quoting them is where it belongs.
+        if self.lost.is_some() {
+            children.push(kit::spaced(
+                kit::row(
+                    "boards/lost-actions",
+                    [action(
+                        "boards/lost-keep",
+                        "Put it on a new card",
+                        "Put the words on a new card where the old one stood",
+                        Message::KeepLostWords,
+                        self.session.connected,
+                    )],
+                ),
+                8.,
+            ));
+        }
         if matches!(self.delivery, Delivery::Failed(_)) {
             children.push(kit::spaced(
                 kit::row(
@@ -1204,6 +1221,12 @@ impl BoardsView {
     pub(super) fn status(&self) -> String {
         if self.inline.is_some() {
             return "Editing text…".into();
+        }
+        // An edit the board answered `Ok` to and did nothing about — a card
+        // removed under it — is not work that was kept, and this chip's whole
+        // job is to say whether the work is being kept.
+        if self.lost.is_some() {
+            return "Not saved".into();
         }
         // "1 change", never "1 changes". One change is the common case — one
         // shape drawn, one colour picked — so the broken reading was the one a
