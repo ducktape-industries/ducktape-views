@@ -146,6 +146,16 @@ enum Gesture {
 struct Inline {
     id: String,
     original: String,
+    /// The card's revision at the words in `original` — the version of the
+    /// card this writer has read and is writing over. It travels with the
+    /// baseline and not with the sitting: a close that is refused because
+    /// somebody else got there first takes their words as the new baseline,
+    /// and the revision those words are at has to move with them or the
+    /// consenting close would name a revision the card is already past.
+    ///
+    /// Sent as `Change::Text::base_revision`, which is what makes the save a
+    /// compare-and-set rather than a blind overwrite.
+    revision: u64,
     #[serde(with = "editor_codec")]
     document: Editor,
     /// The height in board units the words in this card need, as the host
@@ -816,7 +826,7 @@ impl BoardsView {
             return Task::none();
         };
         if let Err(error) = board.changed_many(&changes) {
-            self.error = error;
+            self.error = error.sentence;
             return Task::none();
         }
         self.say_nothing();
@@ -828,6 +838,33 @@ impl BoardsView {
     }
     fn edit(&mut self, change: Change) -> Task<Message> {
         self.edit_many(vec![change])
+    }
+    /// A step off the history stack, against the board it is about to be
+    /// applied to.
+    ///
+    /// A text change names the revision it writes over, and the one it was
+    /// built with is the revision the card had when the step was recorded —
+    /// which every edit since has moved past, our own included. What an undo
+    /// means is "put these words back over what is there NOW", so that is the
+    /// revision it names. It is read here and not at the record, because a step
+    /// sits on the stack for as long as the writer leaves it there.
+    ///
+    /// A card written in by somebody else in the meantime is refused, and so it
+    /// should be: an undo that rubbed their words out would be the same silent
+    /// overwrite from the other direction.
+    fn replayed(&self, changes: &[Change]) -> Vec<Change> {
+        let board = self.visible();
+        let mut changes = changes.to_vec();
+        for change in &mut changes {
+            if let Change::Text {
+                id, base_revision, ..
+            } = change
+                && let Some(record) = board.as_ref().and_then(|board| board.shapes.get(id))
+            {
+                *base_revision = record.revision;
+            }
+        }
+        changes
     }
     fn edit_many(&mut self, changes: Vec<Change>) -> Task<Message> {
         if changes.is_empty() {
@@ -843,7 +880,7 @@ impl BoardsView {
             return Task::none();
         };
         if let Err(error) = board.changed_many(&changes) {
-            self.error = error;
+            self.error = error.sentence;
             return Task::none();
         }
         let mut undo = Vec::new();
@@ -974,7 +1011,7 @@ impl BoardsView {
         let board = match Board::new(title.clone(), String::new()) {
             Ok(board) => board,
             Err(error) => {
-                self.error = error;
+                self.error = error.sentence;
                 return Task::none();
             }
         };
@@ -1013,7 +1050,7 @@ impl BoardsView {
         let renamed = match board.renamed(title.clone()) {
             Ok(renamed) => renamed,
             Err(error) => {
-                self.error = error;
+                self.error = error.sentence;
                 return Task::none();
             }
         };
@@ -1163,6 +1200,7 @@ fn inverse(board: &Board, change: &Change) -> Vec<Change> {
                 vec![Change::Text {
                     id: id.clone(),
                     text: r.shape.text.clone(),
+                    base_revision: r.revision,
                 }]
             })
             .unwrap_or_default(),
@@ -1316,7 +1354,7 @@ ducktape_view_guest::export_app!(
 #[cfg(test)]
 mod tests;
 
-fn apply_operation(board: &Board, operation: &Operation) -> Result<Board, String> {
+fn apply_operation(board: &Board, operation: &Operation) -> Result<Board, boards_wire::Refused> {
     match operation {
         Operation::Edit { change, .. } => board.changed(change),
         Operation::Batch { changes, .. } => board.changed_many(changes),

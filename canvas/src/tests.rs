@@ -14,6 +14,22 @@ fn card(view: &mut BoardsView, id: &str, x: i32) -> Task<Message> {
         },
     })
 }
+/// Words written onto a card, naming the revision the card is at on this
+/// board — which is what the editor sends and what the reducer compares
+/// against. Every test but the ones ABOUT a stale revision means "write over
+/// the card as it stands", so they say that once here instead of carrying a
+/// number each.
+fn writes(board: &Board, id: &str, text: &str) -> Change {
+    Change::Text {
+        id: id.into(),
+        text: text.into(),
+        base_revision: board.shapes[id].revision,
+    }
+}
+/// The same, over the board this view can see.
+fn writing(view: &BoardsView, id: &str, text: &str) -> Change {
+    writes(&view.visible().expect("the view is on no board"), id, text)
+}
 /// An end bound to a card at its middle — what dropping an arrow anywhere near
 /// the middle of one comes to, and the only anchor a test needs unless it is
 /// about anchors.
@@ -54,10 +70,7 @@ fn optimistic_edits_remain_visible_while_waiting_for_consensus() {
         x: 250,
         y: 40,
     });
-    view.edit(Change::Text {
-        id: "a".into(),
-        text: "공유 캔버스".into(),
-    });
+    view.edit(writing(&view, "a", "공유 캔버스"));
     assert!(view.confirmed.as_ref().unwrap().shapes.is_empty());
     let board = view.visible().unwrap();
     assert_eq!(board.shapes["a"].shape.x, 250);
@@ -82,12 +95,7 @@ fn remote_change_is_rebased_under_pending_local_fields() {
         x: 500,
         y: 50,
     });
-    let remote = board
-        .changed(&Change::Text {
-            id: "a".into(),
-            text: "Remote text".into(),
-        })
-        .unwrap();
+    let remote = board.changed(&writes(&board, "a", "Remote text")).unwrap();
     view.on_read(
         0,
         "room".into(),
@@ -119,10 +127,7 @@ fn acknowledgement_does_not_invent_a_revision_and_failed_saves_keep_drafts() {
         view.confirmed.as_ref().unwrap().revision,
         committed.revision
     );
-    view.edit(Change::Text {
-        id: "a".into(),
-        text: "Keep me".into(),
-    });
+    view.edit(writing(&view, "a", "Keep me"));
     view.on_delivered(
         0,
         "room".into(),
@@ -1217,10 +1222,7 @@ fn words_on_an_arrow_take_the_middle_and_the_bend_handle_steps_aside() {
     );
     // Write on it and the handle moves off the plate: two things to take hold
     // of in one place is one of them unreachable.
-    view.edit(Change::Text {
-        id: "edge".into(),
-        text: "blocks".into(),
-    });
+    view.edit(writing(&view, "edge", "blocks"));
     let board = view.visible().unwrap();
     let written = board.shapes["edge"].shape.clone();
     let run = super::interaction::stroke(&board, &written);
@@ -1295,10 +1297,7 @@ fn a_bent_arrows_words_ride_its_curve_and_not_the_box_around_it() {
         from: on("a"),
         to: on("b"),
     });
-    view.edit(Change::Text {
-        id: "edge".into(),
-        text: "waits for".into(),
-    });
+    view.edit(writing(&view, "edge", "waits for"));
     let board = view.visible().unwrap();
     let edge = &board.shapes["edge"].shape;
     let run = super::interaction::stroke(&board, edge);
@@ -1355,10 +1354,7 @@ fn bending_an_arrow_by_hand_leaves_a_run_the_words_can_ride() {
             [middle[0], middle[1] + 170.],
         ],
     );
-    view.edit(Change::Text {
-        id: "edge".into(),
-        text: "waits for".into(),
-    });
+    view.edit(writing(&view, "edge", "waits for"));
     let board = view.visible().unwrap();
     let edge = &board.shapes["edge"].shape;
     let run = super::interaction::stroke(&board, edge);
@@ -2119,12 +2115,7 @@ fn writing_in(board: &Board) -> BoardsView {
 /// Somebody else finishes their own sitting in the card while ours stands open,
 /// arriving the way any live update does.
 fn someone_else_writes(view: &mut BoardsView, board: &Board, words: &str) {
-    let theirs = board
-        .changed(&Change::Text {
-            id: "a".into(),
-            text: words.into(),
-        })
-        .unwrap();
+    let theirs = board.changed(&writes(board, "a", words)).unwrap();
     view.on_read(
         0,
         "room".into(),
@@ -2177,6 +2168,58 @@ fn a_card_written_in_under_an_open_editor_is_not_silently_replaced() {
     // And theirs is recoverable: replacing them is OUR edit, so our undo has it.
     clash.on_undo();
     assert_eq!(clash.visible().unwrap().shapes["a"].shape.text, "ONE");
+}
+
+/// A save writes the card's WHOLE text, so the board can only tell a writer who
+/// read the card from one who did not if the edit says which version it was
+/// written over. The close names that revision; the module compares it and
+/// refuses the second of two closes rather than letting it win by being later.
+#[test]
+fn a_close_names_the_revision_the_card_was_written_over() {
+    let board = one_card_saying("AAA");
+    let mut view = writing_in(&board);
+    view.inline.as_mut().unwrap().document = Editor::new("BBB");
+    view.finish_text();
+    let Some(Operation::Batch { changes, .. }) = view.pending.front() else {
+        panic!("the close sent no edit: {:?}", view.pending)
+    };
+    assert_eq!(
+        changes.as_slice(),
+        [Change::Text {
+            id: "a".into(),
+            text: "BBB".into(),
+            base_revision: board.shapes["a"].revision,
+        }],
+        "the close did not name the revision it was written over"
+    );
+    // Which is a revision the card is actually at, so the board takes it.
+    assert!(board.changed_many(changes).is_ok());
+}
+
+/// Undo restates a card's old words, and a step sits on the stack for as long
+/// as the writer leaves it there — by the time it is taken the card is several
+/// revisions past the one the step was recorded at, our own edit included. A
+/// step that named that revision would be refused as stale and the undo would
+/// do nothing at all.
+#[test]
+fn undoing_a_text_edit_writes_over_the_card_as_it_stands_now() {
+    let board = one_card_saying("AAA");
+    let mut view = view();
+    view.confirmed = Some(board.clone());
+    view.edit(writing(&view, "a", "BBB"));
+    // The edit is agreed. The card is now at a revision its own undo, recorded
+    // before the edit, has never seen.
+    view.confirmed = view.settled();
+    view.pending.clear();
+
+    view.on_undo();
+    assert_eq!(
+        view.pending.len(),
+        1,
+        "the undo never reached the queue: {}",
+        view.error
+    );
+    assert_eq!(view.visible().unwrap().shapes["a"].shape.text, "AAA");
 }
 
 /// The card nobody else touched saves in one press, and so does the one they
@@ -2297,10 +2340,7 @@ fn an_edit_acknowledged_against_a_card_that_is_gone_is_not_saved() {
     let mut view = view();
     view.confirmed = Some(board.clone());
     view.selected = ["a".into()].into();
-    view.edit(Change::Text {
-        id: "a".into(),
-        text: "HALF WRITTEN".into(),
-    });
+    view.edit(writing(&view, "a", "HALF WRITTEN"));
     // The board that comes back with the acknowledgement no longer has the
     // card: somebody else removed it while the edit was in flight.
     let theirs = board.changed(&Change::Delete { id: "a".into() }).unwrap();
@@ -2878,14 +2918,8 @@ fn an_arrows_words_ride_a_plate_and_a_cards_sit_in_the_middle_of_it() {
     let mut view = linked();
     view.on_size(1400., 900.);
     view.selected = Default::default();
-    view.edit(Change::Text {
-        id: "edge".into(),
-        text: "depends on".into(),
-    });
-    view.edit(Change::Text {
-        id: "a".into(),
-        text: "a thought".into(),
-    });
+    view.edit(writing(&view, "edge", "depends on"));
+    view.edit(writing(&view, "a", "a thought"));
     view.edit(Change::Create {
         id: "t".into(),
         shape: Shape {
@@ -4144,21 +4178,18 @@ fn picking_a_shape_takes_up_the_whole_pen_it_was_drawn_with() {
 fn the_save_chip_counts_one_change_in_the_singular() {
     let mut view = view();
     card(&mut view, "a", 0);
+    // The card is agreed, so the count starts at nothing and the writes below
+    // are the only changes waiting.
+    view.confirmed = view.settled();
     view.pending.clear();
 
-    view.edit(Change::Text {
-        id: "a".into(),
-        text: "one".into(),
-    });
+    view.edit(writing(&view, "a", "one"));
     assert_eq!(view.pending.len(), 1);
     let one = view.status();
     assert!(one.contains("1 change"), "{one}");
     assert!(!one.contains("1 changes"), "{one}");
 
-    view.edit(Change::Text {
-        id: "a".into(),
-        text: "two".into(),
-    });
+    view.edit(writing(&view, "a", "two"));
     assert_eq!(view.pending.len(), 2);
     let two = view.status();
     assert!(two.contains("2 changes"), "{two}");
