@@ -2407,7 +2407,7 @@ fn an_edit_refused_because_the_board_is_gone_leaves_the_writer_at_the_list() {
         0,
         String::new(),
         Ok(host::Reading {
-            catalog: elsewhere,
+            catalog: elsewhere.clone(),
             board: None,
         }),
     );
@@ -2419,6 +2419,47 @@ fn an_edit_refused_because_the_board_is_gone_leaves_the_writer_at_the_list() {
         view.error.contains("HALF WRITTEN"),
         "the banner was cleared before it could be read: {}",
         view.error
+    );
+
+    // The same refusal to an edit carrying no words of its own — a card moved,
+    // a colour picked. There is nothing to keep and nothing to quote, and the
+    // chip may no more call THAT saved: it was headed for the same board.
+    let mut moving = self::view();
+    moving.confirmed = Some(board);
+    moving.catalog = [
+        ("room".to_owned(), "Planning".to_owned()),
+        ("other".to_owned(), "Elsewhere".to_owned()),
+    ]
+    .into();
+    moving.edit(Change::Move {
+        id: "a".into(),
+        x: 40,
+        y: 40,
+    });
+    moving.on_delivered(
+        0,
+        "room".into(),
+        Err(refusal("board_gone", "That board is no longer here.")),
+        Ok(host::Reading {
+            catalog: elsewhere,
+            board: None,
+        }),
+    );
+    assert!(moving.pending.is_empty() && moving.current.is_empty());
+    assert!(
+        moving.error.contains("removed this board"),
+        "the move went without a word: {}",
+        moving.error
+    );
+    assert_eq!(
+        moving.status(),
+        "Not saved",
+        "an edit that went with the board was called saved"
+    );
+    let drawn = serde_json::to_string(&moving.view()).unwrap();
+    assert!(
+        !drawn.contains("boards/retry"),
+        "a retry was offered to a board that cannot take it"
     );
 }
 
