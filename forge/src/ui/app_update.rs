@@ -8,7 +8,7 @@ impl super::ForgeView {
             Message::ForgeLandLink(url) => self.on_forge_land_link(url),
             Message::ReposArrived(next) => self.on_repos_arrived(next),
             Message::RepoArrived(next) => self.on_repo_arrived(next),
-            Message::ItemArrived(next) => self.on_item_arrived(next),
+            Message::ItemArrived(next) => self.on_item_arrived(*next),
             Message::DiscussionArrived(next) => self.on_discussion_arrived(next),
             Message::TreeArrived(next) => self.on_tree_arrived(next),
             Message::BlobArrived(next) => self.on_blob_arrived(next),
