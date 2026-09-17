@@ -489,10 +489,10 @@ impl BoardsView {
         Task::batch([save, action])
     }
     fn select_press(&mut self, point: [f32; 2]) -> Task<Message> {
+        self.forget_what_the_board_no_longer_has();
         let Some(board) = self.visible() else {
             return Task::none();
         };
-        self.selected.retain(|id| board.shapes.contains_key(id));
         // Handles sit outside a card: hit them before ordinary card selection.
         if let Some(id) = self.only_selected().cloned() {
             let shape = &board.shapes[&id].shape;

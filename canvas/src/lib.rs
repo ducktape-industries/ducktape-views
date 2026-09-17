@@ -600,7 +600,7 @@ impl BoardsView {
                         }
                     }
                 }
-                self.forget_a_vanished_card();
+                self.forget_what_the_board_no_longer_has();
                 if self.current.is_empty()
                     && let Some(id) = self.catalog.keys().next().cloned()
                 {
@@ -828,25 +828,38 @@ impl BoardsView {
         }
         self.redo.clear();
         let queued = self.enqueue_many(redo);
-        self.forget_a_vanished_card();
+        self.forget_what_the_board_no_longer_has();
         queued
     }
-    /// A card can go out from under the caret: Undo is live while you write,
-    /// another writer can delete the shape, and a refreshed read can arrive
-    /// without it. The editor stops being drawn at once — but the view went on
-    /// believing it was open, which dropped every key on the board and left
-    /// the save to fail against an id nothing answers to.
-    fn forget_a_vanished_card(&mut self) {
-        let Some(inline) = &self.inline else {
-            return;
+    /// A shape can go out from under the caret and from under the selection:
+    /// Undo is live while you write, another writer can delete the shape, and
+    /// a refreshed read can arrive without it.
+    ///
+    /// The editor stops being drawn at once — but the view went on believing
+    /// it was open, which dropped every key on the board and left the save to
+    /// fail against an id nothing answers to. The selection is the same defect
+    /// with a longer fuse: it was reconciled only where the pointer is pressed
+    /// ([`Self::select_press`]), so until you clicked somewhere the properties
+    /// panel went on offering Delete, Duplicate, the stacking row and a colour
+    /// for a shape the board no longer has.
+    ///
+    /// Both are answered here, wherever a board settles, so a board arriving
+    /// from the network reconciles exactly the way a local edit does.
+    fn forget_what_the_board_no_longer_has(&mut self) {
+        let board = self.settled();
+        let still_there = |id: &str| {
+            board
+                .as_ref()
+                .is_some_and(|board| board.shapes.contains_key(id))
         };
-        let still_there = self
-            .settled()
-            .is_some_and(|board| board.shapes.contains_key(&inline.id));
-        if still_there {
-            return;
+        self.selected.retain(|id| still_there(id));
+        let gone = self
+            .inline
+            .as_ref()
+            .is_some_and(|inline| !still_there(&inline.id));
+        if gone {
+            self.inline = None;
         }
-        self.inline = None;
     }
     fn on_create_board(&mut self) -> Task<Message> {
         let allowed =

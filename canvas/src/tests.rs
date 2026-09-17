@@ -2216,6 +2216,37 @@ fn an_undisturbed_card_still_saves_in_one_press() {
     assert_eq!(untouched.visible().unwrap().shapes["a"].shape.text, "ONE");
 }
 
+/// Somebody else deletes the card, arriving the way any live update does.
+fn someone_else_deletes(view: &mut BoardsView, board: &Board) {
+    let theirs = board.changed(&Change::Delete { id: "a".into() }).unwrap();
+    view.on_read(
+        0,
+        "room".into(),
+        Ok(host::Reading {
+            catalog: BTreeMap::new(),
+            board: Some(theirs),
+        }),
+    );
+}
+
+/// The properties panel describes the selection, so a selection naming a shape
+/// the board no longer has is a panel offering Delete, Duplicate, the stacking
+/// row and a colour for nothing. The board that arrives without the card is
+/// where that stops — not the next press somewhere on the canvas, which is all
+/// that ever reconciled it.
+#[test]
+fn a_card_deleted_under_you_leaves_the_selection_when_the_board_arrives() {
+    let board = one_card_saying("AAA");
+    let mut view = view();
+    view.confirmed = Some(board.clone());
+    view.selected = ["a".into()].into();
+    someone_else_deletes(&mut view, &board);
+    assert!(
+        view.selected.is_empty(),
+        "the panel is still acting on a shape that is gone"
+    );
+}
+
 #[test]
 fn the_two_keys_that_leave_a_card_are_not_the_same_answer() {
     // The editor claims Escape and Command-Enter, and both arrive as one
