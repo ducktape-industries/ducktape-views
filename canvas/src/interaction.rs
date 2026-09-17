@@ -1648,7 +1648,7 @@ impl BoardsView {
         Task::none()
     }
     pub(super) fn finish_text(&mut self) -> Task<Message> {
-        let Some(inline) = self.inline.take() else {
+        let Some(mut inline) = self.inline.take() else {
             return Task::none();
         };
         let text = inline.document.text();
@@ -1705,7 +1705,9 @@ impl BoardsView {
         // from being shut inside a card that answers nothing.
         let erases_their_words = changed && standing != inline.original && standing != text;
         if erases_their_words {
-            self.read_this_first(inline, standing, revision);
+            inline.original = standing;
+            inline.revision = revision;
+            self.read_this_first(inline);
             return Task::none();
         }
         // Words are the whole of a text shape. One left with none is an empty
@@ -1743,14 +1745,12 @@ impl BoardsView {
     /// Two clashes end here: one this view could already see when the editor
     /// closed, and one only the module could see, a round trip later. They are
     /// the same clash and the writer is owed the same answer to both.
-    pub(super) fn read_this_first(&mut self, mut inline: Inline, theirs: String, revision: u64) {
+    pub(super) fn read_this_first(&mut self, inline: Inline) {
         self.error = format!(
             "Somebody else changed this card while you had it open — {}. Close it again to \
              replace their words with yours.",
-            now_reading(&theirs)
+            now_reading(&inline.original)
         );
-        inline.original = theirs;
-        inline.revision = revision;
         self.inline = Some(inline);
     }
     /// ⌘Enter out of a sticky: finish it and open the next one.

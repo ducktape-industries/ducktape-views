@@ -30,6 +30,18 @@ fn writes(board: &Board, id: &str, text: &str) -> Change {
 fn writing(view: &BoardsView, id: &str, text: &str) -> Change {
     writes(&view.visible().expect("the view is on no board"), id, text)
 }
+/// A refusal as one reaches a view: a stable token to branch on and the
+/// refusing module's own sentence to show.
+fn refusal(reason: &str, sentence: &str) -> ducktape_view_guest::host::Refusal {
+    ducktape_view_guest::host::Refusal::new(reason, sentence)
+}
+/// The board the module hands back with its answer.
+fn read(board: Board) -> Result<host::Reading, String> {
+    Ok(host::Reading {
+        catalog: BTreeMap::new(),
+        board: Some(board),
+    })
+}
 /// An end bound to a card at its middle — what dropping an arrow anywhere near
 /// the middle of one comes to, and the only anchor a test needs unless it is
 /// about anchors.
@@ -131,7 +143,7 @@ fn acknowledgement_does_not_invent_a_revision_and_failed_saves_keep_drafts() {
     view.on_delivered(
         0,
         "room".into(),
-        Err("offline".into()),
+        Err(refusal("rejected", "offline")),
         Err("offline".into()),
     );
     assert_eq!(view.pending.len(), 1);
@@ -2194,6 +2206,128 @@ fn a_close_names_the_revision_the_card_was_written_over() {
     );
     // Which is a revision the card is actually at, so the board takes it.
     assert!(board.changed_many(changes).is_ok());
+}
+
+/// The clash this view CANNOT see: the other writer's edit and ours crossed on
+/// the wire, so the revision this close named was one old by the time it
+/// arrived. The module refuses it and hands back the card's words verbatim —
+/// and the writer is owed what the clash caught at the close already gets, one
+/// round trip later. The draft goes back in the card, their words are quoted
+/// beside it and taken as the baseline, and the second close is the consent.
+#[test]
+fn a_close_refused_as_stale_hands_the_draft_back_with_their_words_beside_it() {
+    let board = one_card_saying("AAA");
+    let mut view = writing_in(&board);
+    view.inline.as_mut().unwrap().document = Editor::new("MINE");
+    view.finish_text();
+    assert_eq!(view.pending.len(), 1, "the close sent nothing");
+
+    let theirs = board.changed(&writes(&board, "a", "THEIRS")).unwrap();
+    view.on_delivered(
+        0,
+        "room".into(),
+        Err(refusal("stale_text", "THEIRS")),
+        read(theirs),
+    );
+    // The refused edit leaves the queue: nothing can come of it as written, and
+    // anything behind it would wait on it for good.
+    assert!(view.pending.is_empty(), "the refused edit is still queued");
+    let inline = view.inline.as_ref().expect("the draft was dropped");
+    assert_eq!(
+        inline.document.text(),
+        "MINE",
+        "the draft came back changed"
+    );
+    assert!(
+        view.error.contains("THEIRS"),
+        "the writer was not shown what they are about to replace: {}",
+        view.error
+    );
+    assert_ne!(view.status(), "Saved");
+
+    // Closing it again is the writer saying they have read that and mean it —
+    // over the revision the card is at NOW, so the board takes it.
+    view.finish_text();
+    assert!(
+        view.inline.is_none(),
+        "the second close was refused as well"
+    );
+    assert_eq!(view.visible().unwrap().shapes["a"].shape.text, "MINE");
+    assert!(
+        view.error.is_empty(),
+        "the banner outlived what it was about"
+    );
+}
+
+/// The same crossing, with the card removed rather than written in. There is
+/// nowhere to put the draft back into, so it is kept beside the board in the
+/// card's own place and is one press from a card of its own — and the chip may
+/// not call words that reached nothing saved.
+#[test]
+fn a_close_refused_onto_a_card_that_is_gone_keeps_the_words() {
+    let board = one_card_saying("AAA");
+    let mut view = writing_in(&board);
+    view.inline.as_mut().unwrap().document = Editor::new("HALF WRITTEN");
+    view.finish_text();
+
+    let theirs = board.changed(&Change::Delete { id: "a".into() }).unwrap();
+    view.on_delivered(
+        0,
+        "room".into(),
+        Err(refusal(
+            "text_target_gone",
+            "That card is no longer on the board.",
+        )),
+        read(theirs),
+    );
+    assert!(view.pending.is_empty(), "the refused edit is still queued");
+    assert!(
+        view.error.contains("HALF WRITTEN"),
+        "the words went without a word: {}",
+        view.error
+    );
+    assert_eq!(view.status(), "Not saved");
+    let kept = view.lost.clone().expect("the draft was dropped in silence");
+    assert_eq!(kept.text, "HALF WRITTEN");
+
+    view.on_keep_lost_words();
+    view.on_minted(0, "room".into(), kept, Ok("b".into()));
+    assert_eq!(
+        view.visible().unwrap().shapes["b"].shape.text,
+        "HALF WRITTEN"
+    );
+}
+
+/// A refusal this view has no banner for — including the fixed token an app or
+/// a node too old to forward the module's own puts in its place — takes the
+/// path every refusal took before there were tokens to tell them apart: the
+/// edit stands in the queue for Retry, the chip says it is not saved, and the
+/// refusing module's own sentence is what is shown. Reading a token nobody
+/// wrote is how a view comes to answer a refusal with the wrong banner.
+#[test]
+fn a_refusal_with_no_banner_of_its_own_is_still_not_saved() {
+    let board = one_card_saying("AAA");
+    let mut view = writing_in(&board);
+    view.inline.as_mut().unwrap().document = Editor::new("MINE");
+    view.finish_text();
+
+    view.on_delivered(
+        0,
+        "room".into(),
+        Err(refusal("rejected", "The board would not take that.")),
+        read(board),
+    );
+    assert_eq!(view.pending.len(), 1, "the edit was dropped");
+    assert_eq!(view.status(), "Not saved");
+    assert!(
+        matches!(&view.delivery, Delivery::Failed(said) if said == "The board would not take that."),
+        "the module's own words did not survive the trip: {:?}",
+        view.delivery
+    );
+    assert!(
+        view.inline.is_none() && view.lost.is_none(),
+        "a refusal nobody read was answered with somebody else's banner"
+    );
 }
 
 /// Undo restates a card's old words, and a step sits on the stack for as long
