@@ -11,7 +11,7 @@
 //! against `chat` for the rooms and against `runs` for the recent agent
 //! runs, and `files.get` for the recent duckfs snapshots — each re-read on
 //! every `rpc.live` hit for its own plane. A card's door out is
-//! `home.open_link` carrying a `duck://` address the shell's link plane
+//! `host.open_link` carrying a `duck://` address the shell's link plane
 //! routes; the clipboard is `home.copy`. This view has no core module: no
 //! op is ever addressed to it, and it submits nothing.
 
