@@ -1064,8 +1064,11 @@ impl BoardsView {
         };
         let mut children = vec![kit::wrapping(kit::text("boards/error", notice))];
         // Words that reached no card have exactly one thing to be done about
-        // them, and the banner quoting them is where it belongs.
-        if self.lost.is_some() {
+        // them, and the banner quoting them is where it belongs — as long as
+        // there is a board to put the card on. Where the BOARD is what went,
+        // the banner quotes them and offers nothing: a new card would have
+        // nowhere to stand.
+        if self.lost.is_some() && self.confirmed.is_some() {
             children.push(kit::spaced(
                 kit::row(
                     "boards/lost-actions",

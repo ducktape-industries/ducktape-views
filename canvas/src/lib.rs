@@ -642,7 +642,14 @@ impl BoardsView {
                 {
                     self.keep_the_words_that_did_not_land(card);
                 }
+                // Arriving at the view with nothing open, open the first board
+                // there is — unless something is standing on screen saying why
+                // there is nothing open. Opening a board says nothing
+                // ([`Self::say_nothing`]), so a banner the writer has not read
+                // yet would go with it, and they would find themselves on a
+                // board they never picked.
                 if self.current.is_empty()
+                    && self.error.is_empty()
                     && let Some(id) = self.catalog.keys().next().cloned()
                 {
                     return self.on_open(id);
@@ -710,6 +717,10 @@ impl BoardsView {
                 // each. `stale_text` carries the card's current text verbatim,
                 // which is what the writer would have written over.
                 //
+                // `board_gone` is the third the view can act on: the board this
+                // edit names is not there to take it, now or on any retry, and
+                // neither is the view's own reason for still being on it.
+                //
                 // Every other token leaves the edit standing in the queue for
                 // Retry and shows the sentence, which is what a refusal did
                 // before there were tokens to tell them apart — and what an app
@@ -721,6 +732,7 @@ impl BoardsView {
                         self.take_the_words_back(epoch, id, Some(refusal.sentence), reading)
                     }
                     "text_target_gone" => self.take_the_words_back(epoch, id, None, reading),
+                    "board_gone" => self.leave_the_board_that_is_gone(epoch, id, reading),
                     _ => {
                         self.delivery = Delivery::Failed(refusal.sentence);
                         Task::none()
@@ -800,6 +812,57 @@ impl BoardsView {
             }
         }
         self.pump()
+    }
+    /// An edit the board itself is no longer there to take: somebody else
+    /// removed it while this writer was drawing on it.
+    ///
+    /// Nothing queued can land — every operation in the queue names that same
+    /// board — so the queue goes with it rather than standing there for a Retry
+    /// that would re-send the lot to a board that is not there. The words in
+    /// the refused edit are kept and quoted the way a removed CARD's are, and
+    /// the view leaves the board by the same door a removal of our own takes,
+    /// which puts the list of the boards there still are in front of the
+    /// writer.
+    fn leave_the_board_that_is_gone(
+        &mut self,
+        epoch: u64,
+        id: String,
+        reading: Result<host::Reading, String>,
+    ) -> Task<Message> {
+        // The board as our own edits left it, read before the queue goes: the
+        // card the refused edit was for is still on it, in its place.
+        let before = self.settled();
+        let refused = self.pending.pop_front();
+        self.pending.clear();
+        self.delivery = Delivery::Idle;
+        self.on_read(epoch, id, reading);
+        let kept = match refused.as_ref().and_then(written) {
+            Some((card, draft)) => before
+                .and_then(|board| board.shapes.get(card).cloned())
+                .map(|place| Shape {
+                    text: draft.to_owned(),
+                    ..place.shape
+                }),
+            // An edit carrying no words of its own, with an editor open when
+            // the board went: `on_read` has already left that draft here, by
+            // the same rule and in the same place.
+            None => self.lost.take(),
+        };
+        self.error = match kept
+            .as_ref()
+            .and_then(|card| interaction::quoted(&card.text))
+        {
+            Some(words) => format!(
+                "Somebody else removed this board, so what you wrote was not saved — {words}.",
+            ),
+            None => "Somebody else removed this board, so that change was not saved.".into(),
+        };
+        // Kept rather than dropped, though there is no board left to put it
+        // back on: these are still the writer's words, and the chip may not
+        // call an edit that reached a board that is gone saved.
+        self.lost = kept;
+        self.leave_the_open_board();
+        Task::none()
     }
     fn pump(&mut self) -> Task<Message> {
         let ready = self.session.connected && matches!(self.delivery, Delivery::Idle);
@@ -1170,19 +1233,33 @@ impl BoardsView {
         };
         self.session.connected && self.pending.is_empty() && board.shapes.is_empty()
     }
-    fn on_remove_board(&mut self) -> Task<Message> {
-        if !self.removal_would_hold() {
-            return Task::none();
-        }
+    /// Off the open board and back to the list, with everything that was only
+    /// true of that board left behind it: its name in the list, where the
+    /// camera stood on it, what was selected on it, the history of it. Answers
+    /// the board's id, which is the one thing the caller still wants.
+    ///
+    /// One door, whether we asked for the board to go or were told it already
+    /// had: a view that leaves a board two ways is a view where one of them
+    /// one day keeps a piece of it.
+    fn leave_the_open_board(&mut self) -> String {
         let board = std::mem::take(&mut self.current);
         self.catalog.remove(&board);
         self.cameras.remove(&board);
         self.confirmed = None;
+        self.inline = None;
         self.selected.clear();
         self.rename.clear();
         self.undo.clear();
         self.redo.clear();
+        self.gesture = Gesture::Idle;
         self.board_picker = false;
+        board
+    }
+    fn on_remove_board(&mut self) -> Task<Message> {
+        if !self.removal_would_hold() {
+            return Task::none();
+        }
+        let board = self.leave_the_open_board();
         self.pending.push_back(Operation::Remove { board });
         self.pump()
     }

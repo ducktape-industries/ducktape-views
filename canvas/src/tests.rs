@@ -2330,6 +2330,98 @@ fn a_refusal_with_no_banner_of_its_own_is_still_not_saved() {
     );
 }
 
+/// Not the card but the whole board, removed by somebody else while this
+/// writer was on it. Every edit queued names that board, so not one of them can
+/// land and a retry has nowhere to send them: the writer is told, keeps the
+/// words, and is left at the list of the boards there still are.
+#[test]
+fn an_edit_refused_because_the_board_is_gone_leaves_the_writer_at_the_list() {
+    let board = one_card_saying("AAA");
+    let mut view = writing_in(&board);
+    view.catalog = [
+        ("room".to_owned(), "Planning".to_owned()),
+        ("other".to_owned(), "Elsewhere".to_owned()),
+    ]
+    .into();
+    view.inline.as_mut().unwrap().document = Editor::new("HALF WRITTEN");
+    view.finish_text();
+    view.edit(Change::Move {
+        id: "a".into(),
+        x: 40,
+        y: 40,
+    });
+    assert_eq!(view.pending.len(), 2, "the test sent nothing to refuse");
+
+    // What the board answers once it is not there to answer for itself, with
+    // the list as it now stands read back beside it.
+    let elsewhere: BTreeMap<String, String> = [("other".to_owned(), "Elsewhere".to_owned())].into();
+    view.on_delivered(
+        0,
+        "room".into(),
+        Err(refusal("board_gone", "That board is no longer here.")),
+        Ok(host::Reading {
+            catalog: elsewhere.clone(),
+            board: None,
+        }),
+    );
+
+    assert!(
+        view.pending.is_empty(),
+        "edits stood queued for a board that is gone: {:?}",
+        view.pending
+    );
+    assert!(
+        matches!(view.delivery, Delivery::Idle),
+        "something is still in flight to a board that is gone: {:?}",
+        view.delivery
+    );
+    assert!(
+        view.current.is_empty() && view.confirmed.is_none(),
+        "the writer was left standing on a board that is gone"
+    );
+    assert!(
+        !view.catalog.contains_key("room") && view.picking_a_board(),
+        "the list still offers the board that is gone: {:?}",
+        view.catalog
+    );
+    assert!(
+        view.error.contains("HALF WRITTEN"),
+        "the words went without a word: {}",
+        view.error
+    );
+    assert_eq!(view.status(), "Not saved");
+    let drawn = serde_json::to_string(&view.view()).unwrap();
+    assert!(
+        !drawn.contains("boards/retry"),
+        "a retry was offered to a board that cannot take it"
+    );
+    assert!(
+        !drawn.contains("boards/lost-keep"),
+        "the words were offered a card with no board to put it on"
+    );
+
+    // The live feed reads again a moment later, as it does after every
+    // delivery. It may not walk the writer into somebody else's board over the
+    // banner saying why they are not on one.
+    view.on_read(
+        0,
+        String::new(),
+        Ok(host::Reading {
+            catalog: elsewhere,
+            board: None,
+        }),
+    );
+    assert!(
+        view.current.is_empty(),
+        "the next read opened a board the writer did not pick"
+    );
+    assert!(
+        view.error.contains("HALF WRITTEN"),
+        "the banner was cleared before it could be read: {}",
+        view.error
+    );
+}
+
 /// Undo restates a card's old words, and a step sits on the stack for as long
 /// as the writer leaves it there — by the time it is taken the card is several
 /// revisions past the one the step was recorded at, our own edit included. A
