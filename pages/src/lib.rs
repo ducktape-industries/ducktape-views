@@ -12,16 +12,16 @@ pub mod inline;
 pub mod document_sync;
 pub mod editor;
 pub mod editor_binding;
-pub mod rich_document;
-#[path = "editor_format.rs"]
-pub mod format;
 pub mod editor_menu;
 pub mod editor_view;
+#[path = "editor_format.rs"]
+pub mod format;
 pub mod host;
 #[path = "editor_markdown.rs"]
 pub mod markdown;
 #[path = "editor_presentation.rs"]
 pub mod presentation;
+pub mod rich_document;
 
 include!("ui/view.rs");
 

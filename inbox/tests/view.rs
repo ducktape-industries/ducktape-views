@@ -164,7 +164,11 @@ fn an_unseated_device_has_an_empty_inbox_and_not_an_error() {
         })
         .expect("session encodes"),
     )]);
-    assert!(has_text(&frame, "No account on this device"), "{:?}", texts(&frame));
+    assert!(
+        has_text(&frame, "No account on this device"),
+        "{:?}",
+        texts(&frame)
+    );
     assert!(
         frame
             .requests

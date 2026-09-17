@@ -67,7 +67,9 @@ pub fn watch(id: String, epoch: u64) -> Subscription<(u64, String, Result<Readin
     })
 }
 pub async fn mint() -> Result<String, String> {
-    let bytes = host::request("host.id", b"board").await.map_err(host::said)?;
+    let bytes = host::request("host.id", b"board")
+        .await
+        .map_err(host::said)?;
     String::from_utf8(bytes).map_err(|error| error.to_string())
 }
 pub async fn submit(operation: Operation) -> Result<(), String> {

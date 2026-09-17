@@ -1779,10 +1779,12 @@ async fn picked_picture(page_id: String) -> Result<PictureItem, String> {
 /// away, mirroring the composer's own safe name.
 fn file_name(name: &str) -> String {
     name.chars()
-        .map(|c| match c.is_whitespace() || matches!(c, '(' | ')' | '[' | ']' | '/') {
-            true => '_',
-            false => c,
-        })
+        .map(
+            |c| match c.is_whitespace() || matches!(c, '(' | ')' | '[' | ']' | '/') {
+                true => '_',
+                false => c,
+            },
+        )
         .collect()
 }
 

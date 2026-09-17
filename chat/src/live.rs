@@ -103,7 +103,11 @@ fn public_run_progress(
 /// What a reader who may not see a run's output is told about it, from the
 /// committed facts [`progress`] returned for that run.
 pub(crate) fn public_status(run_id: &str, progress: &serde_json::Value) -> String {
-    public_run_status(run_id, progress.get("sessions"), progress.get("delegations"))
+    public_run_status(
+        run_id,
+        progress.get("sessions"),
+        progress.get("delegations"),
+    )
 }
 
 /// A card, from the run discovery named and the output this view streamed.

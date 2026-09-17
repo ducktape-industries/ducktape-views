@@ -7,10 +7,7 @@ use ducktape_view_guest::slots;
 pub(super) fn unread_dot(key: String) -> wire::Node {
     let mut dot = native::container(
         key,
-        native::space(
-            Some(wire::Length::Fixed(8.)),
-            Some(wire::Length::Fixed(8.)),
-        ),
+        native::space(Some(wire::Length::Fixed(8.)), Some(wire::Length::Fixed(8.))),
     );
     if let wire::Node::Container {
         background,
@@ -306,5 +303,4 @@ impl ChatView {
             ],
         )
     }
-
 }

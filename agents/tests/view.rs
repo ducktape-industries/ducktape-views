@@ -445,7 +445,8 @@ fn a_new_agent_registers_from_the_form_once_its_id_is_a_label() {
     );
     let frame = tick_native(vec![answer(
         program.id,
-        &serde_json::to_vec(&json!({"model_program":runs_wire::model_program("chiefduck")})).unwrap(),
+        &serde_json::to_vec(&json!({"model_program":runs_wire::model_program("chiefduck")}))
+            .unwrap(),
     )]);
     let provision = request(&frame, "op.submit");
     let payload: Value = serde_json::from_slice(&provision.payload).unwrap();
@@ -1170,7 +1171,8 @@ fn begin_registration() -> (Frame, u64) {
     let program = request(&frame, "rpc.query").id;
     let frame = tick_native(vec![answer(
         program,
-        &serde_json::to_vec(&json!({"model_program":runs_wire::model_program("new-agent")})).unwrap(),
+        &serde_json::to_vec(&json!({"model_program":runs_wire::model_program("new-agent")}))
+            .unwrap(),
     )]);
     (frame, props)
 }

@@ -70,7 +70,10 @@ impl PaletteView {
         }
         body.push(self.hits());
         kit::sized(
-            kit::card("palette/card", kit::spaced(kit::column("palette/body", body), 6.)),
+            kit::card(
+                "palette/card",
+                kit::spaced(kit::column("palette/body", body), 6.),
+            ),
             Some(Length::Fixed(CARD)),
             None,
         )

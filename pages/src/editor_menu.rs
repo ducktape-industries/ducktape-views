@@ -1020,10 +1020,7 @@ impl Menu {
 
     fn pick_format(&self, document: &Doc, line: usize, tag: &str) -> (EditorDecision, Self) {
         if tag == MORE {
-            return (
-                EditorDecision::Noop,
-                self.reopen(Kind::FormatMore { line }),
-            );
+            return (EditorDecision::Noop, self.reopen(Kind::FormatMore { line }));
         }
         if tag == "turn" {
             return (EditorDecision::Noop, self.reopen(Kind::Turn { line }));

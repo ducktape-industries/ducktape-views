@@ -309,7 +309,9 @@ async fn load_seat() -> SeatItem {
 }
 
 async fn read_seat() -> Result<String, String> {
-    let status = host::request("rpc.status", b"{}").await.map_err(host::said)?;
+    let status = host::request("rpc.status", b"{}")
+        .await
+        .map_err(host::said)?;
     let status: serde_json::Value =
         serde_json::from_slice(&status).map_err(|error| error.to_string())?;
     let node_key = status["public_key"].as_str().unwrap_or_default().to_owned();
@@ -1523,7 +1525,12 @@ pub fn plural(count: i64, one: &str, many: &str) -> String {
 }
 
 /// The tracker's Pull requests / Issues split; the Code seat lists nothing.
-pub fn filter_forge_items(items: &[ForgeItem], tab: &str, side: &str, query: &str) -> Vec<ForgeItem> {
+pub fn filter_forge_items(
+    items: &[ForgeItem],
+    tab: &str,
+    side: &str,
+    query: &str,
+) -> Vec<ForgeItem> {
     let kind = match tab {
         "pulls" => "pr",
         "issues" => "issue",

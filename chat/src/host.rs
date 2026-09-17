@@ -2957,7 +2957,11 @@ mod tests {
         for reason in UNREADABLE {
             let item = folded(host::Refusal::new(reason, "words a view must not read"));
             assert!(item.unavailable, "{reason} is an entitlement");
-            assert!(item.error.is_empty(), "{reason} drew an error: {:?}", item.error);
+            assert!(
+                item.error.is_empty(),
+                "{reason} drew an error: {:?}",
+                item.error
+            );
         }
         // the same prose the old substring list keyed on, under a token that
         // says the stream broke: now an error, as it should always have been.

@@ -625,10 +625,13 @@ fn wire_block(block: &BlockContent) -> RichBlock {
         checked: block.attrs.checked,
         language: block.attrs.language.clone().unwrap_or_default(),
         marks: block.marks.iter().map(wire_mark).collect(),
-        attributes: [named("src", &block.attrs.src), named("alt", &block.attrs.alt)]
-            .into_iter()
-            .flatten()
-            .collect(),
+        attributes: [
+            named("src", &block.attrs.src),
+            named("alt", &block.attrs.alt),
+        ]
+        .into_iter()
+        .flatten()
+        .collect(),
     }
 }
 fn native_block(block: &RichBlock) -> BlockContent {
@@ -795,10 +798,12 @@ pub fn presentation(text: &str, cursor: wire::EditorCursor) -> RichPresentation 
         // (`editor_menu::Menu::current`) keeps the word.
         toolbar: crate::editor_menu::format_items()
             .iter()
-            .map(|(tag, _label, glyph)| wire::editor_presentation::EditorMenuItem {
-                tag: (*tag).into(),
-                label: (*glyph).into(),
-            })
+            .map(
+                |(tag, _label, glyph)| wire::editor_presentation::EditorMenuItem {
+                    tag: (*tag).into(),
+                    label: (*glyph).into(),
+                },
+            )
             .collect(),
     }
 }

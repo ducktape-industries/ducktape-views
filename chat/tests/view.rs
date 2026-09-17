@@ -4,8 +4,8 @@
 //! rename leaves as `op.submit` carrying chat's own message. Composers use
 //! the shared editor transaction contract.
 
-use chat_view::host::{Channel, Session};
 use chat_view::boot_native;
+use chat_view::host::{Channel, Session};
 use ducktape_view_guest::testing::{answer, has_text, item, press, refuse, texts, type_into};
 use ducktape_view_guest::wire::{Frame, Node, Request, SurfaceValue};
 
@@ -1117,7 +1117,9 @@ fn a_refused_output_stream_falls_back_to_committed_progress() {
 
         let shown = texts(&frame);
         assert!(
-            shown.iter().any(|text| text == "Working · 3 actions recorded"),
+            shown
+                .iter()
+                .any(|text| text == "Working · 3 actions recorded"),
             "the refused card does not show committed progress: {shown:?}"
         );
         assert!(

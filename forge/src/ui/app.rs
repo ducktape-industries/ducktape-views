@@ -127,7 +127,7 @@ pub enum Message {
     ForgeLandLink(String),
     ReposArrived(crate::host::RepoListItem),
     RepoArrived(crate::host::RepoItem),
-    ItemArrived(crate::host::ItemItem),
+    ItemArrived(Box<crate::host::ItemItem>),
     DiscussionArrived(crate::host::DiscussionItem),
     TreeArrived(crate::host::TreeItem),
     BlobArrived(crate::host::BlobItem),
@@ -333,7 +333,7 @@ impl ForgeView {
                     self.open_repo.to_owned(),
                     self.forge_item_number,
                 )
-                .map(Message::ItemArrived)])
+                .map(|item| Message::ItemArrived(Box::new(item)))])
             } else {
                 ::ducktape_view_guest::Subscription::none()
             },

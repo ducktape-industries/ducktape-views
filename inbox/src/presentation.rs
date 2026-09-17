@@ -92,7 +92,10 @@ impl InboxView {
             "inbox/list",
             kit::column(
                 "inbox/rows",
-                self.rows.iter().map(|row| self.row(row)).collect::<Vec<_>>(),
+                self.rows
+                    .iter()
+                    .map(|row| self.row(row))
+                    .collect::<Vec<_>>(),
             ),
         )
     }
@@ -112,10 +115,7 @@ impl InboxView {
                 key.clone(),
                 [
                     kit::spaced(kit::centered_row(format!("{key}/line"), line), 8.),
-                    kit::nowrap(kit::secondary(
-                        format!("{key}/detail"),
-                        row.detail.clone(),
-                    )),
+                    kit::nowrap(kit::secondary(format!("{key}/detail"), row.detail.clone())),
                 ],
             ),
             2.,

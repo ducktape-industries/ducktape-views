@@ -64,13 +64,10 @@ mod tests {
             done: true,
         }]);
         assert!(driver.app.0, "an explicit refusal must settle the task");
-        assert!(
-            frame
-                .requests
-                .iter()
-                .any(|request| request.kind == "host.log"
-                    && String::from_utf8_lossy(&request.payload)
-                        .contains("reason=request_closed guest closed"))
-        );
+        assert!(frame.requests.iter().any(|request| {
+            request.kind == "host.log"
+                && String::from_utf8_lossy(&request.payload)
+                    .contains("reason=request_closed guest closed")
+        }));
     }
 }

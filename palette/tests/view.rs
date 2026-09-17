@@ -115,7 +115,10 @@ fn the_chord_opens_it_a_query_finds_and_a_hit_leaves_as_one_open_link() {
         "ship"
     );
     let frame = tick_native(vec![
-        answer(view_asking(&frame, "chat", "search").id, CHAT_HITS.as_bytes()),
+        answer(
+            view_asking(&frame, "chat", "search").id,
+            CHAT_HITS.as_bytes(),
+        ),
         answer(
             view_asking(&frame, "pages", "search").id,
             PAGE_HITS.as_bytes(),
@@ -151,7 +154,10 @@ fn a_page_hit_leaves_at_its_block() {
     let frame = tick_native(type_into(&frame, "palette/input", "ship"));
     let frame = tick_native(vec![item(request(&frame, "clock.ticks").id, b"")]);
     let frame = tick_native(vec![
-        answer(view_asking(&frame, "chat", "search").id, CHAT_HITS.as_bytes()),
+        answer(
+            view_asking(&frame, "chat", "search").id,
+            CHAT_HITS.as_bytes(),
+        ),
         answer(
             view_asking(&frame, "pages", "search").id,
             PAGE_HITS.as_bytes(),
@@ -244,7 +250,10 @@ fn one_lane_refusing_still_answers_and_both_refusing_says_so() {
     let frame = tick_native(type_into(&frame, "palette/input", "ship"));
     let frame = tick_native(vec![item(request(&frame, "clock.ticks").id, b"")]);
     let frame = tick_native(vec![
-        answer(view_asking(&frame, "chat", "search").id, CHAT_HITS.as_bytes()),
+        answer(
+            view_asking(&frame, "chat", "search").id,
+            CHAT_HITS.as_bytes(),
+        ),
         ducktape_view_guest::wire::Event::Response {
             id: view_asking(&frame, "pages", "search").id,
             result: Err(ducktape_view_guest::wire::Refusal::new(

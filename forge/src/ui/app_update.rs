@@ -8,7 +8,7 @@ impl super::ForgeView {
             Message::ForgeLandLink(url) => self.on_forge_land_link(url),
             Message::ReposArrived(next) => self.on_repos_arrived(next),
             Message::RepoArrived(next) => self.on_repo_arrived(next),
-            Message::ItemArrived(next) => self.on_item_arrived(next),
+            Message::ItemArrived(next) => self.on_item_arrived(*next),
             Message::DiscussionArrived(next) => self.on_discussion_arrived(next),
             Message::TreeArrived(next) => self.on_tree_arrived(next),
             Message::BlobArrived(next) => self.on_blob_arrived(next),
@@ -57,10 +57,13 @@ impl super::ForgeView {
             return ::ducktape_view_guest::Task::none();
         }
         let next = item.next.clone();
-        let connection_changed = self.connected_rpc != next.connected_rpc || self.connected != next.connected;
+        let connection_changed =
+            self.connected_rpc != next.connected_rpc || self.connected != next.connected;
         if connection_changed {
             self.upload_handles.clear();
-            for draft in self.composers.values_mut() { draft.retire_device_requests(); }
+            for draft in self.composers.values_mut() {
+                draft.retire_device_requests();
+            }
         }
 
         self.connection_serial = crate::host::connection_serial_after(

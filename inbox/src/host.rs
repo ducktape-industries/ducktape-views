@@ -172,16 +172,18 @@ fn live(plane: &'static [u8]) -> impl Stream<Item = host::Answer> {
 }
 
 /// One reading of the queue, then again on every hit of its plane.
-pub fn inbox(connection: i64, account: String, chain: String) -> ducktape_view_guest::Subscription<InboxItem> {
+pub fn inbox(
+    connection: i64,
+    account: String,
+    chain: String,
+) -> ducktape_view_guest::Subscription<InboxItem> {
     ducktape_view_guest::Subscription::run_with((connection, account, chain), |key| {
         let (_, account, chain) = key.clone();
         let again = (account.clone(), chain.clone());
-        stream::once(read(account, chain)).chain(
-            live(INBOX_PLANE).then(move |_| {
-                let (account, chain) = again.clone();
-                read(account, chain)
-            }),
-        )
+        stream::once(read(account, chain)).chain(live(INBOX_PLANE).then(move |_| {
+            let (account, chain) = again.clone();
+            read(account, chain)
+        }))
     })
 }
 
@@ -586,9 +588,7 @@ async fn chat_message(object: &str, row: &mut Row, chain: &str) -> Result<(), St
     if row.detail.is_empty() {
         row.detail = "Message attachment".into();
     }
-    let seq = message["seq"]
-        .as_i64()
-        .ok_or("message sequence overflow")?;
+    let seq = message["seq"].as_i64().ok_or("message sequence overflow")?;
     row.link = channel_message_link(&text_at(message, "channel_id"), seq, chain);
     Ok(())
 }
@@ -625,7 +625,11 @@ async fn page_block(block_id: &str, row: &mut Row, chain: &str) -> Result<(), St
 
 /// One block off pages' view lane; `None` for an id the index does not hold.
 async fn page_block_row(block_id: &str) -> Result<Option<serde_json::Value>, String> {
-    let reply = view("pages", serde_json::json!({"get_block":{"block_id":block_id}})).await?;
+    let reply = view(
+        "pages",
+        serde_json::json!({"get_block":{"block_id":block_id}}),
+    )
+    .await?;
     let block = reply.get("block").ok_or("wrong page block reply")?;
     Ok(match block.is_null() {
         true => None,
@@ -721,7 +725,11 @@ async fn forge_repo(kind: &str, object: &str, row: &mut Row, chain: &str) -> Res
 }
 
 async fn task(object: &str, row: &mut Row) -> Result<(), String> {
-    let reply = query("tasks", serde_json::json!({"task":{"get":{"task_id":object}}})).await?;
+    let reply = query(
+        "tasks",
+        serde_json::json!({"task":{"get":{"task_id":object}}}),
+    )
+    .await?;
     let task = reply["task"].get("task").ok_or("wrong task reply")?;
     if task.is_null() {
         row.detail = "Task not found".into();
@@ -744,7 +752,11 @@ async fn task(object: &str, row: &mut Row) -> Result<(), String> {
 }
 
 async fn job(job_id: &str, row: &mut Row) -> Result<(), String> {
-    let reply = query("tasks", serde_json::json!({"job":{"get":{"job_id":job_id}}})).await?;
+    let reply = query(
+        "tasks",
+        serde_json::json!({"job":{"get":{"job_id":job_id}}}),
+    )
+    .await?;
     let job = reply["job"].get("job").ok_or("wrong job reply")?;
     if job.is_null() {
         row.detail = "Job not found".into();
@@ -786,7 +798,8 @@ async fn job_event(item: &Item, object: &str, row: &mut Row) -> Result<(), Strin
     let matches_source = source["module"].as_str() == Some("tasks")
         && source["kind"].as_str() == Some("job_event")
         && source["object"].as_str() == Some(object);
-    let matches_sequence = record["at"].as_u64() == Some(seq) && change["seq"].as_u64() == Some(seq);
+    let matches_sequence =
+        record["at"].as_u64() == Some(seq) && change["seq"].as_u64() == Some(seq);
     if !matches_source || !matches_sequence {
         return Err("wrong change".into());
     }
@@ -840,10 +853,13 @@ pub async fn mark_read(account: String, up_to_seq: i64) -> Result<(), String> {
         "target": "inbox",
         "payload": {"mark_read": {"account": number, "up_to_seq": up_to_seq}},
     });
-    host::request("op.submit", &serde_json::to_vec(&op).expect("the op encodes"))
-        .await
-        .map(|_reply| ())
-        .map_err(host::said)
+    host::request(
+        "op.submit",
+        &serde_json::to_vec(&op).expect("the op encodes"),
+    )
+    .await
+    .map(|_reply| ())
+    .map_err(host::said)
 }
 
 // ---------- the addresses a row opens ----------

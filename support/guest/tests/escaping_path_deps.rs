@@ -1,5 +1,4 @@
-//! Every path dependency that escapes `crates/views` is named here, or the
-//! build fails.
+//! No path dependency escapes this workspace, or the build fails.
 //!
 //! The views workspace is its own cargo root, so cargo hashes the ABSOLUTE
 //! location of a path dependency into that package's `-C metadata` whenever the
@@ -13,53 +12,21 @@
 //! into the wasm component a view ships, a `dev-dependencies` one reaches only
 //! the native test binary — `cargo build` never links it.
 //!
-//! Adding an escape is a decision, so it fails here until it is written down
-//! with what it is and why it may cross.
+//! Since this repo stands on its own, nothing may cross. Every crate the views
+//! share with the rest of ducktape arrives as a git dependency on ducktape-sdk,
+//! which pins by revision and carries no absolute path, so a `path =` pointing
+//! out of this checkout is always the mistake and always fails here.
 
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// `<table> <package> -> <path from the repo root>`.
-const ALLOWED: &[&str] = &[
-    // the view tree wire: the one encoding a guest writes and the renderer
-    // decodes, so it belongs to neither workspace and is shared by both.
-    "workspace.dependencies view-wire -> crates/view-wire",
-    // the palette, the type scale and the bundled faces — beside view-wire for
-    // the same reason. What a view draws with and what the shell framing it
-    // draws with have to be one answer, or the two halves of a window disagree
-    // about what the product looks like.
-    "workspace.dependencies design -> crates/design",
-    // module wire surfaces — types and codecs only, no module logic and no host
-    // sdk. Each is its own crate beside the module that runs it, so linking a
-    // format never links a module: `canvas` takes the board format without the
-    // `Boards` module, and the sdk graph cannot reach the component through a
-    // feature nobody turned off.
-    "dependencies boards-wire -> crates/modules/apps/boards/wire",
-    "dependencies chat-message -> crates/modules/apps/chat/message",
-    "dependencies duckfs-core -> crates/duckfs/core",
-    // DEV ONLY, and that is still load-bearing. The agents view's tests pin its
-    // encoded payloads against the real codecs (`runs_wire::model_program`,
-    // `agent_wire::decode_msg`) — the point of the pin is that it breaks when a
-    // module's wire moves. Since #2303 wave 7f these are the WIRE crates rather
-    // than the modules, so what a dev-dep now carries is types and codecs
-    // instead of the whole module graph; `cargo build` still links neither, so
-    // none of it reaches `agents_view.wasm` either way.
-    "dev-dependencies runs-wire -> crates/modules/apps/runs/wire",
-    "dev-dependencies agent-wire -> crates/modules/apps/agent/wire",
-];
-
 #[test]
-fn every_escaping_path_dependency_is_named() {
+fn no_path_dependency_escapes_the_workspace() {
     let views_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../..")
         .canonicalize()
         .expect("the views workspace root resolves");
-    let repo_root = views_root
-        .parent()
-        .and_then(Path::parent)
-        .expect("crates/views sits two levels under the repo root")
-        .to_path_buf();
 
     let mut found = BTreeSet::new();
     for manifest in manifests(&views_root) {
@@ -102,21 +69,15 @@ fn every_escaping_path_dependency_is_named() {
             let name = keyed_name
                 .map(str::to_string)
                 .unwrap_or_else(|| package_name(line));
-            let location = dependency
-                .strip_prefix(&repo_root)
-                .expect("an escaping dependency still sits inside the repo");
-            found.insert(format!("{table} {name} -> {}", location.display()));
+            found.insert(format!("{table} {name} -> {}", dependency.display()));
         }
     }
 
-    let allowed: BTreeSet<String> = ALLOWED.iter().map(|entry| entry.to_string()).collect();
-    let added: Vec<&String> = found.difference(&allowed).collect();
-    let gone: Vec<&String> = allowed.difference(&found).collect();
     assert!(
-        added.is_empty() && gone.is_empty(),
-        "the set of path dependencies escaping crates/views changed.\n\
-         unnamed escapes (add them to ALLOWED with the reason they may cross): {added:?}\n\
-         named escapes that no longer exist (delete them from ALLOWED): {gone:?}",
+        found.is_empty(),
+        "path dependencies escape the views workspace root: {found:?}\n\
+         a crate shared with the rest of ducktape crosses as a git dependency on \
+         ducktape-sdk, not as a path out of this checkout",
     );
 }
 

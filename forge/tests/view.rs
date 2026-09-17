@@ -1099,11 +1099,7 @@ fn a_repository_opens_on_its_readme() {
     drive.answer("all", &accounts());
     drive.answer_tree(
         "",
-        &listing(&[
-            ("LICENSE", "file"),
-            ("README.md", "file"),
-            ("src", "dir"),
-        ]),
+        &listing(&[("LICENSE", "file"), ("README.md", "file"), ("src", "dir")]),
     );
     assert!(
         has_text(&drive.frame, "Loading file…"),
@@ -1125,7 +1121,11 @@ fn a_repository_opens_on_its_readme() {
     let parked = request(&drive.frame, "picture.inline").id;
     drive.tick(vec![answer(parked, b"{}")]);
     assert_eq!(surface_named(&drive.frame), "markdown");
-    assert!(has_text(&drive.frame, "README.md"), "{:?}", texts(&drive.frame));
+    assert!(
+        has_text(&drive.frame, "README.md"),
+        "{:?}",
+        texts(&drive.frame)
+    );
 }
 
 /// A repository without a README leaves the reader's own empty state on
@@ -1212,7 +1212,7 @@ fn a_crumb_shows_its_directory_and_never_folds_it() {
 
 #[test]
 fn the_landing_file_is_the_readme_whatever_it_is_called() {
-    use forge_view::host::{readme_of, TreeEntry};
+    use forge_view::host::{TreeEntry, readme_of};
     let entry = |path: &str, kind: &str| TreeEntry {
         name: path.rsplit('/').next().unwrap().to_owned(),
         path: path.to_owned(),
@@ -1223,12 +1223,18 @@ fn the_landing_file_is_the_readme_whatever_it_is_called() {
         readme_of(&[entry("readme", "file"), entry("README.md", "file")]),
         "README.md"
     );
-    assert_eq!(readme_of(&[entry("Readme.markdown", "file")]), "Readme.markdown");
+    assert_eq!(
+        readme_of(&[entry("Readme.markdown", "file")]),
+        "Readme.markdown"
+    );
     assert_eq!(readme_of(&[entry("README", "file")]), "README");
     assert_eq!(readme_of(&[entry("README.txt", "file")]), "README.txt");
     // a directory called README is not a file to open, and nothing else is a README
     assert_eq!(readme_of(&[entry("README.md", "dir")]), "");
-    assert_eq!(readme_of(&[entry("src/readme.md", "file")]), "src/readme.md");
+    assert_eq!(
+        readme_of(&[entry("src/readme.md", "file")]),
+        "src/readme.md"
+    );
     assert_eq!(readme_of(&[entry("READMEISH.md", "file")]), "");
     assert_eq!(readme_of(&[]), "");
 }
@@ -1254,7 +1260,7 @@ fn a_crumb_trail_presses_every_directory_but_the_file() {
 /// The events the host sends when a key is pressed with nothing focused.
 fn key_press(named: &str) -> Vec<Event> {
     use ducktape_view_guest::wire::keyboard::{
-        Event as Key, Key as Pressed, KeyState, Location, Modifiers, NativeCode, Named, Physical,
+        Event as Key, Key as Pressed, KeyState, Location, Modifiers, Named, NativeCode, Physical,
     };
     let key = match named {
         "Escape" => Pressed::Named(Named::Escape),
@@ -1319,7 +1325,11 @@ fn a_tracker_opens_on_the_open_side_and_the_closed_side_is_a_press_away() {
         texts(&drive.frame)
     );
     // each side wears its own count
-    assert!(has_text(&drive.frame, "Open 2"), "{:?}", texts(&drive.frame));
+    assert!(
+        has_text(&drive.frame, "Open 2"),
+        "{:?}",
+        texts(&drive.frame)
+    );
     assert!(has_text(&drive.frame, "Closed 1"));
     drive.tick(press(&drive.frame, "forge/tracker-side/closed"));
     assert!(has_text(&drive.frame, "Tabs miss their counts"));
@@ -1331,7 +1341,11 @@ fn a_tracker_opens_on_the_open_side_and_the_closed_side_is_a_press_away() {
 #[test]
 fn a_tracker_filter_keeps_what_matches_and_names_the_empty_case() {
     let mut drive = tracker();
-    drive.tick(type_into(&drive.frame, "Filter by title or number", "readme"));
+    drive.tick(type_into(
+        &drive.frame,
+        "Filter by title or number",
+        "readme",
+    ));
     assert!(has_text(&drive.frame, "The landing shows no README"));
     assert!(!has_text(&drive.frame, "Breadcrumbs are one string"));
     drive.tick(type_into(&drive.frame, "Filter by title or number", "#3"));

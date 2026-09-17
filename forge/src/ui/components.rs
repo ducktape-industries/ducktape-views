@@ -278,12 +278,7 @@ impl ForgeView {
                 } else {
                     content.push(wire::Node::Surface {
                         key: "forge/file-text".into(),
-                        name: if markdown {
-                            "markdown"
-                        } else {
-                            "code"
-                        }
-                        .into(),
+                        name: if markdown { "markdown" } else { "code" }.into(),
                         args: vec![
                             wire::SurfaceValue::Str(self.file_text.clone()),
                             wire::SurfaceValue::Str(self.file_path.clone()),
@@ -563,28 +558,28 @@ impl ForgeView {
                     false => block,
                 };
                 wire::Node::KeyedColumn {
-                key: format!("forge/diff-lines/{}", shown[0].key),
-                keys: Some(
-                    shown
-                        .iter()
-                        .map(|line| wire::ListKey::from(line.key))
-                        .collect(),
-                ),
-                children: shown.into_iter().map(&render).collect(),
-                background: Some(native::rgba(p.surface)),
-                border: Some(wire::Border {
-                    color: Some(native::rgba(p.border)),
-                    width: Some(1.),
-                    radius: Some([native::radius::CONTROL as f32; 4]),
-                }),
-                spacing: None,
-                padding: None,
-                width: Some(wire::Length::Fill),
-                height: None,
-                max_width: None,
-                align: None,
-                virtual_row: Some(24.),
-            }
+                    key: format!("forge/diff-lines/{}", shown[0].key),
+                    keys: Some(
+                        shown
+                            .iter()
+                            .map(|line| wire::ListKey::from(line.key))
+                            .collect(),
+                    ),
+                    children: shown.into_iter().map(&render).collect(),
+                    background: Some(native::rgba(p.surface)),
+                    border: Some(wire::Border {
+                        color: Some(native::rgba(p.border)),
+                        width: Some(1.),
+                        radius: Some([native::radius::CONTROL as f32; 4]),
+                    }),
+                    spacing: None,
+                    padding: None,
+                    width: Some(wire::Length::Fill),
+                    height: None,
+                    max_width: None,
+                    align: None,
+                    virtual_row: Some(24.),
+                }
             })
             .collect();
         if self.forge_item_diff_truncated {
@@ -1070,7 +1065,11 @@ fn comment_mark(key: &str, line: &host::DiffLine, line_number: &str) -> wire::No
         wire::ButtonPreset::Text,
     );
     if let wire::Node::Button { label, .. } = &mut mark {
-        *label = Some(host::forge_comment_target(&line.path, line_number, &line.side));
+        *label = Some(host::forge_comment_target(
+            &line.path,
+            line_number,
+            &line.side,
+        ));
     }
     native::sized(mark, Some(wire::Length::Fixed(22.)), None)
 }

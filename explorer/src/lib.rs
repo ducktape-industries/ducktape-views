@@ -138,7 +138,9 @@ mod tests {
         let bytes = wire::Snapshot {
             schema: ExplorerView::SNAPSHOT_SCHEMA.into(),
             state: wire::SnapshotValue::Bytes(wire::encode(&app)),
-        }.encode().unwrap();
+        }
+        .encode()
+        .unwrap();
         assert!(ExplorerView::restore(&bytes).is_err());
     }
     #[test]

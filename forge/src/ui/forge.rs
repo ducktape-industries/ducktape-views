@@ -376,8 +376,7 @@ impl ForgeView {
 
     /// The tracker separates each title and state from its number and author.
     fn tracker_screen(&self, tab: &str) -> wire::Node {
-        let items =
-            host::filter_forge_items(&self.items, tab, &self.item_side, &self.item_filter);
+        let items = host::filter_forge_items(&self.items, tab, &self.item_side, &self.item_filter);
         let mut content = vec![self.tracker_head(tab)];
         match self.repo_phase.as_str() {
             "loading" => content.push(self.loading_tracker("forge/tracker-loading".into())),
