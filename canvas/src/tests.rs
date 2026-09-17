@@ -2287,6 +2287,50 @@ fn words_written_into_a_card_somebody_else_removed_are_kept_and_can_be_put_down(
     assert!(!view.visible().unwrap().shapes.contains_key("b"));
 }
 
+/// `Board::text` and every field change beside it answer `Ok(())` on a shape
+/// the board does not have, so an edit to a card somebody else removed comes
+/// back acknowledged exactly like one that landed — and the chip beside the
+/// board's name read `Saved` for words that reached nothing.
+#[test]
+fn an_edit_acknowledged_against_a_card_that_is_gone_is_not_saved() {
+    let board = one_card_saying("AAA");
+    let mut view = view();
+    view.confirmed = Some(board.clone());
+    view.selected = ["a".into()].into();
+    view.edit(Change::Text {
+        id: "a".into(),
+        text: "HALF WRITTEN".into(),
+    });
+    // The board that comes back with the acknowledgement no longer has the
+    // card: somebody else removed it while the edit was in flight.
+    let theirs = board.changed(&Change::Delete { id: "a".into() }).unwrap();
+    view.on_delivered(
+        0,
+        "room".into(),
+        Ok(()),
+        Ok(host::Reading {
+            catalog: BTreeMap::new(),
+            board: Some(theirs),
+        }),
+    );
+    assert!(view.pending.is_empty(), "the edit was acknowledged");
+    assert_ne!(
+        view.status(),
+        "Saved",
+        "the chip called an edit that went nowhere saved"
+    );
+    assert!(
+        view.error.contains("HALF WRITTEN"),
+        "the words that did not land were not shown: {}",
+        view.error
+    );
+    assert_eq!(
+        view.lost.as_ref().map(|card| card.text.as_str()),
+        Some("HALF WRITTEN"),
+        "there is nothing to put the words back on"
+    );
+}
+
 #[test]
 fn the_two_keys_that_leave_a_card_are_not_the_same_answer() {
     // The editor claims Escape and Command-Enter, and both arrive as one

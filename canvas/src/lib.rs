@@ -651,6 +651,10 @@ impl BoardsView {
         }
         match result {
             Ok(()) => {
+                // The board as our own edits leave it, read before the fresh
+                // one arrives: the card this operation edited is still on it,
+                // with our words and its place in it.
+                let before = self.settled();
                 let acknowledged = self.pending.pop_front();
                 self.delivery = Delivery::Idle;
                 match reading {
@@ -658,9 +662,9 @@ impl BoardsView {
                         self.on_read(epoch, id, Ok(reading));
                     }
                     Err(error) => {
-                        if let Some(operation) = acknowledged
+                        if let Some(operation) = &acknowledged
                             && let Some(board) = &self.confirmed
-                            && let Ok(mut next) = apply_operation(board, &operation)
+                            && let Ok(mut next) = apply_operation(board, operation)
                         {
                             // This is a local fallback, not a claimed remote revision.
                             next.revision = board.revision;
@@ -668,6 +672,21 @@ impl BoardsView {
                         }
                         self.error = format!("Saved; could not refresh: {error}");
                     }
+                }
+                // `Board::text` and every field change beside it answer `Ok(())`
+                // on a shape the board does not have, so an edit to a card
+                // somebody else removed comes back acknowledged exactly like
+                // one that landed. It landed nowhere: say so, rather than let
+                // the chip call it saved.
+                let landed_nowhere =
+                    acknowledged
+                        .as_ref()
+                        .zip(before)
+                        .and_then(|(operation, before)| {
+                            went_nowhere(operation, &before, &self.settled()?)
+                        });
+                if let Some(card) = landed_nowhere {
+                    self.keep_the_words_that_did_not_land(card);
                 }
                 self.pump()
             }
@@ -1072,6 +1091,45 @@ fn coordinate(value: f32) -> i32 {
         -(boards_wire::MAX_COORD as f32),
         boards_wire::MAX_COORD as f32,
     ) as i32
+}
+/// The shape a change edits in place — nothing for one that makes a shape, one
+/// that takes a shape away, or one that restates the whole stack or a group.
+fn edited(change: &Change) -> Option<&str> {
+    match change {
+        Change::Create { .. }
+        | Change::Delete { .. }
+        | Change::Order { .. }
+        | Change::Group { .. } => None,
+        Change::Move { id, .. }
+        | Change::Resize { id, .. }
+        | Change::Text { id, .. }
+        | Change::Color { id, .. }
+        | Change::Fill { id, .. }
+        | Change::Dash { id, .. }
+        | Change::Weight { id, .. }
+        | Change::Heads { id, .. }
+        | Change::Align { id, .. }
+        | Change::TextSize { id, .. }
+        | Change::Route { id, .. } => Some(id),
+    }
+}
+/// The card an acknowledged operation edited that the board no longer has, as
+/// our own edits last left it — our words and its place still in it.
+///
+/// The module treats an edit to a missing shape as a no-op and answers `Ok`,
+/// so nothing downstream can tell an edit that landed from one that reached
+/// a card somebody else had already removed. This is where they part.
+fn went_nowhere(operation: &Operation, before: &Board, after: &Board) -> Option<Shape> {
+    let changes: &[Change] = match operation {
+        Operation::Edit { change, .. } => std::slice::from_ref(change),
+        Operation::Batch { changes, .. } => changes,
+        Operation::Create { .. } | Operation::Rename { .. } | Operation::Remove { .. } => &[],
+    };
+    let id = changes
+        .iter()
+        .filter_map(edited)
+        .find(|id| !after.shapes.contains_key(*id))?;
+    Some(before.shapes.get(id)?.shape.clone())
 }
 fn inverse(board: &Board, change: &Change) -> Vec<Change> {
     match change {
