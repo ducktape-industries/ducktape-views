@@ -1064,8 +1064,11 @@ impl BoardsView {
         };
         let mut children = vec![kit::wrapping(kit::text("boards/error", notice))];
         // Words that reached no card have exactly one thing to be done about
-        // them, and the banner quoting them is where it belongs.
-        if self.lost.is_some() {
+        // them, and the banner quoting them is where it belongs — as long as
+        // there is a board to put the card on. Where the BOARD is what went,
+        // the banner quotes them and offers nothing: a new card would have
+        // nowhere to stand.
+        if self.lost.is_some() && self.confirmed.is_some() {
             children.push(kit::spaced(
                 kit::row(
                     "boards/lost-actions",
@@ -1218,6 +1221,17 @@ impl BoardsView {
     pub(super) fn canvas_color(&self) -> [f32; 4] {
         kit::palette().background
     }
+    /// Standing on no board, with something on screen saying why. That pair is
+    /// what a board removed under this view leaves behind: the board it was
+    /// drawing on went, and the banner is all that is left of it.
+    ///
+    /// A read that failed before any board was ever opened lands here too, and
+    /// answers the same, which is the truth there as well: nothing this view is
+    /// holding has been saved. Arriving normally says nothing at all, so a view
+    /// on its way to its first board is not this.
+    fn told_why_there_is_no_board(&self) -> bool {
+        self.current.is_empty() && !self.error.is_empty()
+    }
     pub(super) fn status(&self) -> String {
         if self.inline.is_some() {
             return "Editing text…".into();
@@ -1225,7 +1239,12 @@ impl BoardsView {
         // An edit the board answered `Ok` to and did nothing about — a card
         // removed under it — is not work that was kept, and this chip's whole
         // job is to say whether the work is being kept.
-        if self.lost.is_some() {
+        //
+        // Nor is an edit aimed at a board that is gone: it went with the board,
+        // whether it left words behind — a card written in — or nothing to keep
+        // at all, a card moved or a colour picked. The chip reads the standing
+        // banner rather than the refusal that raised it, so both answer alike.
+        if self.lost.is_some() || self.told_why_there_is_no_board() {
             return "Not saved".into();
         }
         // "1 change", never "1 changes". One change is the common case — one
