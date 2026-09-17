@@ -3,15 +3,17 @@
 //! [`ducktape_view_guest::host::open_link`] sends the request kind
 //! `host.open_link`, and the app answers it from one table for every view —
 //! same link plane, same refusal, one place to audit where a click can send
-//! somebody. A view that declared `<its module>.open_link` instead would ask
-//! the app to grow a second opener per module, each with its own idea of what
-//! a `duck://` address means, and the audit would be as wide as the registry.
+//! somebody. A view that named an opener under its own module instead would
+//! ask the app to grow a second opener per module, each with its own idea of
+//! what a `duck://` address means, and the audit would be as wide as the
+//! registry.
 //!
 //! So the rule is about the request kind a view NAMES, not about who calls
-//! whom: every `…open_link` string literal in this workspace's source reads
-//! `host.open_link`. A doc comment that promises a module-owned opener is a
-//! violation too — it is the design claim that is wrong, and prose is where a
-//! second door gets proposed before anyone writes it.
+//! whom: wherever this workspace's source writes one out — a string literal,
+//! a doc comment's code span — it reads `host.open_link`. Prose counts because
+//! prose is where a second door gets proposed before anyone writes it, and a
+//! comment promising a module-owned opener is already the wrong design claim.
+//! This file obeys its own rule, so it names the two shapes by escape.
 //!
 //! This rule belongs to the repo that holds the source it is about: the app
 //! tests the door tables it serves (ducktape-app#8), this tests the views.
@@ -20,9 +22,10 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The tail of every request kind that asks for a link to be opened, quoted:
-/// the literal a view would have to write to name an opener of its own.
-const OPENER_KIND: &str = ".open_link\"";
+/// The tail of a request kind that asks for a link to be opened, in the two
+/// shapes source writes one in: a string literal and a doc comment's code
+/// span. Each terminator is escaped so this file names no opener itself.
+const OPENER_KINDS: [&str; 2] = [".open_link\"", ".open_link\u{60}"];
 
 #[test]
 fn no_view_declares_its_own_open_link() {
@@ -37,17 +40,19 @@ fn no_view_declares_its_own_open_link() {
             let text = fs::read_to_string(&source)
                 .unwrap_or_else(|error| panic!("read {}: {error}", source.display()));
             for (number, line) in text.lines().enumerate() {
-                for (index, _) in line.match_indices(OPENER_KIND) {
-                    if opener(&line[..index]) == "host" {
-                        continue;
+                for kind in OPENER_KINDS {
+                    for (index, _) in line.match_indices(kind) {
+                        if opener(&line[..index]) == "host" {
+                            continue;
+                        }
+                        let path = source.strip_prefix(&views_root).unwrap_or(&source);
+                        found.insert(format!(
+                            "{}:{}: {}",
+                            path.display(),
+                            number + 1,
+                            line.trim()
+                        ));
                     }
-                    let path = source.strip_prefix(&views_root).unwrap_or(&source);
-                    found.insert(format!(
-                        "{}:{}: {}",
-                        path.display(),
-                        number + 1,
-                        line.trim()
-                    ));
                 }
             }
         }
