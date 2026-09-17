@@ -489,10 +489,10 @@ impl BoardsView {
         Task::batch([save, action])
     }
     fn select_press(&mut self, point: [f32; 2]) -> Task<Message> {
+        self.forget_what_the_board_no_longer_has();
         let Some(board) = self.visible() else {
             return Task::none();
         };
-        self.selected.retain(|id| board.shapes.contains_key(id));
         // Handles sit outside a card: hit them before ordinary card selection.
         if let Some(id) = self.only_selected().cloned() {
             let shape = &board.shapes[&id].shape;
@@ -1425,7 +1425,7 @@ impl BoardsView {
                 return self.finish_text();
             }
             let inline = self.inline.take().expect("the editor is open");
-            self.error.clear();
+            self.say_nothing();
             // Words are the whole of a text shape, and these are not being
             // kept, so one that had none before goes back to not existing.
             let never_written =
@@ -2629,21 +2629,28 @@ pub(super) fn plate(run: &[[f32; 2]]) -> [f32; 4] {
         middle[1] + reach[1],
     ]
 }
-/// What a card says now, short enough to read in a banner. The card itself is
-/// behind the editor and cannot be read around it, so the banner is the only
-/// place the writer can see the words they are about to replace.
-fn now_reading(text: &str) -> String {
+/// A card's words, short enough to read in a banner, or nothing when it has
+/// none. The card is behind the editor, or off the board altogether, so the
+/// banner is the only place its words can be seen.
+pub(super) fn quoted(text: &str) -> Option<String> {
     // Long enough for a sticky's first line, short enough not to bury the
     // sentence that says what to do about it.
     const ROOM: usize = 80;
     if text.trim().is_empty() {
-        return "it is empty now".to_owned();
+        return None;
     }
     let mut shown: String = text.chars().take(ROOM).collect();
     if text.chars().nth(ROOM).is_some() {
         shown.push('…');
     }
-    format!("it now reads “{shown}”")
+    Some(format!("“{shown}”"))
+}
+/// What a card says now, for the writer about to replace it.
+fn now_reading(text: &str) -> String {
+    match quoted(text) {
+        Some(words) => format!("it now reads {words}"),
+        None => "it is empty now".to_owned(),
+    }
 }
 /// Which end of the stack a single step travels towards.
 #[derive(Clone, Copy, PartialEq, Eq)]

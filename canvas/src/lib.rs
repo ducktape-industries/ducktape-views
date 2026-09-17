@@ -250,6 +250,12 @@ pub struct BoardsView {
     pending: VecDeque<Operation>,
     delivery: Delivery,
     error: String,
+    /// A card the board has no place for any more, with our words still in it:
+    /// somebody else removed it while they were being written, or while the
+    /// edit carrying them was in flight. Kept so the banner can quote them and
+    /// put them back down where the card stood, and so the chip cannot call an
+    /// edit that reached nothing saved.
+    lost: Option<Shape>,
     title: String,
     /// The open board's name while it is being edited in the picker. Seeded
     /// from the board every time the picker opens, so what you see in the box
@@ -381,6 +387,9 @@ pub enum Message {
     Redo,
     Retry,
     DiscardPending,
+    /// The one thing to be done about words that reached no card: put them on
+    /// a new one where the old card stood.
+    KeepLostWords,
 }
 impl BoardsView {
     const PREFERRED_WINDOW_SIZE: &'static str = "none";
@@ -395,6 +404,7 @@ impl BoardsView {
                 pending: VecDeque::new(),
                 delivery: Delivery::Idle,
                 error: String::new(),
+                lost: None,
                 title: String::new(),
                 rename: String::new(),
                 selected: BTreeSet::new(),
@@ -531,6 +541,7 @@ impl BoardsView {
             Message::Redo => self.on_redo(),
             Message::Retry => self.on_retry(),
             Message::DiscardPending => self.on_discard_pending(),
+            Message::KeepLostWords => self.on_keep_lost_words(),
         }
     }
     fn on_session(&mut self, result: Result<host::Session, String>) -> Task<Message> {
@@ -574,6 +585,15 @@ impl BoardsView {
         }
         match result {
             Ok(reading) => {
+                // The card under an open editor, read off before this board
+                // lands: the words in it are nobody else's to have seen, and
+                // there is no card left to read them or their place off once
+                // an arrival without it closes the editor.
+                let writing = self.inline.as_ref().and_then(|inline| {
+                    let text = inline.document.text();
+                    let place = self.settled()?.shapes.get(&inline.id)?.shape.clone();
+                    (text != inline.original).then_some(Shape { text, ..place })
+                });
                 self.catalog = reading.catalog;
                 if reading.board.is_none() && self.pending.is_empty() {
                     self.confirmed = None;
@@ -600,7 +620,14 @@ impl BoardsView {
                         }
                     }
                 }
-                self.forget_a_vanished_card();
+                self.forget_what_the_board_no_longer_has();
+                // The editor closed because the card went, and only this
+                // writer ever had the words in it.
+                if self.inline.is_none()
+                    && let Some(card) = writing
+                {
+                    self.keep_the_words_that_did_not_land(card);
+                }
                 if self.current.is_empty()
                     && let Some(id) = self.catalog.keys().next().cloned()
                 {
@@ -624,6 +651,10 @@ impl BoardsView {
         }
         match result {
             Ok(()) => {
+                // The board as our own edits leave it, read before the fresh
+                // one arrives: the card this operation edited is still on it,
+                // with our words and its place in it.
+                let before = self.settled();
                 let acknowledged = self.pending.pop_front();
                 self.delivery = Delivery::Idle;
                 match reading {
@@ -631,9 +662,9 @@ impl BoardsView {
                         self.on_read(epoch, id, Ok(reading));
                     }
                     Err(error) => {
-                        if let Some(operation) = acknowledged
+                        if let Some(operation) = &acknowledged
                             && let Some(board) = &self.confirmed
-                            && let Ok(mut next) = apply_operation(board, &operation)
+                            && let Ok(mut next) = apply_operation(board, operation)
                         {
                             // This is a local fallback, not a claimed remote revision.
                             next.revision = board.revision;
@@ -641,6 +672,21 @@ impl BoardsView {
                         }
                         self.error = format!("Saved; could not refresh: {error}");
                     }
+                }
+                // `Board::text` and every field change beside it answer `Ok(())`
+                // on a shape the board does not have, so an edit to a card
+                // somebody else removed comes back acknowledged exactly like
+                // one that landed. It landed nowhere: say so, rather than let
+                // the chip call it saved.
+                let landed_nowhere =
+                    acknowledged
+                        .as_ref()
+                        .zip(before)
+                        .and_then(|(operation, before)| {
+                            went_nowhere(operation, &before, &self.settled()?)
+                        });
+                if let Some(card) = landed_nowhere {
+                    self.keep_the_words_that_did_not_land(card);
                 }
                 self.pump()
             }
@@ -679,7 +725,7 @@ impl BoardsView {
         self.inline = None;
         self.gesture = Gesture::Idle;
         self.confirmed = None;
-        self.error.clear();
+        self.say_nothing();
         self.delivery = Delivery::Idle;
         self.undo.clear();
         self.redo.clear();
@@ -773,7 +819,7 @@ impl BoardsView {
             self.error = error;
             return Task::none();
         }
-        self.error.clear();
+        self.say_nothing();
         self.pending.push_back(Operation::Batch {
             board: self.current.clone(),
             changes,
@@ -828,25 +874,75 @@ impl BoardsView {
         }
         self.redo.clear();
         let queued = self.enqueue_many(redo);
-        self.forget_a_vanished_card();
+        self.forget_what_the_board_no_longer_has();
         queued
     }
-    /// A card can go out from under the caret: Undo is live while you write,
-    /// another writer can delete the shape, and a refreshed read can arrive
-    /// without it. The editor stops being drawn at once — but the view went on
-    /// believing it was open, which dropped every key on the board and left
-    /// the save to fail against an id nothing answers to.
-    fn forget_a_vanished_card(&mut self) {
-        let Some(inline) = &self.inline else {
-            return;
+    /// A shape can go out from under the caret and from under the selection:
+    /// Undo is live while you write, another writer can delete the shape, and
+    /// a refreshed read can arrive without it.
+    ///
+    /// The editor stops being drawn at once — but the view went on believing
+    /// it was open, which dropped every key on the board and left the save to
+    /// fail against an id nothing answers to. The selection is the same defect
+    /// with a longer fuse: it was reconciled only where the pointer is pressed
+    /// ([`Self::select_press`]), so until you clicked somewhere the properties
+    /// panel went on offering Delete, Duplicate, the stacking row and a colour
+    /// for a shape the board no longer has.
+    ///
+    /// Both are answered here, wherever a board settles, so a board arriving
+    /// from the network reconciles exactly the way a local edit does.
+    fn forget_what_the_board_no_longer_has(&mut self) {
+        let board = self.settled();
+        let still_there = |id: &str| {
+            board
+                .as_ref()
+                .is_some_and(|board| board.shapes.contains_key(id))
         };
-        let still_there = self
-            .settled()
-            .is_some_and(|board| board.shapes.contains_key(&inline.id));
-        if still_there {
-            return;
+        self.selected.retain(|id| still_there(id));
+        let gone = self
+            .inline
+            .as_ref()
+            .is_some_and(|inline| !still_there(&inline.id));
+        if gone {
+            self.inline = None;
         }
-        self.inline = None;
+    }
+    /// Work of ours that reached no card: the words in an editor whose card
+    /// went, or an edit acknowledged against a card that had already gone.
+    /// Both are said out loud with the words quoted — the card they belong to
+    /// is not on the board to be read — and both keep the card itself, so the
+    /// one thing left to do about them is one press.
+    fn keep_the_words_that_did_not_land(&mut self, card: Shape) {
+        self.error = match interaction::quoted(&card.text) {
+            Some(words) => format!(
+                "Somebody else removed this card, so what you wrote was not saved — {words}. Put \
+                 it on a new card to keep it.",
+            ),
+            None => "Somebody else removed this card, so that change was not saved.".into(),
+        };
+        self.lost = Some(card);
+    }
+    /// The kept words, put down on a new card where the old one stood. They go
+    /// through the same minting every other new shape does, so the board names
+    /// it and undo holds it — and the banner lets go of them only once that
+    /// edit is on the board, so a mint that fails leaves them where they are.
+    fn on_keep_lost_words(&mut self) -> Task<Message> {
+        let Some(card) = self.lost.clone() else {
+            return Task::none();
+        };
+        // A connector's ends named cards that may well have gone with it.
+        self.mint_shape(Shape {
+            from: None,
+            to: None,
+            ..card
+        })
+    }
+    /// The banner and anything it was offering to do about the board, gone
+    /// together: an action outliving the message that explained it is an
+    /// action nobody can read before pressing.
+    fn say_nothing(&mut self) {
+        self.error.clear();
+        self.lost = None;
     }
     fn on_create_board(&mut self) -> Task<Message> {
         let allowed =
@@ -981,7 +1077,7 @@ impl BoardsView {
         self.confirmed = None;
         self.name_the_board_we_are_on();
         self.selected.clear();
-        self.error.clear();
+        self.say_nothing();
 
         self.gesture = Gesture::Idle;
         self.undo.clear();
@@ -995,6 +1091,45 @@ fn coordinate(value: f32) -> i32 {
         -(boards_wire::MAX_COORD as f32),
         boards_wire::MAX_COORD as f32,
     ) as i32
+}
+/// The shape a change edits in place — nothing for one that makes a shape, one
+/// that takes a shape away, or one that restates the whole stack or a group.
+fn edited(change: &Change) -> Option<&str> {
+    match change {
+        Change::Create { .. }
+        | Change::Delete { .. }
+        | Change::Order { .. }
+        | Change::Group { .. } => None,
+        Change::Move { id, .. }
+        | Change::Resize { id, .. }
+        | Change::Text { id, .. }
+        | Change::Color { id, .. }
+        | Change::Fill { id, .. }
+        | Change::Dash { id, .. }
+        | Change::Weight { id, .. }
+        | Change::Heads { id, .. }
+        | Change::Align { id, .. }
+        | Change::TextSize { id, .. }
+        | Change::Route { id, .. } => Some(id),
+    }
+}
+/// The card an acknowledged operation edited that the board no longer has, as
+/// our own edits last left it — our words and its place still in it.
+///
+/// The module treats an edit to a missing shape as a no-op and answers `Ok`,
+/// so nothing downstream can tell an edit that landed from one that reached
+/// a card somebody else had already removed. This is where they part.
+fn went_nowhere(operation: &Operation, before: &Board, after: &Board) -> Option<Shape> {
+    let changes: &[Change] = match operation {
+        Operation::Edit { change, .. } => std::slice::from_ref(change),
+        Operation::Batch { changes, .. } => changes,
+        Operation::Create { .. } | Operation::Rename { .. } | Operation::Remove { .. } => &[],
+    };
+    let id = changes
+        .iter()
+        .filter_map(edited)
+        .find(|id| !after.shapes.contains_key(*id))?;
+    Some(before.shapes.get(id)?.shape.clone())
 }
 fn inverse(board: &Board, change: &Change) -> Vec<Change> {
     match change {
