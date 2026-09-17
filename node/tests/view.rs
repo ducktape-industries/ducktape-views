@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 // ---------- what the node answers ----------
 
 fn status() -> Value {
-    json!({
+    let mut status = json!({
         "public_key": "ab12cd34",
         "version": "0.4.2",
         "root_hash": "c0ffee",
@@ -34,7 +34,14 @@ fn status() -> Value {
             "storage": { "checkpoint_height": 84_900 },
             "sync": { "retries": 0, "failures": 0 },
         },
-    })
+    });
+    // a node that has heard no tip publishes no `follow` at all, which is
+    // what the fixture above is; a test that has one says so.
+    if let Some((phase, follow)) = FOLLOWING.with(|held| held.borrow().clone()) {
+        status["operations"]["phase"] = phase.into();
+        status["operations"]["follow"] = follow;
+    }
+    status
 }
 
 fn peers() -> Value {
@@ -73,6 +80,12 @@ fn module_status() -> Value {
 }
 
 thread_local! {
+    /// The phase and the `operations.follow` section `status()` serves, for
+    /// the tests that drive a node off its own tip poll. Unset is the wire of
+    /// a node that has never heard a tip.
+    static FOLLOWING: std::cell::RefCell<Option<(String, Value)>> =
+        const { std::cell::RefCell::new(None) };
+
     /// Whether the valset below seats THIS node. It is the only thing that
     /// decides what the card calls this device and whether the live filter
     /// may be retuned — the session carries no standing at all.
@@ -172,6 +185,13 @@ fn connected_as(seated: bool) -> (Frame, Vec<Request>) {
     SEATED.with(|held| held.set(seated));
     let props = request(&boot(), "node.props").id;
     settle(tick_native(vec![item(props, &session())]))
+}
+
+/// Boots connected to a node whose status carries `operations.follow` and
+/// the phase the node itself settled on.
+fn following(phase: &str, follow: Value) -> Frame {
+    FOLLOWING.with(|held| *held.borrow_mut() = Some((phase.to_owned(), follow)));
+    connected().0
 }
 
 /// The one `node.copy` intent a frame carries.
@@ -347,6 +367,99 @@ fn an_unreported_identity_reads_not_reported_and_offers_no_copy() {
     );
     // the session's own facts are still readings
     assert!(has_text(&frame, "/var/ducktape/demo"), "{shown:?}");
+}
+
+// ---------- a node that stopped following ----------
+
+/// The whole point of `operations.follow`: a node the network left behind
+/// says so in words, with the gap and the seconds its own height has stood
+/// still. `last_finalized_at` is 1_700_000_000 and the session's clock reads
+/// 1_700_000_030, so the stall is 30 seconds.
+#[test]
+fn a_node_behind_the_network_says_by_how_much_and_for_how_long() {
+    let frame = following(
+        "behind",
+        json!({ "network_height": 85_513, "behind_by": 601, "heard_at": 1_700_000_030i64 }),
+    );
+    assert!(
+        has_text(
+            &frame,
+            "This node is 601 blocks behind the network and has not advanced for 30 seconds."
+        ),
+        "{:?}",
+        texts(&frame)
+    );
+    // the poll is answering; the gap is the fault, not the silence
+    assert!(
+        !texts(&frame)
+            .iter()
+            .any(|text| text.starts_with("This node has not heard")),
+        "{:?}",
+        texts(&frame)
+    );
+}
+
+/// A tip poll that stopped answering is a DIFFERENT fault from a gap: the
+/// last gap a peer confirmed may read zero while the node hears nothing at
+/// all. The silence is measured from `heard_at` — 200 seconds here, past the
+/// three 12-second polls the node itself waits out.
+#[test]
+fn a_tip_poll_that_stopped_answering_is_its_own_sentence() {
+    let frame = following(
+        "serving",
+        json!({ "network_height": 84_912, "behind_by": 0, "heard_at": 1_699_999_830i64 }),
+    );
+    assert!(
+        has_text(
+            &frame,
+            "This node has not heard from the network for 200 seconds: its tip poll stopped \
+             answering."
+        ),
+        "{:?}",
+        texts(&frame)
+    );
+    assert!(
+        !texts(&frame)
+            .iter()
+            .any(|text| text.starts_with("This node is")),
+        "{:?}",
+        texts(&frame)
+    );
+}
+
+/// A node that has heard NO tip publishes no `follow`, and a poll that never
+/// answered once is not a poll that stopped: the screen says neither
+/// sentence rather than inventing a gap of zero.
+#[test]
+fn a_status_without_follow_draws_neither_sentence() {
+    let (frame, _) = connected();
+    let shown = texts(&frame);
+    assert!(
+        !shown
+            .iter()
+            .any(|text| text.starts_with("This node is")
+                || text.starts_with("This node has not heard")),
+        "{shown:?}"
+    );
+}
+
+/// `follow` is present on every healthy node too. A node level with the tip
+/// it just heard is not a fault, and saying so on every screen would train
+/// the one operator who can act on it to ignore the sentence.
+#[test]
+fn a_node_level_with_a_tip_it_just_heard_draws_neither_sentence() {
+    let frame = following(
+        "serving",
+        json!({ "network_height": 84_912, "behind_by": 0, "heard_at": 1_700_000_030i64 }),
+    );
+    let shown = texts(&frame);
+    assert!(
+        !shown
+            .iter()
+            .any(|text| text.starts_with("This node is")
+                || text.starts_with("This node has not heard")),
+        "{shown:?}"
+    );
 }
 
 // ---------- the registry ----------

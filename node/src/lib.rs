@@ -68,7 +68,7 @@ pub enum Message {
 impl NodeView {
     /// This state's layout, digested — `snapshot_schema` holds it here.
     const SNAPSHOT_SCHEMA: &'static str =
-        "a3c71212f7dd37b4968727ff2aa8999979360e8d6a5c0ee634db40e8823988eb";
+        "dce4ba365c9422236d46621a8e925a331c4d530be55d2a3fb1c34f6ede1d1afd";
     fn state() -> Self {
         Self {
             node_data_dir: "".to_owned(),

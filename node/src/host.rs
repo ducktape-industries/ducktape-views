@@ -39,6 +39,22 @@ const LOGS_TOPIC: &str = "logs";
 /// so an absence renders `—` and never a measured zero.
 const UNMEASURED: i64 = -1;
 
+/// How long the tip poll may answer nothing before this screen calls it
+/// stopped.
+///
+/// NOT a window this view invented. Both lanes that poll a peer's tip run on
+/// a 12-second tick — the validator's `sync::divergence::ROOT_POLL_TICK` and
+/// the parked resident's `constants::RESIDENT_FALLBACK_POLL` — and the node
+/// itself waits three of them (`BEHIND_AFTER_SECONDS`) before it calls its
+/// own lag a fault, because one silent tick is an unreachable peer and two is
+/// a block landing between two polls. The view reads silence with the node's
+/// own patience rather than a shorter one it would have to defend.
+///
+/// A `heard_at` unchanged across two readings cannot stand in for it: this
+/// view re-reads status on EVERY BLOCK, and a block lands between two polls,
+/// so a node following perfectly repeats the same `heard_at` most readings.
+const TIP_SILENT_AFTER: i64 = 36;
+
 /// How many log lines the timeline holds, and how many of them one frame
 /// draws. The ring on the node is 4,096 deep and its whole contents replay
 /// on subscribe; a tree wire carries text, not a virtual list, so the
@@ -232,6 +248,14 @@ pub struct NodeFacts {
     pub node_version: String,
     pub node_root_hash: String,
     pub sync_line: String,
+    /// the phase as the NODE spells it on the wire: `sync_line` has already
+    /// turned it into prose, and the sentences below are decided on the word
+    pub node_phase: String,
+    /// the gap to the tip this node last heard, and when that tip landed —
+    /// both [`UNMEASURED`] until a peer answers a tip poll, because a node
+    /// that has heard nothing is not a node that measured a zero gap
+    pub node_behind_by: i64,
+    pub node_heard_at: i64,
     pub node_phase_since: i64,
     pub node_sync_retries: i64,
     pub node_sync_failures: i64,
@@ -252,6 +276,9 @@ impl Default for NodeFacts {
             node_version: String::new(),
             node_root_hash: String::new(),
             sync_line: String::new(),
+            node_phase: String::new(),
+            node_behind_by: UNMEASURED,
+            node_heard_at: UNMEASURED,
             node_phase_since: UNMEASURED,
             node_sync_retries: 0,
             node_sync_failures: 0,
@@ -300,6 +327,7 @@ fn node_facts(status: &serde_json::Value) -> NodeFacts {
     let operations = &status["operations"];
     let consensus = &operations["consensus"];
     let sync = &operations["sync"];
+    let follow = &operations["follow"];
     let phase = operations["phase"].as_str().unwrap_or_default();
     let applied = sync["applied_height"].as_i64().unwrap_or(UNMEASURED);
     let target = sync["target_height"].as_i64().unwrap_or(UNMEASURED);
@@ -317,6 +345,9 @@ fn node_facts(status: &serde_json::Value) -> NodeFacts {
         node_version: status["version"].as_str().unwrap_or_default().to_owned(),
         node_root_hash: status["root_hash"].as_str().unwrap_or_default().to_owned(),
         sync_line: sync_label(phase, applied, target),
+        node_phase: phase.to_owned(),
+        node_behind_by: follow["behind_by"].as_i64().unwrap_or(UNMEASURED),
+        node_heard_at: follow["heard_at"].as_i64().unwrap_or(UNMEASURED),
         node_phase_since: operations["phase_since"].as_i64().unwrap_or(UNMEASURED),
         node_sync_retries: sync["retries"].as_i64().unwrap_or(0),
         node_sync_failures: sync["failures"].as_i64().unwrap_or(0),
@@ -362,6 +393,46 @@ fn sync_label(phase: &str, applied: i64, target: i64) -> String {
         "{name} {} / {}",
         grouped_digits(applied),
         grouped_digits(target)
+    )
+}
+
+/// What a node that stopped following owes its operator, in words: how far
+/// behind the tip it last heard it is, and how long its own height has stood
+/// still. Drawn ONLY on the phase the node itself calls `behind` — a gap on
+/// its own is a block landing between two polls, and the node has already
+/// waited out the window that tells the two apart.
+pub fn behind_line(facts: &NodeFacts, wall_now: i64) -> String {
+    // the node measures its own stall from the last block it finalized, and
+    // from the phase change while it has finalized none; this says the same
+    // seconds its phase was decided on.
+    let progressed_at = match facts.node_last_finalized >= 0 {
+        true => facts.node_last_finalized,
+        false => facts.node_phase_since,
+    };
+    let behind = facts.node_phase == "behind" && facts.node_behind_by >= 0;
+    if !behind || progressed_at < 0 {
+        return String::new();
+    }
+    format!(
+        "This node is {} blocks behind the network and has not advanced for {} seconds.",
+        grouped_digits(facts.node_behind_by),
+        grouped_digits(wall_now.saturating_sub(progressed_at))
+    )
+}
+
+/// The OTHER fault: the tip poll itself stopped answering, so whatever gap
+/// the node reports is the last one a peer confirmed and not what it is
+/// missing now. A node that has heard nothing at all publishes no `follow`
+/// and gets no sentence — silence from a poll that never answered once is
+/// not a poll that stopped.
+pub fn unheard_line(facts: &NodeFacts, wall_now: i64) -> String {
+    let silent_for = wall_now.saturating_sub(facts.node_heard_at);
+    if facts.node_heard_at < 0 || silent_for < TIP_SILENT_AFTER {
+        return String::new();
+    }
+    format!(
+        "This node has not heard from the network for {} seconds: its tip poll stopped answering.",
+        grouped_digits(silent_for)
     )
 }
 

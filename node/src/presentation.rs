@@ -283,6 +283,22 @@ impl NodeView {
             "Chain",
             chain,
         )];
+        // the two faults a node that stopped following can be in: it is
+        // behind a tip it heard, or the poll that would tell it so has gone
+        // quiet. Both can be true at once, and they are different sentences.
+        for (key, sentence) in [
+            ("node/behind", host::behind_line(facts, self.wall_now)),
+            ("node/unheard", host::unheard_line(facts, self.wall_now)),
+        ] {
+            if sentence.is_empty() {
+                continue;
+            }
+            sections.push(kit::notice(
+                key,
+                kit::wrapping(kit::text(format!("{key}/text"), sentence)),
+                Tone::Warning,
+            ));
+        }
         if !facts.node_sync_last_error.is_empty() {
             sections.push(kit::notice(
                 "node/sync-error",
