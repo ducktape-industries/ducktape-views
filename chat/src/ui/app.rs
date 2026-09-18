@@ -1261,6 +1261,39 @@ mod tests {
         );
     }
 
+    /// With a thread open, Details drew a second side pane, and the two left
+    /// the conversation ~170 px at 1280 and nothing at 1000: each pane's width
+    /// is clamped as the only one beside the room. Details now stands in front
+    /// of the thread, and closing it brings the thread back.
+    #[test]
+    fn details_over_a_thread_stand_in_front_of_it_instead_of_beside_it() {
+        let mut state = ChatView::state();
+        state.connected = true;
+        state.active_channel = "room".into();
+        let panes = |state: &ChatView| {
+            let mut tree = state.view();
+            let mut panes = Vec::new();
+            tree.for_each_mut(&mut |node| {
+                if let Some(key @ ("ChatView/chat/details-pane" | "ChatView/chat/thread-pane")) =
+                    node.key()
+                {
+                    panes.push(key.to_owned());
+                }
+            });
+            panes
+        };
+        let _ = state.update(Message::OpenThreadFor(1));
+        assert_eq!(panes(&state), ["ChatView/chat/thread-pane"]);
+        let _ = state.update(Message::ToggleChannelSettings);
+        assert_eq!(
+            panes(&state),
+            ["ChatView/chat/details-pane"],
+            "one side pane beside the room"
+        );
+        let _ = state.update(Message::ToggleChannelSettings);
+        assert_eq!(panes(&state), ["ChatView/chat/thread-pane"]);
+    }
+
     #[test]
     fn every_thread_menu_mount_matches_its_focus_target() {
         let mut state = ChatView::state();

@@ -162,14 +162,17 @@ impl ChatView {
             divider(format!("{key}/sidebar-resize"), Message::SidebarResized),
             self.room(&key),
         ];
+        // One side pane at a time: each pane's width is clamped as the only
+        // one beside the room. Opening a thread closes the details, so both
+        // are open only when Details was pressed over a thread; the details
+        // stand in front, and closing them brings the thread back.
         if self.channel_settings_open && !self.active_channel.is_empty() {
             panes.push(divider(
                 format!("{key}/details-resize"),
                 Message::DetailsResized,
             ));
             panes.push(self.channel_details(format!("{key}/details-pane")));
-        }
-        if self.active_thread_seq > 0 && !self.active_channel.is_empty() {
+        } else if self.active_thread_seq > 0 && !self.active_channel.is_empty() {
             panes.push(divider(
                 format!("{key}/thread-resize"),
                 Message::ThreadResized,
