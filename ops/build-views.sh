@@ -47,7 +47,14 @@ packages=()
 while (($#)); do
   case "$1" in
     -p) packages+=("$2"); shift 2 ;;
-    *) echo "expected -p <view-package>, got $1" >&2; exit 1 ;;
+    # every workspace member whose package name ends in `-view`, sorted
+    --all)
+      names=$("${CARGO:-cargo}" metadata --no-deps --format-version 1 \
+        --manifest-path "$repo/Cargo.toml" |
+        jq -r '.packages[].name | select(endswith("-view"))' | sort)
+      for name in $names; do packages+=("$name"); done
+      shift ;;
+    *) echo "expected -p <view-package> or --all, got $1" >&2; exit 1 ;;
   esac
 done
 (("${#packages[@]}")) || { echo "no view packages selected" >&2; exit 1; }
@@ -61,3 +68,4 @@ for package in "${packages[@]}"; do
   wasm-tools component new "$view_target/wasm32-unknown-unknown/release/$library.wasm" \
     -o "$repo/target/views/$library.wasm"
 done
+wasm-tools --version > "$repo/target/views/WASM_TOOLS_VERSION"
