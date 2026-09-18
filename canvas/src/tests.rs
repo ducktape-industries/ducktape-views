@@ -4612,6 +4612,80 @@ fn the_save_chip_counts_one_change_in_the_singular() {
     let two = view.status();
     assert!(two.contains("2 changes"), "{two}");
 }
+/// The chip sits after the board's name, and a long name pushed it under the
+/// tool bar where nobody could read it. The menu is given the room left of the
+/// tool bar and no more; inside it the name is the one that gives way, cut to
+/// a line, while the chip keeps its own width.
+#[test]
+fn a_long_board_name_gives_way_to_the_save_chip_and_not_the_other_way() {
+    let mut view = view();
+    let title = "boards-views-accept-20260918t120040-c2-with-a-longer-tail-60";
+    assert_eq!(title.len(), 60);
+    view.confirmed = Some(Board::new(title.into(), "owner".into()).unwrap());
+    // The narrowest stage that still keeps the tool bar at the top, the stage
+    // the chip went missing on, and a wide one.
+    for width in [960., 1080., 1440.] {
+        view.on_size(width, 800.);
+        let tree = view.view();
+        let menu = node_at(&tree, "boards/menu").expect("the board menu is drawn");
+        let wire::Node::Container { max_width, .. } = menu else {
+            panic!("the board menu is an island: {menu:?}");
+        };
+        let tools_start = (width - presentation::TOOL_BAR) / 2.;
+        assert!(
+            max_width.is_some_and(
+                |room| presentation::ISLAND + room + presentation::ISLAND <= tools_start
+            ),
+            "at {width} the board menu may run to {max_width:?}, under the tool bar at \
+             {tools_start}"
+        );
+        let Some(wire::Node::Button {
+            width: button,
+            content,
+            ..
+        }) = node_at(&tree, "boards/switcher")
+        else {
+            panic!("the board's name is the button that opens the list");
+        };
+        let wire::ButtonContent::Child(name) = content else {
+            panic!("the board's name is a bare label, which keeps its whole width: {content:?}");
+        };
+        let wire::Node::Text {
+            content: words,
+            width: name_width,
+            options,
+            ..
+        } = name.as_ref()
+        else {
+            panic!("the board's name is not a line of text: {name:?}");
+        };
+        assert!(words.starts_with(title));
+        assert_eq!(
+            (*button, *name_width, options.wrapping),
+            (
+                Some(wire::Length::Fill),
+                Some(wire::Length::Fill),
+                Some(wire::Wrapping::None)
+            ),
+            "the name has to take only the room it is given, on one line, and be cut there"
+        );
+        let Some(wire::Node::Text {
+            content: chip,
+            width: chip_width,
+            options,
+            ..
+        }) = node_at(&tree, "boards/sync")
+        else {
+            panic!("the save chip is not drawn");
+        };
+        assert_eq!(*chip, view.status());
+        assert_eq!(
+            (*chip_width, options.wrapping),
+            (Some(wire::Length::Shrink), Some(wire::Wrapping::None)),
+            "the chip has to keep its own width whatever the name beside it needs"
+        );
+    }
+}
 /// The zoom readout is a fixed-width box, so what it has to hold is a fact
 /// about the zoom's own limits rather than about the labels that happened to be
 /// on screen when it was measured. Walking the zoom to both ends is what keeps
