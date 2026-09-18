@@ -91,15 +91,15 @@ impl HomeView {
             self.files_card(),
             self.modules_card(),
         ];
+        // a rail is `Fill` (a column's own width), never `FillPortion`: the
+        // host holds a portion no narrower than its widest one-line row, so
+        // one long room name ran its rail past the pane (#35); equal `Fill`
+        // rails split the row evenly and give way to it
         let rails = host::dealt(cards, columns)
             .into_iter()
             .enumerate()
             .map(|(index, cards)| {
-                kit::sized(
-                    kit::spaced(kit::column(format!("home/column/{index}"), cards), GUTTER),
-                    Some(Length::FillPortion(1)),
-                    None,
-                )
+                kit::spaced(kit::column(format!("home/column/{index}"), cards), GUTTER)
             });
         let dashboard = kit::spaced(
             kit::column(
