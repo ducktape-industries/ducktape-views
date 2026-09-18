@@ -1192,6 +1192,75 @@ mod tests {
         assert_eq!(grids, 1);
     }
 
+    /// A long channel name pushed Huddle and Details out of the header, and
+    /// the thread's room line ran under its ✕. The sizes mean what the host
+    /// makes of them: a one-line `Shrink` text keeps its whole width, up to its
+    /// row's; a `Fill` row takes what its rigid siblings leave; a clipped box
+    /// sized to its content shrinks to what is left. So the title is the `Fill`
+    /// row, and the name is the clipped box in it.
+    #[test]
+    fn a_long_channel_name_gives_way_to_huddle_and_details() {
+        let name = "views-walk-20260918-a-very-long-channel-name-to-check-how-the-header-and-the-channel-list-truncate-it";
+        let mut state = ChatView::state();
+        state.connected = true;
+        state.active_channel = "room".into();
+        state.active_channel_name = name.into();
+        state.active_thread_seq = 1;
+        let mut tree = state.view();
+        let (mut header, mut thread_title) = (Vec::new(), Vec::new());
+        tree.for_each_mut(&mut |node| {
+            if let wire::Node::Linear { key, children, .. } = node {
+                match key.as_str() {
+                    "ChatView/chat/header" => header = children.clone(),
+                    "ChatView/chat/thread-pane/title-row" => thread_title = children.clone(),
+                    _ => {}
+                }
+            }
+        });
+        let gives_way = |node: &wire::Node, text: &str| match node {
+            wire::Node::Container {
+                width: Some(wire::Length::Shrink),
+                clip: true,
+                content,
+                ..
+            } => matches!(
+                content.as_ref(),
+                wire::Node::Text { content, width: None | Some(wire::Length::Shrink), options, .. }
+                    if content == text && options.wrapping == Some(wire::Wrapping::None)
+            ),
+            _ => false,
+        };
+        let keys: Vec<_> = header.iter().map(|node| node.key()).collect();
+        assert_eq!(
+            keys,
+            [
+                Some("ChatView/chat/room-title"),
+                Some("ChatView/chat/huddle"),
+                Some("ChatView/chat/details"),
+            ],
+            "the header is the title, then Huddle and Details: {header:?}"
+        );
+        let wire::Node::Linear {
+            width,
+            children: title,
+            ..
+        } = &header[0]
+        else {
+            panic!("the title is a row: {:?}", header[0]);
+        };
+        assert_eq!(*width, Some(wire::Length::Fill));
+        assert!(
+            title.iter().any(|node| gives_way(node, name)),
+            "the name is a clipped box that gives way: {title:?}"
+        );
+        assert!(
+            thread_title
+                .iter()
+                .any(|node| gives_way(node, &format!("#{name}"))),
+            "the thread's room line gives way to its ✕: {thread_title:?}"
+        );
+    }
+
     #[test]
     fn every_thread_menu_mount_matches_its_focus_target() {
         let mut state = ChatView::state();

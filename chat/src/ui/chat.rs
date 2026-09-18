@@ -121,6 +121,21 @@ fn section_row(key: String, name: &str, control: Option<wire::Node>) -> wire::No
         },
     )
 }
+/// A one-line title that gives way to what stands beside it. The host keeps a
+/// one-line `Shrink` text at its whole width, so the title sits in a box sized
+/// to it that clips: the box shrinks to what its row leaves, and the title is
+/// cut to an ellipsis inside it. A short title keeps its own width.
+fn gives_way(key: String, title: wire::Node) -> wire::Node {
+    let mut node = native::sized(
+        native::container(key, native::nowrap(title)),
+        Some(wire::Length::Shrink),
+        None,
+    );
+    if let wire::Node::Container { clip, .. } = &mut node {
+        *clip = true;
+    }
+    node
+}
 /// A pane's title row: a heading, what stands beside it, and its close.
 fn pane_header(key: String, children: impl IntoIterator<Item = wire::Node>) -> wire::Node {
     native::padded(
@@ -289,26 +304,28 @@ impl ChatView {
         )
     }
     fn room(&self, key: &str) -> wire::Node {
-        let mut header = Vec::new();
+        // The title takes what Huddle and Details leave, and in it only the
+        // channel's name gives way: a long one is cut, never the buttons.
+        let mut title = Vec::new();
         if self.active_dm.name.is_empty() {
-            header.push(native::nowrap(native::colored(
+            title.push(native::nowrap(native::colored(
                 native::heading(format!("{key}/room-hash"), "#"),
                 native::palette().muted,
             )));
-            header.push(native::nowrap(native::heading(
-                format!("{key}/room-name"),
-                &self.active_channel_name,
-            )));
+            title.push(gives_way(
+                format!("{key}/room-name-box"),
+                native::heading(format!("{key}/room-name"), &self.active_channel_name),
+            ));
         } else {
-            header.push(self.direct_message_header(format!("{key}/dm-header")));
+            title.push(self.direct_message_header(format!("{key}/dm-header")));
         }
         if self.active_channel_archived {
-            header.push(self.archived_badge(format!("{key}/archived")));
+            title.push(self.archived_badge(format!("{key}/archived")));
         }
         if self.active_channel_members_only {
-            header.push(self.private_badge(format!("{key}/private")));
+            title.push(self.private_badge(format!("{key}/private")));
         }
-        header.push(native::spacer());
+        let mut header = vec![native::centered_row(format!("{key}/room-title"), title)];
         // the header speaks for THIS room's huddle: seated elsewhere (a voice
         // room), the room on screen still offers its own to join
         let seated_here = self.huddle_joined && self.huddle_channel == self.active_channel;
@@ -982,10 +999,13 @@ impl ChatView {
                                         format!("{key}/title"),
                                         "Thread",
                                     )),
-                                    native::nowrap(native::caption(
-                                        format!("{key}/room"),
-                                        self.thread_room_label(),
-                                    )),
+                                    gives_way(
+                                        format!("{key}/room-box"),
+                                        native::caption(
+                                            format!("{key}/room"),
+                                            self.thread_room_label(),
+                                        ),
+                                    ),
                                 ],
                             ),
                             8.,
