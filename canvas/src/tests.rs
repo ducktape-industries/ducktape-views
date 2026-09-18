@@ -2298,6 +2298,73 @@ fn a_close_refused_onto_a_card_that_is_gone_keeps_the_words() {
     );
 }
 
+/// The same refusal as it actually arrives with two people on the board: the
+/// other client's delete lands on this view's own live read FIRST, and the
+/// refusal for the close that was already in flight lands after it. By then
+/// nothing here has the card or its place — not the fresh board, not the board
+/// our own edits left. The words are the writer's either way, and a place a
+/// race took is no reason to drop them: they are kept, quoted, and one press
+/// from a card of their own, and the chip may not call them saved.
+#[test]
+fn a_close_refused_after_the_delete_already_arrived_keeps_the_words() {
+    let board = one_card_saying("AAA");
+    let mut view = writing_in(&board);
+    view.inline.as_mut().unwrap().document = Editor::new("HALF WRITTEN");
+    view.finish_text();
+    assert_eq!(view.pending.len(), 1, "the close was never queued");
+
+    // Their delete, arriving the way any live update does — before the answer
+    // to our own edit, which is what the two-client run reproduces.
+    someone_else_deletes(&mut view, &board);
+    assert!(
+        view.lost.is_none(),
+        "the editor was closed, not the words lost"
+    );
+
+    let theirs = board.changed(&Change::Delete { id: "a".into() }).unwrap();
+    view.on_delivered(
+        0,
+        "room".into(),
+        Err(refusal(
+            "text_target_gone",
+            "That card is no longer on the board.",
+        )),
+        read(theirs),
+    );
+    assert!(view.pending.is_empty(), "the refused edit is still queued");
+    assert!(
+        view.error.contains("HALF WRITTEN"),
+        "the words went without a word: {}",
+        view.error
+    );
+    assert_eq!(view.status(), "Not saved");
+    let kept = view.lost.clone().expect("the draft was dropped in silence");
+    assert_eq!(kept.text, "HALF WRITTEN");
+    let drawn = serde_json::to_string(&view.view()).unwrap();
+    assert!(
+        drawn.contains("boards/lost-keep"),
+        "the words were kept with nothing to be done about them"
+    );
+
+    // One press puts them down, where this view puts any new card: over the
+    // middle of what the writer is looking at, so they land in sight.
+    view.on_keep_lost_words();
+    view.on_minted(0, "room".into(), kept, Ok("b".into()));
+    let now = view.visible().unwrap();
+    let put = now.shapes["b"].shape.clone();
+    assert_eq!(put.text, "HALF WRITTEN");
+    let middle = view.world([view.viewport[0] / 2., view.viewport[1] / 2.]);
+    let covers = |low: i32, span: i32, at: f32| (low as f32) < at && at < (low + span) as f32;
+    assert!(
+        covers(put.x, put.width, middle[0]) && covers(put.y, put.height, middle[1]),
+        "the words came back where nobody is looking: {} {} {}x{}",
+        put.x,
+        put.y,
+        put.width,
+        put.height
+    );
+}
+
 /// A refusal this view has no banner for — including the fixed token an app or
 /// a node too old to forward the module's own puts in its place — takes the
 /// path every refusal took before there were tokens to tell them apart: the
@@ -2635,6 +2702,42 @@ fn an_edit_acknowledged_against_a_card_that_is_gone_is_not_saved() {
         view.lost.as_ref().map(|card| card.text.as_str()),
         Some("HALF WRITTEN"),
         "there is nothing to put the words back on"
+    );
+}
+
+/// The same acknowledgement, with their delete already through the live read —
+/// an older node, which refuses nothing and answers `Ok` to an edit for a card
+/// it does not have. The card's place went with the delete before the answer
+/// came back, and the words are no less the writer's for it.
+#[test]
+fn an_edit_acknowledged_after_the_delete_already_arrived_is_not_saved() {
+    let board = one_card_saying("AAA");
+    let mut view = view();
+    view.confirmed = Some(board.clone());
+    view.selected = ["a".into()].into();
+    view.edit(writing(&view, "a", "HALF WRITTEN"));
+    someone_else_deletes(&mut view, &board);
+
+    let theirs = board.changed(&Change::Delete { id: "a".into() }).unwrap();
+    view.on_delivered(0, "room".into(), Ok(()), read(theirs));
+    assert!(view.pending.is_empty(), "the edit was acknowledged");
+    assert_ne!(
+        view.status(),
+        "Saved",
+        "the chip called an edit that went nowhere saved"
+    );
+    assert!(
+        view.error.contains("HALF WRITTEN"),
+        "the words that did not land were not shown: {}",
+        view.error
+    );
+    let kept = view.lost.clone().expect("the draft was dropped in silence");
+    assert_eq!(kept.text, "HALF WRITTEN");
+    view.on_keep_lost_words();
+    view.on_minted(0, "room".into(), kept, Ok("b".into()));
+    assert_eq!(
+        view.visible().unwrap().shapes["b"].shape.text,
+        "HALF WRITTEN"
     );
 }
 

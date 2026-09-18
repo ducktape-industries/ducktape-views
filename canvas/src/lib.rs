@@ -402,7 +402,7 @@ pub enum Message {
     Retry,
     DiscardPending,
     /// The one thing to be done about words that reached no card: put them on
-    /// a new one where the old card stood.
+    /// a new one.
     KeepLostWords,
 }
 impl BoardsView {
@@ -699,13 +699,13 @@ impl BoardsView {
                 // somebody else removed comes back acknowledged exactly like
                 // one that landed. It landed nowhere: say so, rather than let
                 // the chip call it saved.
-                let landed_nowhere =
-                    acknowledged
-                        .as_ref()
-                        .zip(before)
-                        .and_then(|(operation, before)| {
-                            went_nowhere(operation, &before, &self.settled()?)
-                        });
+                let landed_nowhere = acknowledged.as_ref().and_then(|operation| {
+                    let id = went_nowhere(operation, &self.settled()?)?;
+                    let draft = written(operation)
+                        .filter(|(card, _)| *card == id)
+                        .map(|(_, draft)| draft);
+                    self.what_did_not_land(before.as_ref(), id, draft)
+                });
                 if let Some(card) = landed_nowhere {
                     self.keep_the_words_that_did_not_land(card);
                 }
@@ -799,15 +799,13 @@ impl BoardsView {
                     wide: None,
                 });
             }
-            // No card to put the draft back into, so the words are kept beside
-            // the board instead — in the card's own place, which `before` still
-            // has even though the fresh board does not.
+            // No card to put the draft back into, so the words are kept
+            // beside the board instead — in the card's own place when this
+            // view still knows it, and where a new card goes when the removal
+            // arrived first and took that with it.
             None => {
-                if let Some(place) = before.and_then(|board| board.shapes.get(card).cloned()) {
-                    self.keep_the_words_that_did_not_land(Shape {
-                        text: draft.to_owned(),
-                        ..place.shape
-                    });
+                if let Some(kept) = self.what_did_not_land(before.as_ref(), card, Some(draft)) {
+                    self.keep_the_words_that_did_not_land(kept);
                 }
             }
         }
@@ -837,12 +835,7 @@ impl BoardsView {
         self.delivery = Delivery::Idle;
         self.on_read(epoch, id, reading);
         let kept = match refused.as_ref().and_then(written) {
-            Some((card, draft)) => before
-                .and_then(|board| board.shapes.get(card).cloned())
-                .map(|place| Shape {
-                    text: draft.to_owned(),
-                    ..place.shape
-                }),
+            Some((card, draft)) => self.what_did_not_land(before.as_ref(), card, Some(draft)),
             // An edit carrying no words of its own, with an editor open when
             // the board went: `on_read` has already left that draft here, by
             // the same rule and in the same place.
@@ -1102,6 +1095,43 @@ impl BoardsView {
             self.inline = None;
         }
     }
+    /// Work of ours that reached no card, as it should be put back down: in
+    /// the card's own place when this view still knows it — `before` is the
+    /// board as our own edits left it — and otherwise in a new card's, the
+    /// middle of what the writer is looking at.
+    ///
+    /// The place is the one part of this that a race can take away. The
+    /// removal arriving on its own read BEFORE the answer to our edit leaves
+    /// `before` without the card as surely as the fresh board is without it,
+    /// and a place nobody can look up any more is no reason to drop words that
+    /// nobody but this writer has ever had. Nothing is kept only when there is
+    /// neither place nor words: a move or a colour that reached a card already
+    /// gone leaves nothing to put down anywhere.
+    fn what_did_not_land(
+        &self,
+        before: Option<&Board>,
+        id: &str,
+        draft: Option<&str>,
+    ) -> Option<Shape> {
+        let place = before
+            .and_then(|board| board.shapes.get(id))
+            .map(|placed| placed.shape.clone());
+        match (place, draft) {
+            (Some(place), None) => Some(place),
+            (Some(place), Some(draft)) => Some(Shape {
+                text: draft.to_owned(),
+                ..place
+            }),
+            (None, Some(draft)) => {
+                let middle = self.world([self.viewport[0] / 2., self.viewport[1] / 2.]);
+                Some(Shape {
+                    text: draft.to_owned(),
+                    ..self.creation_shape(Kind::Note, middle, middle)
+                })
+            }
+            (None, None) => None,
+        }
+    }
     /// Work of ours that reached no card: the words in an editor whose card
     /// went, or an edit acknowledged against a card that had already gone.
     /// Both are said out loud with the words quoted — the card they belong to
@@ -1117,10 +1147,11 @@ impl BoardsView {
         };
         self.lost = Some(card);
     }
-    /// The kept words, put down on a new card where the old one stood. They go
-    /// through the same minting every other new shape does, so the board names
-    /// it and undo holds it — and the banner lets go of them only once that
-    /// edit is on the board, so a mint that fails leaves them where they are.
+    /// The kept words, put down on a new card in the place they were kept in.
+    /// They go through the same minting every other new shape does, so the
+    /// board names it and undo holds it — and the banner lets go of them only
+    /// once that edit is on the board, so a mint that fails leaves them where
+    /// they are.
     fn on_keep_lost_words(&mut self) -> Task<Message> {
         let Some(card) = self.lost.clone() else {
             return Task::none();
@@ -1342,18 +1373,16 @@ fn written(operation: &Operation) -> Option<(&str, &str)> {
             _ => None,
         })
 }
-/// The card an acknowledged operation edited that the board no longer has, as
-/// our own edits last left it — our words and its place still in it.
+/// The card an acknowledged operation edited that the board no longer has.
 ///
 /// The module treats an edit to a missing shape as a no-op and answers `Ok`,
 /// so nothing downstream can tell an edit that landed from one that reached
 /// a card somebody else had already removed. This is where they part.
-fn went_nowhere(operation: &Operation, before: &Board, after: &Board) -> Option<Shape> {
-    let id = shape_changes(operation)
+fn went_nowhere<'a>(operation: &'a Operation, after: &Board) -> Option<&'a str> {
+    shape_changes(operation)
         .iter()
         .filter_map(edited)
-        .find(|id| !after.shapes.contains_key(*id))?;
-    Some(before.shapes.get(id)?.shape.clone())
+        .find(|id| !after.shapes.contains_key(*id))
 }
 fn inverse(board: &Board, change: &Change) -> Vec<Change> {
     match change {
