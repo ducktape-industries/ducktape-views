@@ -53,8 +53,14 @@ fn the_nodes_standing_is_the_accounts_only_when_it_holds_the_nodes_key() {
         label: "laptop".into(),
     };
     assert!(!account_holds_node_key("ab", "cd", &[]), "a remote node");
-    assert!(account_holds_node_key("ab", "ab", &[]), "the seat is the node's key");
-    assert!(account_holds_node_key("ab", "cd", &[laptop]), "an account key");
+    assert!(
+        account_holds_node_key("ab", "ab", &[]),
+        "the seat is the node's key"
+    );
+    assert!(
+        account_holds_node_key("ab", "cd", &[laptop]),
+        "an account key"
+    );
     assert!(!account_holds_node_key("", "", &[]), "no node read yet");
 }
 
