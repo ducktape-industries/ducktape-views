@@ -1535,6 +1535,10 @@ pub enum OutputConnection {
     #[default]
     Connecting,
     Connected,
+    /// The node will not let this key watch the run. A state of the reader,
+    /// not of the connection, so nothing retries it; the node's sentence
+    /// names who may watch.
+    Refused(String),
     Failed(String),
 }
 
@@ -1563,6 +1567,7 @@ impl LiveRun {
             OutputConnection::Failed(_) => {
                 "Run output could not be connected. See the error above."
             }
+            OutputConnection::Refused(_) => "This run's output is not yours to watch.",
             OutputConnection::Connected if !self.trace.is_empty() => {
                 "This output contains no thinking or tool steps. Raw events are available in the Raw tab."
             }
@@ -1967,14 +1972,22 @@ fn fold_output(run: &mut LiveRun, topic: &str, frame: host::Answer) {
     let bytes = match frame {
         Ok(bytes) => bytes,
         Err(refusal) => {
-            run.connection =
-                OutputConnection::Failed(clip(&refusal.sentence, MAX_TRACE_EVENT_BYTES));
+            let sentence = clip(&refusal.sentence, MAX_TRACE_EVENT_BYTES);
+            // `unauthorized`: the kernel's class for an upgrade the node
+            // refused with 401 or 403 — this key may not hear the run
+            run.connection = match refusal.reason.as_str() {
+                "unauthorized" => OutputConnection::Refused(sentence),
+                _ => OutputConnection::Failed(sentence),
+            };
             run.control = None;
             return;
         }
     };
     if bytes.is_empty() {
-        if !matches!(run.connection, OutputConnection::Failed(_)) {
+        if !matches!(
+            run.connection,
+            OutputConnection::Failed(_) | OutputConnection::Refused(_)
+        ) {
             run.connection = OutputConnection::Failed(
                 "The run output connection closed. Reconnect to continue receiving updates.".into(),
             );
@@ -1992,7 +2005,12 @@ fn fold_output(run: &mut LiveRun, topic: &str, frame: host::Answer) {
         let detail = value["detail"]
             .as_str()
             .unwrap_or("The node refused this run output subscription.");
-        run.connection = OutputConnection::Failed(clip(detail, MAX_TRACE_EVENT_BYTES));
+        let detail = clip(detail, MAX_TRACE_EVENT_BYTES);
+        // `forbidden`: the topic exists and this caller may not hold it
+        run.connection = match value["code"] == "forbidden" {
+            true => OutputConnection::Refused(detail),
+            false => OutputConnection::Failed(detail),
+        };
         run.control = None;
         return;
     }
@@ -2814,19 +2832,15 @@ mod process_tests {
             &mut run,
             topic,
             Err(host::Refusal::new(
-                "unauthorized",
-                "HTTP error: 403 Forbidden",
+                "stream_open_failed",
+                "could not open the node stream: connection reset",
             )),
         );
-        assert_eq!(
-            run.connection,
-            OutputConnection::Failed("HTTP error: 403 Forbidden".into())
-        );
+        let failed =
+            OutputConnection::Failed("could not open the node stream: connection reset".into());
+        assert_eq!(run.connection, failed);
         fold_output(&mut run, topic, Ok(Vec::new()));
-        assert_eq!(
-            run.connection,
-            OutputConnection::Failed("HTTP error: 403 Forbidden".into())
-        );
+        assert_eq!(run.connection, failed);
         let snapshot = json!({"type":"run_control_snapshot","topic":topic,"control":{"turn":"a","steers":true}});
         fold_output(&mut run, topic, Ok(serde_json::to_vec(&snapshot).unwrap()));
         assert_eq!(run.connection, OutputConnection::Connected);
@@ -2838,6 +2852,41 @@ mod process_tests {
             OutputConnection::Failed("not_this_runs_reader".into())
         );
         assert!(run.control.is_none());
+    }
+
+    /// Who may watch is decided by the node, on stable tokens only: the
+    /// stream's `forbidden` code in band, the kernel's `unauthorized` class
+    /// at the upgrade. Either is the reader's state and the close after it
+    /// does not turn it back into a broken connection.
+    #[test]
+    fn a_reader_the_node_refuses_is_refused_not_failed() {
+        let topic = "run-output:test";
+        let mut run = LiveRun::default();
+        let forbidden =
+            json!({"type":"error","topic":topic,"code":"forbidden","detail":"only the requester"});
+        fold_output(&mut run, topic, Ok(serde_json::to_vec(&forbidden).unwrap()));
+        assert_eq!(
+            run.connection,
+            OutputConnection::Refused("only the requester".into())
+        );
+        fold_output(&mut run, topic, Ok(Vec::new()));
+        assert_eq!(
+            run.connection,
+            OutputConnection::Refused("only the requester".into())
+        );
+        let mut run = LiveRun::default();
+        fold_output(
+            &mut run,
+            topic,
+            Err(host::Refusal::new("unauthorized", "only the requester")),
+        );
+        assert_eq!(
+            run.connection,
+            OutputConnection::Refused("only the requester".into())
+        );
+        let other = json!({"type":"error","topic":topic,"code":"unavailable","detail":"try later"});
+        fold_output(&mut run, topic, Ok(serde_json::to_vec(&other).unwrap()));
+        assert_eq!(run.connection, OutputConnection::Failed("try later".into()));
     }
 
     #[test]
