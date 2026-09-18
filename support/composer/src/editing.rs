@@ -25,7 +25,7 @@ pub(crate) fn selection(text: &str, cursor: wire::EditorCursor) -> Range<usize> 
 fn markers(tag: &str) -> Option<(&'static str, &'static str)> {
     match tag {
         "bold" => Some(("**", "**")),
-        "italic" => Some(("_", "_")),
+        "italic" => Some(("*", "*")),
         "code" => Some(("```\n", "\n```")),
         "quote" => Some(("> ", "")),
         _ => None,
