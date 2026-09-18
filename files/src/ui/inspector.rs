@@ -324,8 +324,8 @@ impl FilesView {
             return (provenance.error.clone(), "".into());
         }
         let found = !provenance.snapshot.id.is_empty();
-        match found {
-            true => (
+        match (found, provenance.rooted) {
+            (true, _) => (
                 format!(
                     "{} ({})",
                     crate::host::height_label(provenance.snapshot.height),
@@ -333,7 +333,10 @@ impl FilesView {
                 ),
                 provenance.snapshot.author.clone(),
             ),
-            false => (
+            // the walk reached the first snapshot without finding the path:
+            // no snapshot holds it, so there is no change to name
+            (false, true) => ("unknown".into(), "".into()),
+            (false, false) => (
                 format!("earlier than the last {} snapshots", provenance.searched),
                 "".into(),
             ),

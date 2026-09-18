@@ -161,6 +161,14 @@ fn read(text: &str) -> Vec<u8> {
         .into_bytes()
 }
 
+/// The `stat` reply for a path the snapshot holds; a path it does not hold
+/// is `null`.
+fn stat_entry(path: &str) -> Vec<u8> {
+    serde_json::json!({ "path": path, "kind": "file", "size": 1, "object": "aa" })
+        .to_string()
+        .into_bytes()
+}
+
 /// The subscriptions a connected view holds: the session push it was given
 /// at boot, and the `rpc.live` it keeps on the files plane.
 struct Held {
@@ -407,8 +415,8 @@ fn a_click_chooses_and_a_double_click_opens_a_directory() {
     let (frame, _held) = connected_with_listing();
     let frame = tick_native(press(&frame, "Folder docs"));
     assert!(
-        frame.requests.is_empty(),
-        "choosing a folder reads nothing: {:?}",
+        files_gets(&frame, "ls").is_empty(),
+        "choosing a folder lists nothing: {:?}",
         frame.requests
     );
     assert!(has_text(&frame, "/shared/docs"), "{:?}", texts(&frame));
@@ -572,15 +580,21 @@ fn a_chosen_file_reads_the_snapshot_it_will_save_against() {
     assert!(has_text(&frame, "Reading the file…"), "{:?}", texts(&frame));
     let (_, params) = files_get(&frame, "refs");
     assert_eq!(params, serde_json::json!({}));
+    // Get Info's walk, on a history one snapshot deep: the first snapshot
+    // has no parent to diff against, so it is asked whether it HOLDS the path
+    let probe = files_get(&frame, "stat").0.id;
     let head = files_get(&frame, "refs").0.id;
-    let frame = tick_native(vec![answer(head, &refs())]);
+    let frame = tick_native(vec![
+        answer(head, &refs()),
+        answer(probe, &stat_entry("/shared/README.md")),
+    ]);
     let (_, params) = files_get(&frame, "read");
     assert_eq!(params["path"], "/shared/README.md");
     assert_eq!(params["snapshot"], "cc".repeat(32));
     assert_eq!(params["len"], 65_536);
     let page = files_get(&frame, "read").0.id;
     let frame = tick_native(vec![answer(page, &read("# Hello"))]);
-    // the first snapshot has no parent and touched everything it holds
+    // the first snapshot holds it, so it is the modification
     for expected in ["Modified", "h 84,912 (s1)", "Author", "acct:9"] {
         assert!(
             has_text(&frame, expected),
@@ -590,10 +604,18 @@ fn a_chosen_file_reads_the_snapshot_it_will_save_against() {
     }
 }
 
-/// The snapshot that last touched a path is found by diffing each snapshot
-/// against its parent under that prefix, newest first.
-#[test]
-fn get_info_walks_the_history_for_the_last_change() {
+/// Two snapshots: the first commit and one on top of it.
+fn two_snapshots() -> Vec<u8> {
+    serde_json::json!({ "snapshots": [
+        { "id": "s2", "parent": "s1", "author": { "Account": 4 }, "height": 90_000, "message": "later" },
+        { "id": "s1", "parent": null, "author": { "Account": 9 }, "height": 84_912, "message": "first" },
+    ]})
+    .to_string()
+    .into_bytes()
+}
+
+/// Boots onto `/shared` with the two-snapshot history behind it.
+fn connected_with_two_snapshots() -> Frame {
     let frame = boot();
     let session_id = request(&frame, "files.props").id;
     let frame = tick_native(vec![item(session_id, &session(true))]);
@@ -602,15 +624,15 @@ fn get_info_walks_the_history_for_the_last_change() {
     let home = ls_of(&frame, "/home").0.id;
     let frame = tick_native(vec![answer(home, &homes())]);
     let snapshots = files_get(&frame, "history").0.id;
-    let frame = tick_native(vec![answer(
-        snapshots,
-        serde_json::json!({ "snapshots": [
-            { "id": "s2", "parent": "s1", "author": { "Account": 4 }, "height": 90_000, "message": "later" },
-            { "id": "s1", "parent": null, "author": { "Account": 9 }, "height": 84_912, "message": "first" },
-        ]})
-        .to_string()
-        .as_bytes(),
-    )]);
+    tick_native(vec![answer(snapshots, &two_snapshots())])
+}
+
+/// The snapshot that last touched a path is found by diffing each snapshot
+/// against its parent under that prefix, newest first: the newest snapshot
+/// whose diff carries the path is the one Get Info names.
+#[test]
+fn get_info_names_the_snapshot_that_changed_the_path() {
+    let frame = connected_with_two_snapshots();
     let frame = tick_native(press(&frame, "Folder docs"));
     assert!(has_text(&frame, "Looking…"), "{:?}", texts(&frame));
     let (walk, params) = files_get(&frame, "diff");
@@ -619,15 +641,75 @@ fn get_info_walks_the_history_for_the_last_change() {
     assert_eq!(params["prefix"], "/shared/docs");
     let frame = tick_native(vec![answer(
         walk.id,
-        serde_json::json!({ "entries": [] }).to_string().as_bytes(),
+        serde_json::json!({ "entries": [{ "path": "/shared/docs/plan.md", "kind": "added" }] })
+            .to_string()
+            .as_bytes(),
     )]);
     assert!(
         !has_request(&frame, "rpc.query"),
-        "the first snapshot needs no diff: {:?}",
+        "the walk stops at the snapshot that changed it: {:?}",
         frame.requests
     );
+    assert!(has_text(&frame, "h 90,000 (s2)"), "{:?}", texts(&frame));
+    assert!(has_text(&frame, "acct:4"), "{:?}", texts(&frame));
+}
+
+/// The first snapshot has no parent to diff against, so the walk asks
+/// whether it HOLDS the path: a path it holds is the first commit's, named
+/// with its author.
+#[test]
+fn get_info_walks_the_history_for_the_last_change() {
+    let frame = connected_with_two_snapshots();
+    let frame = tick_native(press(&frame, "Folder docs"));
+    assert!(has_text(&frame, "Looking…"), "{:?}", texts(&frame));
+    let walk = files_get(&frame, "diff").0.id;
+    let frame = tick_native(vec![answer(
+        walk,
+        serde_json::json!({ "entries": [] }).to_string().as_bytes(),
+    )]);
+    let (probe, params) = files_get(&frame, "stat");
+    assert_eq!(params["path"], "/shared/docs");
+    assert_eq!(
+        params["snapshot"], "s1",
+        "the first snapshot is asked at itself"
+    );
+    let frame = tick_native(vec![answer(probe.id, &stat_entry("/shared/docs"))]);
     assert!(has_text(&frame, "h 84,912 (s1)"), "{:?}", texts(&frame));
     assert!(has_text(&frame, "acct:9"), "{:?}", texts(&frame));
+}
+
+/// A path NO snapshot holds is nobody's change: the first snapshot does not
+/// hold it either, so Get Info says the modification is unknown and names no
+/// author — never the network's first commit and whoever signed it.
+#[test]
+fn get_info_on_a_path_no_snapshot_holds_names_no_snapshot() {
+    let (_frame, held) = connected_with_listing();
+    // a duck:// link onto a path that is not there: the directory refuses,
+    // and the address itself is what the inspector describes
+    let frame = tick_native(vec![item(
+        held.session,
+        &routed_session(true, "/shared/nowhere/missing.txt", 1),
+    )]);
+    let (probe, params) = files_get(&frame, "stat");
+    assert_eq!(params["path"], "/shared/nowhere/missing.txt");
+    assert_eq!(params["snapshot"], "s1");
+    let probe = probe.id;
+    let ls = ls_of(&frame, "/shared/nowhere").0.id;
+    let frame = tick_native(vec![
+        refuse(ls, "files: path not found"),
+        answer(probe, b"null"),
+    ]);
+    assert!(has_text(&frame, "unknown"), "{:?}", texts(&frame));
+    assert!(
+        !has_text(&frame, "h 84,912 (s1)"),
+        "the first snapshot did not modify a path it does not hold: {:?}",
+        texts(&frame)
+    );
+    assert!(
+        !has_text(&frame, "acct:9"),
+        "and nobody authored it: {:?}",
+        texts(&frame)
+    );
 }
 
 /// A name typed into the New folder prompt leaves as a duckfs commit the

@@ -44,11 +44,14 @@ impl Preview {
 }
 
 /// The snapshot that last touched the chosen path, once the walk answers.
+/// `rooted` says the walk reached the first snapshot, so a walk that found
+/// nothing found nothing anywhere.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Provenance {
     pub path: String,
     pub snapshot: FsSnapshot,
     pub searched: i64,
+    pub rooted: bool,
     pub answered: bool,
     pub error: String,
 }
@@ -374,7 +377,7 @@ impl FilesView {
     pub(crate) const PREFERRED_WINDOW_SIZE: &'static str = "none";
     /// This state's layout, digested — `snapshot_schema` holds it here.
     pub(crate) const SNAPSHOT_SCHEMA: &'static str =
-        "90dd66a8f7aae8d943bfe74f65272b4f658d0db93169eddf128d6fe260c23969";
+        "3639db4b1965424044c39d8b5b983d1f6b31298d4cccbe4b12a1e7a9ab475aa7";
 }
 
 impl FilesView {
