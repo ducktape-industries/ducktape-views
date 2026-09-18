@@ -565,3 +565,10 @@ fn a_code_ballots_view_can_be_tried_and_left_from_its_card() {
     assert!(!has_text(&frame, "On the ballot"), "{:?}", texts(&frame));
     assert!(!has_text(&frame, "Try this view"), "{:?}", texts(&frame));
 }
+
+/// `tick_native` asserts every frame it returns; this reads the register
+/// from boot, the state that holds the view's controls.
+#[test]
+fn accessibility_the_register_names_its_controls() {
+    connected_with_register();
+}

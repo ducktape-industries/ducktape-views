@@ -176,7 +176,12 @@ impl ExplorerView {
             let Node::Button { label, .. } = &mut button else {
                 unreachable!()
             };
-            *label = Some("Inspect block".into());
+            // The row's own words, so each row reads apart from the next.
+            *label = Some(format!(
+                "Block {}, {}",
+                block.height,
+                host::plural(block.op_count, "op", "ops")
+            ));
             rows.push(button);
         }
         if rows.is_empty() {

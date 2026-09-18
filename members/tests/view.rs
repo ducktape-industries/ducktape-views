@@ -517,3 +517,12 @@ fn a_member_this_node_has_no_link_to_is_not_called_offline() {
         assert!(!tree.contains(word), "{word:?} is still drawn: {tree}");
     }
 }
+
+/// `tick_native` asserts every frame it returns; this walks the roster and
+/// a record, seated and not, the states that hold the view's controls.
+#[test]
+fn accessibility_the_roster_and_a_record_name_their_controls() {
+    opened(true, THIS_NODE);
+    opened(true, "Reviewer Bot");
+    opened(false, RESIDENT);
+}

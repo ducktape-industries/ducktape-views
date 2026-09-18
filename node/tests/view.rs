@@ -852,3 +852,14 @@ fn a_seat_without_administration_is_told_the_retune_is_closed() {
     };
     assert!(on_press.is_none(), "the retune is closed to this seat");
 }
+
+/// `tick_native` asserts every frame it returns; this walks every tab,
+/// seated and not, the states that hold the view's controls.
+#[test]
+fn accessibility_every_node_tab_names_its_controls() {
+    connected_as(false);
+    let (frame, _) = connected();
+    let (frame, _) = settle(tick_native(press(&frame, "Node permissions")));
+    let (frame, _) = settle(tick_native(press(&frame, "Node modules")));
+    settle(tick_native(press(&frame, "Node activity")));
+}

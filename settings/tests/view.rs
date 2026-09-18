@@ -1162,3 +1162,11 @@ fn the_appearance_choice_offers_system_and_checks_the_current_mode() {
         ]
     );
 }
+
+/// `tick_native` asserts every frame it returns; this draws all four panes
+/// connected, the states that hold the view's controls.
+#[test]
+fn accessibility_every_settings_pane_names_its_controls() {
+    let (frame, _, _) = connected(&facts(), 2);
+    every_pane(frame);
+}

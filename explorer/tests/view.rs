@@ -488,7 +488,7 @@ fn unavailable_sources_do_not_claim_that_nothing_matched() {
 #[test]
 fn an_ops_hash_reads_prefixed_and_copies_bare() {
     let (frame, _live) = connected_with_ledger();
-    let frame = tick_native(press(&frame, "Inspect block"));
+    let frame = tick_native(press(&frame, "Block 84912, 1 op"));
     assert!(has_text(&frame, "0xab12cd34"), "{:?}", texts(&frame));
     for expected in ["Dispatch", "chat", "1 message, 0 events"] {
         assert!(
@@ -531,7 +531,7 @@ fn an_ops_payload_reads_as_labelled_fields_not_json() {
     }])
     .to_string();
     let frame = tick_native(vec![answer(feed, rows.as_bytes())]);
-    let frame = tick_native(press(&frame, "Inspect block"));
+    let frame = tick_native(press(&frame, "Block 9, 1 op"));
     let shown = texts(&frame);
     for expected in [
         "put",
@@ -587,7 +587,7 @@ fn every_digest_reads_whole_and_hex_prefixed_and_copies_the_bare_key() {
         abbreviated.is_none(),
         "the list carries the whole hash, not {abbreviated:?}"
     );
-    let frame = tick_native(press(&frame, "Inspect block"));
+    let frame = tick_native(press(&frame, "Block 84912, 1 op"));
     for expected in [whole, format!("0x{commit}")] {
         assert!(has_text(&frame, &expected), "{:?}", texts(&frame));
     }
@@ -611,7 +611,7 @@ fn every_digest_reads_whole_and_hex_prefixed_and_copies_the_bare_key() {
 #[test]
 fn a_proposer_that_is_not_a_key_keeps_its_label() {
     let (frame, _live) = connected_with_ledger();
-    let frame = tick_native(press(&frame, "Inspect block"));
+    let frame = tick_native(press(&frame, "Block 84912, 1 op"));
     assert!(has_text(&frame, "system"), "{:?}", texts(&frame));
     assert!(!has_text(&frame, "0xsystem"), "{:?}", texts(&frame));
     let frame = tick_native(press(&frame, "Copy proposer"));
@@ -696,7 +696,7 @@ fn every_row_cell_keeps_one_line() {
     assert_eq!(wrapping_cells_in_fixed_rows(&ledger), [] as [String; 0]);
 
     // the details pane: its header bar and the op head line under it
-    let details = tick_native(press(&ledger, "Inspect block"));
+    let details = tick_native(press(&ledger, "Block 84912, 1 op"));
     assert!(has_text(&details, "Applied"), "{:?}", texts(&details));
     assert_eq!(wrapping_cells_in_fixed_rows(&details), [] as [String; 0]);
 
@@ -726,4 +726,13 @@ fn every_row_cell_keeps_one_line() {
     let results = empty_task_pages(tick_native(events));
     assert!(has_text(&results, "message 12"), "{:?}", texts(&results));
     assert_eq!(wrapping_cells_in_fixed_rows(&results), [] as [String; 0]);
+}
+
+/// `tick_native` asserts every frame it returns; this walks the ledger from
+/// boot to a block's details, the states that hold the view's controls.
+#[test]
+fn accessibility_the_ledger_and_a_block_name_their_controls() {
+    boot();
+    let (frame, _live) = connected_with_ledger();
+    tick_native(press(&frame, "Block 84912, 1 op"));
 }
