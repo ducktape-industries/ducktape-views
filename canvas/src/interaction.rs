@@ -1694,7 +1694,7 @@ impl BoardsView {
         // card can take a revision without taking a word — somebody recolouring
         // it does that — and the baseline is about the WORDS. With the card off
         // the board there is nothing to read it from, so the revision this
-        // writer did open on stands: the module answers `text_target_gone` to
+        // writer did open on stands: the module answers `TARGET_GONE` to
         // that, which is the honest answer and not a revision we invented.
         let revision = record.map_or(inline.revision, |r| r.revision);
         // Saving writes the card's WHOLE text, so those words go with no trace

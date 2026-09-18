@@ -2226,7 +2226,7 @@ fn a_close_refused_as_stale_hands_the_draft_back_with_their_words_beside_it() {
     view.on_delivered(
         0,
         "room".into(),
-        Err(refusal("stale_text", "THEIRS")),
+        Err(refusal(STALE, "THEIRS")),
         read(theirs),
     );
     // The refused edit leaves the queue: nothing can come of it as written, and
@@ -2274,10 +2274,7 @@ fn a_close_refused_onto_a_card_that_is_gone_keeps_the_words() {
     view.on_delivered(
         0,
         "room".into(),
-        Err(refusal(
-            "text_target_gone",
-            "That card is no longer on the board.",
-        )),
+        Err(refusal(TARGET_GONE, "That card is no longer on the board.")),
         read(theirs),
     );
     assert!(view.pending.is_empty(), "the refused edit is still queued");
@@ -2325,10 +2322,7 @@ fn a_close_refused_after_the_delete_already_arrived_keeps_the_words() {
     view.on_delivered(
         0,
         "room".into(),
-        Err(refusal(
-            "text_target_gone",
-            "That card is no longer on the board.",
-        )),
+        Err(refusal(TARGET_GONE, "That card is no longer on the board.")),
         read(theirs),
     );
     assert!(view.pending.is_empty(), "the refused edit is still queued");
@@ -2425,7 +2419,7 @@ fn an_edit_refused_because_the_board_is_gone_leaves_the_writer_at_the_list() {
     view.on_delivered(
         0,
         "room".into(),
-        Err(refusal("board_gone", "That board is no longer here.")),
+        Err(refusal(NOT_FOUND, "That board is no longer here.")),
         Ok(host::Reading {
             catalog: elsewhere.clone(),
             board: None,
@@ -2506,7 +2500,7 @@ fn an_edit_refused_because_the_board_is_gone_leaves_the_writer_at_the_list() {
     moving.on_delivered(
         0,
         "room".into(),
-        Err(refusal("board_gone", "That board is no longer here.")),
+        Err(refusal(NOT_FOUND, "That board is no longer here.")),
         Ok(host::Reading {
             catalog: elsewhere,
             board: None,
@@ -2559,7 +2553,7 @@ fn a_board_removed_under_a_new_note_keeps_the_words_typed_into_it() {
     view.on_delivered(
         0,
         "room".into(),
-        Err(refusal("board_gone", "That board is no longer here.")),
+        Err(refusal(NOT_FOUND, "That board is no longer here.")),
         Ok(host::Reading {
             catalog: BTreeMap::new(),
             board: None,
