@@ -70,6 +70,26 @@ fn reads(frame: &Frame) -> Vec<String> {
     reads
 }
 
+/// The tasks status page this frame asks for, if it asks one.
+fn task_page(frame: &Frame) -> Option<(u64, String)> {
+    frame.requests.iter().find_map(|request| {
+        let ask: serde_json::Value = serde_json::from_slice(&request.payload).ok()?;
+        (request.kind == "rpc.view" && ask["target"] == "tasks").then(|| {
+            let status = ask["query"]["by_status"]["status"].as_str().unwrap_or_default();
+            (request.id, status.to_owned())
+        })
+    })
+}
+
+/// Answers the tasks leg's later status pages, empty: it reads one page at a
+/// time (#34), so each answer asks the next. The frame once none is asked.
+fn empty_task_pages(mut frame: Frame) -> Frame {
+    while let Some((id, _)) = task_page(&frame) {
+        frame = tick_native(vec![answer(id, br#"{"tasks":{"tasks":[]}}"#)]);
+    }
+    frame
+}
+
 /// One op-carrying block and one op-less follower boundary row, as
 /// `GET /v1/blocks` serves them.
 fn blocks() -> Vec<u8> {
@@ -189,10 +209,16 @@ fn a_block_and_a_refresh_both_re_read_the_window() {
 
 /// A SEARCH COSTS ITS SLOWEST SOURCE, NOT THEIR SUM. Nothing in the fan-out
 /// reads what another leg produced, and a module's first touch runs tens of
-/// seconds against the node client's ceiling — so every round trip the search
+/// seconds against the node client's ceiling — so every source the search
 /// opens with must be in flight AT ONCE. Observed from outside: the frame that
-/// carries the submit carries all eight reads (tasks walks three status
-/// pages), and none of them has been answered yet.
+/// carries the submit asks all six sources, and none of them has been
+/// answered yet.
+///
+/// BUT NO MORE INDEX VIEWS THAN THE NODE SERVES TOGETHER. The node runs four
+/// `rpc.view` reads at once and refuses the fifth with a 429; tasks' three
+/// status pages beside chat, pages and runs made six, and the refused page
+/// silenced Tasks on a node that answers each one (#34). Tasks walks its
+/// pages one after another.
 #[test]
 fn a_workspace_search_reaches_its_six_sources_together() {
     let (frame, _live) = connected_with_ledger();
@@ -216,8 +242,6 @@ fn a_workspace_search_reaches_its_six_sources_together() {
             "rpc.view pages",
             "rpc.view runs",
             "rpc.view tasks",
-            "rpc.view tasks",
-            "rpc.view tasks",
         ],
         "every source of a workspace search is asked at once: {:?}",
         frame.requests
@@ -227,6 +251,14 @@ fn a_workspace_search_reaches_its_six_sources_together() {
     let chat: serde_json::Value =
         serde_json::from_slice(&request(&frame, "rpc.view").payload).expect("a read decodes");
     assert_eq!(chat["query"]["search"]["text"], "needle");
+
+    let mut frame = frame;
+    let mut statuses = Vec::new();
+    while let Some((id, status)) = task_page(&frame) {
+        statuses.push(status);
+        frame = tick_native(vec![answer(id, br#"{"tasks":{"tasks":[]}}"#)]);
+    }
+    assert_eq!(statuses, ["open", "in_progress", "done"]);
 }
 
 #[test]
@@ -249,11 +281,15 @@ fn search_hits_name_the_page_author_and_room_once() {
         answer(request.id, reply.to_string().as_bytes())
     }).collect();
     let frame = tick_native(events);
+    let titles_read = frame
+        .requests
+        .iter()
+        .find(|request| request.kind == "rpc.view" && task_page(&frame).map(|(id, _)| id) != Some(request.id))
+        .expect("the page titles read")
+        .id;
+    empty_task_pages(frame);
     let titles = serde_json::json!({"pages": {"pages": [{"id": "page-qa", "title": "Named QA page"}], "has_more": false}});
-    let frame = tick_native(vec![answer(
-        request(&frame, "rpc.view").id,
-        titles.to_string().as_bytes(),
-    )]);
+    let frame = tick_native(vec![answer(titles_read, titles.to_string().as_bytes())]);
     let shown = texts(&frame);
     for expected in [
         "account 7",
@@ -302,7 +338,7 @@ fn an_empty_answer_belongs_to_its_submitted_query_and_can_be_cleared() {
             answer(request.id, reply.to_string().as_bytes())
         })
         .collect();
-    let frame = tick_native(events);
+    let frame = empty_task_pages(tick_native(events));
     assert!(
         has_text(&frame, "No matching results."),
         "{:?}",
@@ -357,7 +393,7 @@ fn a_search_that_lost_a_source_says_which_one_and_keeps_no_chip_for_it() {
         };
         events.push(answer(request.id, reply.to_string().as_bytes()));
     }
-    let frame = tick_native(events);
+    let frame = empty_task_pages(tick_native(events));
 
     for expected in [
         // the app's name directory does not cross the view wire, so a user
@@ -418,7 +454,7 @@ fn unavailable_sources_do_not_claim_that_nothing_matched() {
         .iter()
         .filter(|request| matches!(request.kind.as_str(), "rpc.query" | "rpc.view"))
         .collect();
-    assert_eq!(searches.len(), 8, "tasks reads three status pages");
+    assert_eq!(searches.len(), 6, "tasks reads one status page at a time");
     let failures = searches
         .into_iter()
         .map(|request| refuse(request.id, "unavailable"))
@@ -672,7 +708,7 @@ fn every_row_cell_keeps_one_line() {
             answer(request.id, reply.to_string().as_bytes())
         })
         .collect();
-    let results = tick_native(events);
+    let results = empty_task_pages(tick_native(events));
     assert!(has_text(&results, "message 12"), "{:?}", texts(&results));
     assert_eq!(wrapping_cells_in_fixed_rows(&results), [] as [String; 0]);
 }
