@@ -1801,7 +1801,7 @@ impl super::ChatView {
             "Members only: Off"
         };
         let mut children = vec![
-            native::text(format!("{key}/title"), "Create a channel"),
+            native::heading(format!("{key}/title"), "Create a channel"),
             field(
                 format!("{key}/name"),
                 "Channel name",
@@ -1846,10 +1846,12 @@ impl super::ChatView {
                 ),
             ],
         ));
-        Some(native::sized(
-            native::column(key, children),
-            Some(wire::Length::Fixed(480.)),
-            None,
-        ))
+        // the dialog chrome the other views' dialogs wear: a card, padded
+        let mut card = native::card(format!("{key}/card"), native::column(key, children));
+        if let wire::Node::Container { padding, width, .. } = &mut card {
+            *padding = Some(wire::Edges::all(20.));
+            *width = Some(wire::Length::Fixed(480.));
+        }
+        Some(card)
     }
 }

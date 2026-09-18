@@ -1294,6 +1294,46 @@ mod tests {
         assert_eq!(panes(&state), ["ChatView/chat/thread-pane"]);
     }
 
+    /// "Create a channel" was a bare column on the dimmed backdrop: no edge,
+    /// and its title and fields flush with its sides. It wears the card the
+    /// other views' dialogs do, padded, under a heading.
+    #[test]
+    fn the_create_a_channel_dialog_is_a_padded_card() {
+        let mut state = ChatView::state();
+        state.connected = true;
+        let _ = state.update(Message::ToggleChannelCreate);
+        let mut tree = state.view();
+        let mut card = None;
+        tree.for_each_mut(&mut |node| {
+            if let wire::Node::Container {
+                key,
+                padding,
+                border,
+                background,
+                content,
+                ..
+            } = node
+                && key == "ChatView/chat/create/card"
+            {
+                let title = match content.as_ref() {
+                    wire::Node::Linear { children, .. } => children.first().cloned(),
+                    _ => None,
+                };
+                card = Some((*padding, border.is_some(), background.is_some(), title));
+            }
+        });
+        let (padding, bordered, filled, title) = card.expect("the dialog is a card");
+        assert_eq!(padding, Some(wire::Edges::all(20.)));
+        assert!(bordered && filled, "the card has an edge on the backdrop");
+        assert_eq!(
+            title,
+            Some(native::heading(
+                "ChatView/chat/create/title",
+                "Create a channel"
+            ))
+        );
+    }
+
     #[test]
     fn every_thread_menu_mount_matches_its_focus_target() {
         let mut state = ChatView::state();
