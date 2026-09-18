@@ -218,7 +218,14 @@ impl super::ChatView {
                 Message::BackgroundFinished
             });
         }
-        self.host_error = crate::host::failure_note("Couldn’t read the session", &item.error);
+        // The session arrives with every block, so it takes back only a note
+        // it put up itself: another step's refusal stays until the reader
+        // moves on.
+        let session_note = crate::host::failure_note("Couldn’t read the session", &item.error);
+        if self.session_failed || !session_note.is_empty() {
+            self.host_error = session_note;
+        }
+        self.session_failed = !item.error.is_empty();
         if !(item.error).is_empty() {
             return ::ducktape_view_guest::Task::none();
         }
