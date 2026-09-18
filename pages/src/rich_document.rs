@@ -1023,6 +1023,40 @@ mod tests {
         }
     }
 
+    /// A mark the writer put on part of a snake_case word — "var" selected
+    /// in `my_var_name`, then Italic — is saved as `my_*var*_name`. The
+    /// underscores beside the fence stay letters, and the page reads back as
+    /// the page that was saved.
+    #[test]
+    fn a_mark_inside_a_snake_case_word_round_trips() {
+        let title = RichBlock {
+            kind: types::HEADING.into(),
+            text: "T".into(),
+            level: 1,
+            ..Default::default()
+        };
+        let line = RichBlock {
+            kind: types::PARAGRAPH.into(),
+            text: "my_var_name".into(),
+            marks: vec![RichMark {
+                start: 3,
+                end: 6,
+                kind: "italic".into(),
+                value: String::new(),
+            }],
+            ..Default::default()
+        };
+        let marked = RichDocument {
+            blocks: vec![title, line],
+            ..Default::default()
+        };
+        let (saved, cursor) = canonical(&marked).expect("marked snapshot");
+        assert_eq!(saved, "T\nmy_*var*_name");
+        let shown = presentation(&saved, cursor).document;
+        assert_eq!(shown.blocks[1].text, "my_var_name");
+        assert_eq!(shown.blocks[1].marks, marked.blocks[1].marks);
+    }
+
     #[test]
     fn the_canonical_text_round_trips_through_blocks() {
         let blocks = blocks_of(DOCUMENT);

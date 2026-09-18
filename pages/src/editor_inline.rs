@@ -74,7 +74,8 @@ const OPENERS: &[char] = &['*', '_', '~', '+', '=', '`', 'h', '@', '<'];
 
 /// Byte-ranged mirror of `chat::client::inline_spans`, minus its account
 /// tokens: bare `http(s)://` runs, then the fences above, then `@name`
-/// mentions; unmatched or empty fences stay plain. Ranges land on char
+/// mentions; unmatched or empty fences stay plain. Unlike chat, an underscore
+/// inside a word is a letter — see [`fenced`]. Ranges land on char
 /// boundaries by construction — the scanner only advances through
 /// `char_indices`.
 pub fn inline_marks(line: &str) -> Vec<(Range<usize>, Inline)> {
