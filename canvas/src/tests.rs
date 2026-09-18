@@ -429,6 +429,36 @@ fn editing_clicks_do_not_close_text_and_network_switch_preserves_the_draft() {
     assert!(view.session.chain.is_empty());
 }
 
+/// `view()` asserts every tree it renders; this walks the board through the
+/// states that hold its controls: the tool bar and islands, a selection's
+/// inspector, a card being written in, the menu, the board list and help.
+#[test]
+fn accessibility_every_board_state_names_its_controls() {
+    let mut view = BoardsView::boot().0;
+    view.catalog.insert("plans".into(), "Plans".into());
+    view.view();
+    let mut view = self::view();
+    view.catalog.insert("plans".into(), "Plans".into());
+    view.camera = [0., 0.];
+    card(&mut view, "a", 0);
+    view.view();
+    view.selected = ["a".into()].into();
+    view.view();
+    view.begin_text();
+    view.on_press(40., 30.);
+    assert!(view.inline.is_some());
+    view.view();
+    view.inline = None;
+    view.menu = Some([40., 30.]);
+    view.view();
+    view.menu = None;
+    view.board_picker = true;
+    view.view();
+    view.board_picker = false;
+    view.help = true;
+    view.view();
+}
+
 #[test]
 fn help_uses_the_shifted_slash_key_and_prevents_edits_behind_it() {
     let mut view = view();

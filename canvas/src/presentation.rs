@@ -445,6 +445,10 @@ impl BoardsView {
             let card = kit::sized(self.help_card(), Some(Length::Fixed(sheet)), None);
             stage = modal("boards/help-modal", stage, card, Message::Help);
         }
+        // Every tree the crate's own tests render is one assistive
+        // technology can read.
+        #[cfg(test)]
+        ducktape_view_guest::testing::assert_accessible(&stage);
         stage
     }
     /// The board's own menu, where the secondary button opened it: a backdrop
@@ -569,7 +573,14 @@ impl BoardsView {
         );
         // Inside the button only the name gives way; the ▾ is a word of its
         // own after it, so the ellipsis cannot take it.
-        if let Node::Button { content, width, .. } = &mut switcher {
+        if let Node::Button {
+            content,
+            width,
+            expanded,
+            ..
+        } = &mut switcher
+        {
+            *expanded = Some(open);
             let name = wide(kit::nowrap(kit::text("boards/switcher/name", title)));
             let caret = kit::nowrap(kit::text("boards/switcher/caret", "▾"));
             let label = kit::spaced(kit::row("boards/switcher/label", [name, caret]), 6.);
@@ -639,7 +650,7 @@ impl BoardsView {
     /// Bottom-left: the camera, then history, then snapping.
     fn camera_island(&self) -> Node {
         let controls = [
-            action("boards/zoom-out", "−", "Zoom out", Message::Zoom(0.8), true),
+            glyph("boards/zoom-out", "−", "Zoom out", Message::Zoom(0.8)),
             kit::sized(
                 action(
                     "boards/zoom",
@@ -651,7 +662,7 @@ impl BoardsView {
                 Some(Length::Fixed(ZOOM_READOUT)),
                 None,
             ),
-            action("boards/zoom-in", "+", "Zoom in", Message::Zoom(1.25), true),
+            glyph("boards/zoom-in", "+", "Zoom in", Message::Zoom(1.25)),
             action("boards/fit", "Fit", "Fit board · F", Message::Fit, true),
             rule("boards/camera-rule-a"),
             icon_button(
@@ -2931,6 +2942,14 @@ fn button(
 fn action(key: &str, label: &str, hint: &str, message: Message, enabled: bool) -> Node {
     button(key, label, hint, message, enabled, ButtonPreset::Subtle)
 }
+/// A quiet action whose face is a glyph: it is named by what it does.
+fn glyph(key: &str, face: &str, name: &str, message: Message) -> Node {
+    let mut node = action(key, face, name, message, true);
+    if let Node::Button { label, .. } = &mut node {
+        *label = Some(name.into());
+    }
+    node
+}
 /// A quiet action that reads as on or off.
 fn checked(key: &str, label: &str, hint: &str, message: Message, on: bool) -> Node {
     let mut node = action(key, label, hint, message, true);
@@ -3119,6 +3138,7 @@ fn tool_button_message(
     if let Node::Button {
         label: accessible,
         checked,
+        selected: chosen,
         width,
         height,
         padding,
@@ -3127,6 +3147,9 @@ fn tool_button_message(
     } = &mut node
     {
         *accessible = Some(label.into());
+        // One tool of many is in hand. The host paints a button's selection
+        // from `checked`, so it says so too.
+        *chosen = Some(selected);
         *checked = Some(selected);
         *width = Some(Length::Fixed(TOOL));
         *height = Some(Length::Fixed(TOOL));

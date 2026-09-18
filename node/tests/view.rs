@@ -8,7 +8,18 @@
 use ducktape_view_guest::testing::{answer, has_text, item, press, refuse, texts, type_into};
 use ducktape_view_guest::wire::{Event, Frame, Length, Node, Request, Wrapping};
 use node_view::host::{Copy, Session};
-use node_view::{boot_native, tick_native};
+use node_view::boot_native;
+
+/// The view's own tick, refusing a frame assistive technology cannot read:
+/// every tree these tests render is checked.
+fn tick_native(events: Vec<ducktape_view_guest::wire::Event>) -> ducktape_view_guest::wire::Frame {
+    let frame = node_view::tick_native(events);
+    frame
+        .root
+        .iter()
+        .for_each(ducktape_view_guest::testing::assert_accessible);
+    frame
+}
 use serde_json::{Value, json};
 
 // ---------- what the node answers ----------

@@ -9,7 +9,18 @@ use ducktape_view_guest::testing::{
 };
 use ducktape_view_guest::wire::{Event, Frame, Node, Request};
 use explorer_view::host::{Copy, Session};
-use explorer_view::{boot_native, tick_native};
+use explorer_view::boot_native;
+
+/// The view's own tick, refusing a frame assistive technology cannot read:
+/// every tree these tests render is checked.
+fn tick_native(events: Vec<ducktape_view_guest::wire::Event>) -> ducktape_view_guest::wire::Frame {
+    let frame = explorer_view::tick_native(events);
+    frame
+        .root
+        .iter()
+        .for_each(ducktape_view_guest::testing::assert_accessible);
+    frame
+}
 
 fn node_ending(frame: &Frame, suffix: &str) -> Node {
     fn find(node: &Node, suffix: &str) -> Option<Node> {
