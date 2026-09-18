@@ -298,7 +298,13 @@ impl FilesView {
             fact("size", "Size", size),
             fact("object", "Object", object),
         ];
+        // a fact nobody can name is "—" like its neighbours, never a blank
+        // row that reads as the value still on its way
         let (modified, author) = self.modified_line();
+        let author = match author.is_empty() {
+            true => "—".into(),
+            false => author,
+        };
         rows.push(fact("modified", "Modified", modified));
         rows.push(fact("author", "Author", author));
         native::padded(

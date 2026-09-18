@@ -228,6 +228,15 @@ fn node_ending(frame: &Frame, suffix: &str) -> Node {
         .unwrap_or_else(|| panic!("no node ending {suffix:?} in {:?}", keys(frame)))
 }
 
+/// What Get Info's Author row says. Read from the row itself: Size and Object
+/// may say "—" too, so the text alone could not tell whose "—" it is.
+fn author_row(frame: &Frame) -> String {
+    match node_ending(frame, "/author/value") {
+        Node::Text { content, .. } => content,
+        other => panic!("the Author value is not text: {other:?}"),
+    }
+}
+
 /// The events the host sends for a double-click on the row of `path`.
 fn double_click(frame: &Frame, path: &str) -> Vec<Event> {
     let Node::MouseArea {
@@ -635,6 +644,7 @@ fn get_info_names_the_snapshot_that_changed_the_path() {
     let frame = connected_with_two_snapshots();
     let frame = tick_native(press(&frame, "Folder docs"));
     assert!(has_text(&frame, "Looking…"), "{:?}", texts(&frame));
+    assert_eq!(author_row(&frame), "—", "no author named yet");
     let (walk, params) = files_get(&frame, "diff");
     assert_eq!(params["from"], "s1");
     assert_eq!(params["to"], "s2");
@@ -651,7 +661,7 @@ fn get_info_names_the_snapshot_that_changed_the_path() {
         frame.requests
     );
     assert!(has_text(&frame, "h 90,000 (s2)"), "{:?}", texts(&frame));
-    assert!(has_text(&frame, "acct:4"), "{:?}", texts(&frame));
+    assert_eq!(author_row(&frame), "acct:4");
 }
 
 /// The first snapshot has no parent to diff against, so the walk asks
@@ -709,6 +719,11 @@ fn get_info_on_a_path_no_snapshot_holds_names_no_snapshot() {
         !has_text(&frame, "acct:9"),
         "and nobody authored it: {:?}",
         texts(&frame)
+    );
+    assert_eq!(
+        author_row(&frame),
+        "—",
+        "no author reads like no size and no object, not as a blank row"
     );
 }
 
@@ -770,7 +785,7 @@ fn a_refused_write_is_shown_in_place_and_keeps_the_draft() {
     // the pane under the backdrop
     let refusal = node_ending(&frame, "/name-prompt/refusal");
     assert!(
-        matches!(&refusal, Node::Text { content, .. } if content == "the local user key is locked"),
+        matches!(&refusal, Node::Text { content, .. } if content == "the local user key is locked [module]"),
         "{refusal:?}"
     );
     assert!(
@@ -795,7 +810,7 @@ fn a_refused_write_is_shown_in_place_and_keeps_the_draft() {
     let frame = tick_native(vec![refuse(submit, "not a member")]);
     let refusal = node_ending(&frame, "/confirm-delete/refusal");
     assert!(
-        matches!(&refusal, Node::Text { content, .. } if content == "not a member"),
+        matches!(&refusal, Node::Text { content, .. } if content == "not a member [module]"),
         "{refusal:?}"
     );
     assert!(
@@ -846,7 +861,7 @@ fn a_choice_survives_a_refusal_and_a_page_not_yet_walked() {
     let frame = tick_native(vec![answer(snapshots, &history())]);
     assert!(has_text(
         &frame,
-        "Could not list this directory: files: busy"
+        "Could not list this directory: files: busy [module]"
     ));
     assert!(has_text(&frame, "/shared/big/zz.md"), "{:?}", texts(&frame));
 
@@ -973,14 +988,21 @@ fn a_folder_deletes_with_everything_in_it() {
 
 /// A listing the node refuses is a STATE the pane draws, with the way back
 /// beside it — never a loading word that stays. The write controls stay
-/// reachable.
+/// reachable. The refusal reads as the module's sentence with its token after
+/// it, the line duckfs prints; a reply the view could not decode is its own
+/// words and carries no token.
 #[test]
 fn a_failed_listing_is_a_plate_with_a_retry() {
     let frame = boot();
     let session_id = request(&frame, "files.props").id;
     let frame = tick_native(vec![item(session_id, &session(true))]);
     let ls = ls_of(&frame, "/shared").0.id;
-    let frame = tick_native(vec![refuse(ls, "files: path not found")]);
+    // the class the files module answers every query refusal under
+    let frame = tick_native(vec![Event::Response {
+        id: ls,
+        result: Err(wire::Refusal::new("files_query", "path not found: /shared")),
+        done: true,
+    }]);
     let home = ls_of(&frame, "/home").0.id;
     let frame = tick_native(vec![answer(home, &homes())]);
     let snapshots = files_get(&frame, "history").0.id;
@@ -988,7 +1010,7 @@ fn a_failed_listing_is_a_plate_with_a_retry() {
     assert!(
         has_text(
             &frame,
-            "Could not list this directory: files: path not found"
+            "Could not list this directory: path not found: /shared [files_query]"
         ),
         "{:?}",
         texts(&frame)
@@ -1005,6 +1027,24 @@ fn a_failed_listing_is_a_plate_with_a_retry() {
     assert!(
         has_text(&frame, "Shared"),
         "the sidebar is drawn from its own reads"
+    );
+
+    // an answer that is not the module's reply at all
+    let frame = tick_native(press(&frame, "Try again"));
+    let ls = ls_of(&frame, "/shared").0.id;
+    let frame = tick_native(vec![raw_answer(ls, b"not json")]);
+    let home = ls_of(&frame, "/home").0.id;
+    let frame = tick_native(vec![answer(home, &homes())]);
+    let snapshots = files_get(&frame, "history").0.id;
+    let frame = tick_native(vec![answer(snapshots, &history())]);
+    let undecoded = serde_json::from_slice::<serde_json::Value>(b"not json").unwrap_err();
+    assert!(
+        has_text(
+            &frame,
+            &format!("Could not list this directory: {undecoded}")
+        ),
+        "{:?}",
+        texts(&frame)
     );
 
     let frame = tick_native(press(&frame, "Try again"));
@@ -1172,7 +1212,10 @@ fn a_binary_file_and_a_refused_read_each_say_so_in_words() {
     let _settled = settle_workspace(&frame, "/shared", &listing());
     let frame = tick_native(vec![refuse(head, "not connected to a node")]);
     assert!(
-        has_text(&frame, "Could not read this file: not connected to a node"),
+        has_text(
+            &frame,
+            "Could not read this file: not connected to a node [module]"
+        ),
         "{:?}",
         texts(&frame)
     );
@@ -1658,7 +1701,10 @@ fn a_drop_builds_its_commit_in_the_guest_and_keeps_the_base_read_before_device_i
     let release = request(&frame, "fs.release");
     assert_eq!(release.payload, b"grant");
     let frame = tick_native(vec![raw_answer(release.id, b"")]);
-    assert!(has_text(&frame, "path changed since base snapshot"));
+    assert!(has_text(
+        &frame,
+        "path changed since base snapshot [module]"
+    ));
 }
 
 #[test]
