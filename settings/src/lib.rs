@@ -27,6 +27,10 @@ pub struct SettingsView {
     pub(crate) account_name: String,
     pub(crate) network_name: String,
     pub(crate) connected_rpc: String,
+    /// the node RPC facts (`host::Session::rpc_endpoint*`)
+    pub(crate) rpc_endpoint: String,
+    pub(crate) rpc_endpoint_override: String,
+    pub(crate) rpc_endpoint_refusal: String,
     pub(crate) account_ceremony_phase: String,
     pub(crate) account_ceremony_qr: String,
     pub(crate) account_ceremony_detail: String,
@@ -42,6 +46,7 @@ pub struct SettingsView {
     pub(crate) update_current: String,
     pub(crate) update_previous: String,
     pub(crate) update_staged_display: String,
+    pub(crate) update_refused: String,
     pub(crate) update_channel: String,
     pub(crate) update_checked: String,
     pub(crate) update_note: String,
@@ -58,6 +63,7 @@ pub struct SettingsView {
     pub(crate) account_key_draft: String,
     pub(crate) account_key_label_draft: String,
     pub(crate) account_join_draft: String,
+    pub(crate) rpc_endpoint_draft: String,
     pub(crate) host_error: String,
     key_password: String,
     settings_pane: SettingsPane,
@@ -105,6 +111,9 @@ pub enum Message {
     BindAccountJoinDraft(String),
     BindAccountKeyDraft(String),
     BindAccountKeyLabelDraft(String),
+    BindRpcEndpointDraft(String),
+    SaveRpcEndpoint,
+    ClearRpcEndpoint,
     /// Try the view a code ballot would install: `(module, hash hex)`.
     Taste(String, String),
     /// Back to the current view of `module`.
@@ -131,6 +140,9 @@ impl SettingsView {
             account_name: "".to_owned(),
             network_name: "".to_owned(),
             connected_rpc: "".to_owned(),
+            rpc_endpoint: "".to_owned(),
+            rpc_endpoint_override: "".to_owned(),
+            rpc_endpoint_refusal: "".to_owned(),
             account_ceremony_phase: "".to_owned(),
             account_ceremony_qr: "".to_owned(),
             account_ceremony_detail: "".to_owned(),
@@ -145,6 +157,7 @@ impl SettingsView {
             update_current: "".to_owned(),
             update_previous: "".to_owned(),
             update_staged_display: "".to_owned(),
+            update_refused: "".to_owned(),
             update_channel: "".to_owned(),
             update_checked: "".to_owned(),
             update_note: "".to_owned(),
@@ -161,6 +174,7 @@ impl SettingsView {
             account_key_draft: "".to_owned(),
             account_key_label_draft: "".to_owned(),
             account_join_draft: "".to_owned(),
+            rpc_endpoint_draft: "".to_owned(),
             host_error: "".to_owned(),
             key_password: String::new(),
             settings_pane: SettingsPane::General,
@@ -174,7 +188,7 @@ impl SettingsView {
     pub(crate) const PREFERRED_WINDOW_SIZE: &'static str = "none";
     /// This state's layout, digested — `snapshot_schema` holds it here.
     pub(crate) const SNAPSHOT_SCHEMA: &'static str =
-        "ce3410128672865555ecb44ee823284c572ef8294638ae4679c536dbcecd241b";
+        "cc2dbf236ab7e71a54f26dee0d2ec0275e86875d2f9c8f9b57cd544a16678ad3";
     pub(crate) fn snapshot(&self) -> Result<Vec<u8>, String> {
         wire::Snapshot {
             schema: Self::SNAPSHOT_SCHEMA.into(),
@@ -329,6 +343,9 @@ impl SettingsView {
             Message::BindAccountJoinDraft(value) => self.on_bind_account_join_draft(value),
             Message::BindAccountKeyDraft(value) => self.on_bind_account_key_draft(value),
             Message::BindAccountKeyLabelDraft(value) => self.on_bind_account_key_label_draft(value),
+            Message::BindRpcEndpointDraft(value) => self.on_bind_rpc_endpoint_draft(value),
+            Message::SaveRpcEndpoint => self.on_save_rpc_endpoint(),
+            Message::ClearRpcEndpoint => self.on_clear_rpc_endpoint(),
             Message::Taste(module, hash) => self.on_taste(module, hash),
             Message::Untaste(module) => self.on_untaste(module),
         }
@@ -358,6 +375,15 @@ impl SettingsView {
         self.account_name = next.account_name.to_owned();
         self.network_name = next.network_name.to_owned();
         self.connected_rpc = next.connected_rpc.to_owned();
+        // the URL draft follows the stored one whenever it moves — seeded on
+        // the first session, replaced when a save or a clear lands — and is
+        // kept while it does not, so a refused URL stays beside its refusal
+        if next.rpc_endpoint_override != self.rpc_endpoint_override {
+            self.rpc_endpoint_draft = next.rpc_endpoint_override.to_owned();
+        }
+        self.rpc_endpoint = next.rpc_endpoint.to_owned();
+        self.rpc_endpoint_override = next.rpc_endpoint_override.to_owned();
+        self.rpc_endpoint_refusal = next.rpc_endpoint_refusal.to_owned();
         self.account_ceremony_phase = next.account_ceremony_phase.to_owned();
         self.account_ceremony_qr = next.account_ceremony_qr.to_owned();
         self.account_ceremony_detail = next.account_ceremony_detail.to_owned();
@@ -371,6 +397,7 @@ impl SettingsView {
         self.update_current = next.update_current.to_owned();
         self.update_previous = next.update_previous.to_owned();
         self.update_staged_display = next.update_staged_display.to_owned();
+        self.update_refused = next.update_refused.to_owned();
         self.update_channel = next.update_channel.to_owned();
         self.update_checked = next.update_checked.to_owned();
         self.update_note = next.update_note.to_owned();
@@ -589,6 +616,18 @@ impl SettingsView {
     }
     fn on_bind_account_key_label_draft(&mut self, value: String) -> Task<Message> {
         self.account_key_label_draft = value;
+        Task::none()
+    }
+    fn on_bind_rpc_endpoint_draft(&mut self, value: String) -> Task<Message> {
+        self.rpc_endpoint_draft = value;
+        Task::none()
+    }
+    fn on_save_rpc_endpoint(&mut self) -> Task<Message> {
+        crate::host::set_endpoint(&self.rpc_endpoint_draft);
+        Task::none()
+    }
+    fn on_clear_rpc_endpoint(&mut self) -> Task<Message> {
+        crate::host::set_endpoint("");
         Task::none()
     }
 }
@@ -923,8 +962,10 @@ impl SettingsView {
     }
     /// The "Updates" group: what runs, what is staged, when the network was
     /// last asked, and the controls — a check, the restart into a staged
-    /// release, the rollback to the kept one. Without a launcher (`make dev`
-    /// runs the binary bare) it says so and offers nothing.
+    /// release, discarding it, the rollback to the kept one. A staged release
+    /// its qualify refused reads as refused, with the app's reason, and has
+    /// no restart. Without a launcher (`make dev` runs the binary bare) it
+    /// says so and offers nothing.
     fn updates_section(&self) -> wire::Node {
         use ducktape_view_guest::kit;
         let unavailable = self.update_state == "unavailable";
@@ -941,6 +982,7 @@ impl SettingsView {
             );
         }
         let staged = self.update_state == "staged";
+        let refused = staged && !self.update_refused.is_empty();
         let rollback_offered = !self.update_previous.is_empty() && self.update_state == "idle";
         let current = kit::kv(
             "settings/update-current-row",
@@ -964,25 +1006,46 @@ impl SettingsView {
         if staged {
             rows.push(kit::kv(
                 "settings/update-staged-row",
-                "Ready to install",
+                if refused {
+                    "Refused"
+                } else {
+                    "Ready to install"
+                },
                 kit::nowrap(kit::text(
                     "settings/update-staged",
                     &self.update_staged_display,
                 )),
             ));
         }
+        if refused {
+            rows.push(kit::kv(
+                "settings/update-refused-row",
+                "Reason",
+                kit::nowrap(kit::mono("settings/update-refused", &self.update_refused)),
+            ));
+        }
+        // the machine fetches while staged too: a newer release replaces it
         let mut actions = vec![settings_action(
             "settings/update-check",
             "Check now",
             Message::CheckForUpdate,
-            !self.update_busy && self.update_state == "idle",
+            !self.update_busy && (self.update_state == "idle" || staged),
         )];
-        if staged {
+        if staged && !refused {
             actions.push(settings_primary(
                 "settings/update-restart",
                 "Restart to update",
                 Message::RestartToUpdate,
                 true,
+            ));
+        }
+        // a roll-back from `staged` discards the staged release
+        if staged {
+            actions.push(settings_subtle(
+                "settings/update-discard",
+                &format!("Discard {}", self.update_staged_display),
+                Message::RollBackUpdate,
+                !self.update_busy,
             ));
         }
         if rollback_offered {
@@ -1055,6 +1118,60 @@ impl SettingsView {
             &self.network_name
         };
         let members = self.reading(&self.members_line, self.members_answered);
+        let rpc_endpoint = kit::kv(
+            "settings/node-rpc-row",
+            "Node RPC",
+            kit::wrapping(kit::mono(
+                "settings/node-rpc",
+                if self.rpc_endpoint.is_empty() {
+                    "—"
+                } else {
+                    &self.rpc_endpoint
+                },
+            )),
+        );
+        let mut rpc_field = vec![kit::row(
+            "settings/node-rpc-controls",
+            [
+                settings_input(
+                    "settings/node-rpc-draft",
+                    "node RPC URL…",
+                    &self.rpc_endpoint_draft,
+                    Message::BindRpcEndpointDraft,
+                ),
+                settings_primary(
+                    "settings/node-rpc-save",
+                    "Save",
+                    Message::SaveRpcEndpoint,
+                    !self.rpc_endpoint_draft.trim().is_empty()
+                        && self.rpc_endpoint_draft != self.rpc_endpoint_override,
+                ),
+                settings_subtle(
+                    "settings/node-rpc-clear",
+                    "Clear",
+                    Message::ClearRpcEndpoint,
+                    !self.rpc_endpoint_override.is_empty(),
+                ),
+            ],
+        )];
+        // the app checks the URL and the node; its refusal sits under the field
+        if !self.rpc_endpoint_refusal.is_empty() {
+            rpc_field.push(kit::sized(
+                kit::wrapping(kit::caption(
+                    "settings/node-rpc-refusal",
+                    &self.rpc_endpoint_refusal,
+                )),
+                Some(wire::Length::Fixed(FIELD_WIDTH)),
+                None,
+            ));
+        }
+        let rpc_override = setting_row(
+            "settings/node-rpc-edit",
+            "Node RPC URL",
+            "Used instead of the one in node.toml; Clear goes back to it.",
+            "",
+            kit::column("settings/node-rpc-field", rpc_field),
+        );
         let network = settings_section(
             "settings/network",
             "settings/network-name",
@@ -1126,6 +1243,8 @@ impl SettingsView {
                                         )],
                                     ),
                                 ),
+                                rpc_endpoint,
+                                rpc_override,
                             ],
                         ),
                         actions,

@@ -65,6 +65,17 @@ pub struct Session {
     pub account_exists: bool,
     pub network_name: String,
     pub connected_rpc: String,
+    /// the node RPC URL this workspace resolves to ("" when it has none; an
+    /// older app sends none of the three `rpc_endpoint*` facts)
+    #[serde(default)]
+    pub rpc_endpoint: String,
+    /// the node RPC URL stored for this workspace ("" when none)
+    #[serde(default)]
+    pub rpc_endpoint_override: String,
+    /// why the app refused the last URL sent, in one sentence ("" when it
+    /// did not)
+    #[serde(default)]
+    pub rpc_endpoint_refusal: String,
     pub account_ceremony_phase: String,
     pub account_ceremony_qr: String,
     pub account_ceremony_detail: String,
@@ -83,6 +94,10 @@ pub struct Session {
     pub update_previous: String,
     /// the display name of the release being downloaded or staged
     pub update_staged_display: String,
+    /// why the staged release's qualify refused it, as the app's token
+    /// ("" when nothing refused is staged; an older app does not send it)
+    #[serde(default)]
+    pub update_refused: String,
     pub update_channel: String,
     /// when the last check ran, in words ("never", "5 min ago")
     pub update_checked: String,
@@ -668,9 +683,23 @@ pub fn restart_to_update() -> bool {
     notify("settings.update_restart", &())
 }
 
-/// `settings.update_rollback` — relaunch into the previous release.
+/// `settings.update_rollback` — relaunch into the previous release, or,
+/// while a release is staged, discard it.
 pub fn roll_back_update() -> bool {
     notify("settings.update_rollback", &())
+}
+
+/// `settings.endpoint` — the node RPC URL for this workspace.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Endpoint {
+    pub url: String,
+}
+
+/// `settings.endpoint` — store `url` as this workspace's node RPC URL, or
+/// clear the stored one when it is empty. The app checks the URL and the
+/// node, and answers with the facts or a refusal.
+pub fn set_endpoint(url: &str) -> bool {
+    notify("settings.endpoint", &Endpoint { url: url.into() })
 }
 
 fn notify<T: Serialize>(operation: &str, payload: &T) -> bool {
