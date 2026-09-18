@@ -4,13 +4,22 @@
 //! `rpc.live` hit, and a pause or a save leaves as `op.submit`. Only the
 //! navigation intents still leave as notifications.
 
+use agents_view::boot_native;
 use agents_view::host::Session;
-use agents_view::{boot_native, tick_native};
 use ducktape_view_guest::testing::{
     answer, has_text, item, pick, press, refuse, texts, toggle, type_into,
 };
 use ducktape_view_guest::wire::{Event, Frame, Node, Request};
 use serde_json::{Value, json};
+
+/// Every frame a test renders is one assistive technology can name.
+fn tick_native(events: Vec<ducktape_view_guest::wire::Event>) -> ducktape_view_guest::wire::Frame {
+    let frame = agents_view::tick_native(events);
+    if let Some(root) = &frame.root {
+        assert_eq!(ducktape_view_guest::wire::accessibility_faults(root), []);
+    }
+    frame
+}
 
 /// Inputs are found by placeholder and pick lists by key.
 const AGENT_ID_HINT: &str = "a-dns-label, e.g. chiefduck";

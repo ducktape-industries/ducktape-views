@@ -180,7 +180,7 @@ impl ChatView {
                 Some(wire::Length::Fixed(4.)),
             )
         };
-        let contents = self.message_contents(format!("{key}/contents"), message, surface);
+        let contents = self.message_contents(format!("{key}/contents"), message, surface, plate);
         let mut row = native::row(format!("{key}/row"), [rail, contents]);
         if let wire::Node::Linear {
             spacing,
@@ -218,6 +218,7 @@ impl ChatView {
         key: String,
         message: &crate::host::ChatMessage,
         surface: CopySurface,
+        plate: RowPlate,
     ) -> wire::Node {
         use ducktape_view_guest::slots;
         let mut children = Vec::new();
@@ -247,8 +248,15 @@ impl ChatView {
                 6.,
             ));
         }
+        // Shift-pressing the body grows the copy range: the message is a
+        // row, selected while the range holds it.
         children.push(wire::Node::MouseArea {
             key: format!("{key}/select"),
+            role: Some(wire::Role::Row),
+            label: Some(format!("{}: {}", message.author, message.body)),
+            expanded: None,
+            selected: Some(plate != RowPlate::Plain),
+            checked: None,
             on_press: Some(slots::message(Message::PressMessage(message.seq, surface))),
             on_release: None,
             on_double_click: None,

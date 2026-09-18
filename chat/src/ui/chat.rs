@@ -737,8 +737,15 @@ impl ChatView {
                 children.push(hover);
                 let content =
                     native::spaced(native::column(format!("{scope}/content"), children), 0.);
+                // The right press is the pointer's way to the More action
+                // the row already announces, so the area adds no role.
                 rows.push(wire::Node::MouseArea {
                     key: scope,
+                    role: None,
+                    label: None,
+                    expanded: None,
+                    selected: None,
+                    checked: None,
                     on_press: None,
                     on_release: None,
                     on_double_click: None,

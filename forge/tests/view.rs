@@ -6,8 +6,17 @@
 
 use ducktape_view_guest::testing::{answer, has_text, item, press, refuse, texts, type_into};
 use ducktape_view_guest::wire::{Event, Frame, Node, Request};
+use forge_view::boot_native;
 use forge_view::host::Session;
-use forge_view::{boot_native, tick_native};
+
+/// Every frame a test renders is one assistive technology can name.
+fn tick_native(events: Vec<ducktape_view_guest::wire::Event>) -> ducktape_view_guest::wire::Frame {
+    let frame = forge_view::tick_native(events);
+    if let Some(root) = &frame.root {
+        assert_eq!(ducktape_view_guest::wire::accessibility_faults(root), []);
+    }
+    frame
+}
 
 fn node_ending(frame: &Frame, suffix: &str) -> Node {
     fn find(node: &Node, suffix: &str) -> Option<Node> {

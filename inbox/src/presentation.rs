@@ -123,6 +123,10 @@ impl InboxView {
         // A row with no address opens nothing — the source is gone, or this
         // app has no tab for it — and says so by not being pressable.
         let door = (!row.link.is_empty()).then(|| slots::message(Message::Open(row.link.clone())));
-        kit::list_row(format!("{key}/press"), entry, false, door)
+        let mut press = kit::list_row(format!("{key}/press"), entry, false, door);
+        if let Node::Button { label, .. } = &mut press {
+            *label = Some(row.title.clone());
+        }
+        press
     }
 }

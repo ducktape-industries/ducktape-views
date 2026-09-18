@@ -21,8 +21,16 @@ fn on_a_deep_stack(test: fn()) {
         .expect("the test thread finishes");
 }
 
+/// Every frame a test renders is one assistive technology can name.
+fn nameable(frame: Frame) -> Frame {
+    if let Some(root) = &frame.root {
+        assert_eq!(ducktape_view_guest::wire::accessibility_faults(root), []);
+    }
+    frame
+}
+
 fn tick_native(input: Vec<ducktape_view_guest::wire::Event>) -> Frame {
-    let mut frame = chat_view::tick_native(input);
+    let mut frame = nameable(chat_view::tick_native(input));
     let sidebar = frame
         .requests
         .iter()
@@ -54,7 +62,7 @@ fn tick_native(input: Vec<ducktape_view_guest::wire::Event>) -> Frame {
             &serde_json::json!({"channels":{"channels":rows,"has_more":false,"next_after":null}}),
         )
         .unwrap();
-        let mut next = chat_view::tick_native(vec![answer(request.id, &bytes)]);
+        let mut next = nameable(chat_view::tick_native(vec![answer(request.id, &bytes)]));
         next.requests
             .extend(frame.requests.drain(..).filter(|old| old.id != request.id));
         return next;
@@ -1353,16 +1361,19 @@ fn a_landing_short_of_the_rooms_head_offers_the_jump() {
 fn visible_room_navigation_requests_a_fresh_sidebar_without_a_live_event() {
     on_a_deep_stack(|| {
         boot_native();
-        let boot = chat_view::tick_native(Vec::new());
+        let boot = nameable(chat_view::tick_native(Vec::new()));
         let props_id = request(&boot, "chat.props").id;
         let visible_id = request(&boot, "host.visible").id;
-        let _ = chat_view::tick_native(vec![
+        nameable(chat_view::tick_native(vec![
             item(props_id, &encoded(&session(true))),
             item(visible_id, b"true"),
-        ]);
+        ]));
         let mut next = session(true);
         next.active_channel = "channel-b".into();
-        let frame = chat_view::tick_native(vec![item(props_id, &encoded(&next))]);
+        let frame = nameable(chat_view::tick_native(vec![item(
+            props_id,
+            &encoded(&next),
+        )]));
         assert!(
             frame
                 .requests

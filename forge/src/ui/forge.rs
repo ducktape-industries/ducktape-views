@@ -56,6 +56,7 @@ fn item_column(content: Vec<wire::Node>) -> wire::Node {
 
 fn picker(
     key: &str,
+    label: &str,
     options: Vec<String>,
     selected: &str,
     placeholder: Option<String>,
@@ -68,6 +69,7 @@ fn picker(
     let choices = options.clone();
     wire::Node::PickList {
         key: key.into(),
+        label: Some(label.into()),
         options,
         selected,
         placeholder,
@@ -265,6 +267,7 @@ impl ForgeView {
             native::caption("forge/crumb", "/"),
             picker(
                 "ForgeView/forge/repo-pick",
+                "Repository",
                 host::repo_names(&self.repos),
                 &self.open_repo,
                 None,
@@ -274,6 +277,7 @@ impl ForgeView {
         if !self.branches.is_empty() {
             header.push(picker(
                 "ForgeView/forge/branch-pick",
+                "Branch",
                 host::branch_names(&self.branches),
                 &host::forge_tree_branch(&self.branches, &self.tree_pick, &self.tree_rev),
                 Some(host::commit_label(&self.tree_rev)),

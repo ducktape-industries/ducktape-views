@@ -6,8 +6,17 @@
 
 use ducktape_view_guest::testing::{answer, has_text, item, press, texts, type_into};
 use ducktape_view_guest::wire::{Frame, Request};
+use palette_view::boot_native;
 use palette_view::host::{CHORD, Session};
-use palette_view::{boot_native, tick_native};
+
+/// Every frame a test renders is one assistive technology can name.
+fn tick_native(events: Vec<ducktape_view_guest::wire::Event>) -> ducktape_view_guest::wire::Frame {
+    let frame = palette_view::tick_native(events);
+    if let Some(root) = &frame.root {
+        assert_eq!(ducktape_view_guest::wire::accessibility_faults(root), []);
+    }
+    frame
+}
 
 fn request<'a>(frame: &'a Frame, kind: &str) -> &'a Request {
     frame
