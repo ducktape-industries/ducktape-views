@@ -2530,6 +2530,54 @@ fn an_edit_refused_because_the_board_is_gone_leaves_the_writer_at_the_list() {
     );
 }
 
+/// The board removed under a note the writer has only just added, with the
+/// words still being typed into it. The refused edit is the note's own Create,
+/// which carries no words, so the draft in the open editor is all there is to
+/// keep — and the only place it has ever had is the one that Create put it in,
+/// in a queue that goes with the board. Read after the queue, there is no
+/// card, no place, and the words go without a word.
+#[test]
+fn a_board_removed_under_a_new_note_keeps_the_words_typed_into_it() {
+    let mut view = view();
+    view.catalog = [("room".to_owned(), "Planning".to_owned())].into();
+    view.on_quick_note();
+    view.on_minted(
+        0,
+        "room".into(),
+        Shape {
+            kind: Kind::Note,
+            width: 220,
+            height: 180,
+            ..Default::default()
+        },
+        Ok("b".into()),
+    );
+    view.inline
+        .as_mut()
+        .expect("the note opened no editor")
+        .document = Editor::new("HALF WRITTEN");
+    view.on_delivered(
+        0,
+        "room".into(),
+        Err(refusal("board_gone", "That board is no longer here.")),
+        Ok(host::Reading {
+            catalog: BTreeMap::new(),
+            board: None,
+        }),
+    );
+    assert!(
+        view.error.contains("HALF WRITTEN"),
+        "the words went without a word: {}",
+        view.error
+    );
+    assert_eq!(
+        view.lost.as_ref().map(|card| card.text.as_str()),
+        Some("HALF WRITTEN"),
+        "the words the banner quotes were not kept"
+    );
+    assert_eq!(view.status(), "Not saved");
+}
+
 /// Undo restates a card's old words, and a step sits on the stack for as long
 /// as the writer leaves it there — by the time it is taken the card is several
 /// revisions past the one the step was recorded at, our own edit included. A

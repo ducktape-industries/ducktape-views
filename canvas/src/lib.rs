@@ -830,6 +830,16 @@ impl BoardsView {
         // The board as our own edits left it, read before the queue goes: the
         // card the refused edit was for is still on it, in its place.
         let before = self.settled();
+        // The open editor's draft, read off for the same reason. `on_read`
+        // reads it too, but off the board as it stands AFTER the queue has
+        // gone — and a note this writer has only just minted is on no such
+        // board. Its whole existence is the Create standing in that queue,
+        // so once the queue goes the words in it have no place to be looked
+        // up by and are dropped in silence. Read here, against `before`.
+        let writing = self.inline.as_ref().and_then(|inline| {
+            let text = inline.document.text();
+            (text != inline.original).then(|| (inline.id.clone(), text))
+        });
         let refused = self.pending.pop_front();
         self.pending.clear();
         self.delivery = Delivery::Idle;
@@ -838,8 +848,12 @@ impl BoardsView {
             Some((card, draft)) => self.what_did_not_land(before.as_ref(), card, Some(draft)),
             // An edit carrying no words of its own, with an editor open when
             // the board went: `on_read` has already left that draft here, by
-            // the same rule and in the same place.
-            None => self.lost.take(),
+            // the same rule and in the same place — and where it could not,
+            // the draft read before the queue went is what is left of it.
+            None => self.lost.take().or_else(|| {
+                let (card, draft) = writing?;
+                self.what_did_not_land(before.as_ref(), &card, Some(&draft))
+            }),
         };
         self.error = match kept
             .as_ref()
