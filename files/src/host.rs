@@ -315,11 +315,14 @@ pub fn fold_author(author: &serde_json::Value) -> String {
 
 /// One item of the provenance subscription: the newest snapshot within
 /// [`PROVENANCE_DEPTH`] that touched the path, or "" when none of them did.
+/// `rooted` says the walk reached the FIRST snapshot — there is nothing
+/// earlier, so a path it did not find is a path no snapshot holds.
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
 pub struct ProvenanceItem {
     pub path: String,
     pub snapshot: FsSnapshot,
     pub searched: i64,
+    pub rooted: bool,
     pub error: String,
 }
 
@@ -358,22 +361,38 @@ async fn load_provenance(path: String, history: Vec<FsSnapshot>) -> ProvenanceIt
                 path,
                 snapshot: snapshot.clone(),
                 searched,
-                error: String::new(),
+                ..ProvenanceItem::default()
             };
         }
     }
+    // Nothing in the window touched the path. Where the walk stopped says
+    // whether anything earlier could have: at the first snapshot, nothing can.
+    let rooted = history
+        .iter()
+        .take(PROVENANCE_DEPTH)
+        .next_back()
+        .is_some_and(|oldest| oldest.parent.is_empty());
     ProvenanceItem {
         path,
         searched,
+        rooted,
         ..ProvenanceItem::default()
     }
 }
 
-/// Did this snapshot change anything under `path`? The first snapshot has
-/// no parent and touched everything it holds.
+/// Did this snapshot change anything under `path`? Every snapshot but the
+/// first is read as the diff against its parent; the first has no parent to
+/// diff against, so it touched the path only if it HOLDS it — asked of the
+/// module as a stat at that snapshot, because a snapshot holding nothing of
+/// the path changed nothing about it.
 async fn snapshot_touches(snapshot: &FsSnapshot, path: &str) -> Result<bool, String> {
     if snapshot.parent.is_empty() {
-        return Ok(true);
+        let reply = files_get(
+            "stat",
+            serde_json::json!({ "path": path, "snapshot": snapshot.id }),
+        )
+        .await?;
+        return Ok(!reply.is_null());
     }
     let reply = files_get(
         "diff",

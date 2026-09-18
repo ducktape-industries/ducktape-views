@@ -319,6 +319,7 @@ impl FilesView {
             path: item.path,
             snapshot: item.snapshot,
             searched: item.searched,
+            rooted: item.rooted,
             answered: true,
             error: item.error,
         };
