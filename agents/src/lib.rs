@@ -1085,18 +1085,24 @@ impl AgentsView {
     }
 
     fn editor(&self) -> Node {
+        let read_only = !self.can_edit && !self.creating;
+        // A reader cannot save, so the record reads as stored: a title that
+        // followed a draft would name an agent that does not exist.
+        let stored = self
+            .rows
+            .iter()
+            .find(|row| row.id == self.selected)
+            .map(|row| row.name.as_str());
+        let title = match (self.creating, stored) {
+            (true, _) => "New agent",
+            (false, Some(stored)) if read_only => stored,
+            (false, _) => &self.draft_name,
+        };
         let mut items = vec![kit::centered_row(
             "agents/editor-heading",
             [
                 kit::sized(
-                    kit::wrapping(kit::heading(
-                        "agents/editor-title",
-                        if self.creating {
-                            "New agent"
-                        } else {
-                            &self.draft_name
-                        },
-                    )),
+                    kit::wrapping(kit::heading("agents/editor-title", title)),
                     Some(Length::Fill),
                     None,
                 ),
@@ -1107,7 +1113,6 @@ impl AgentsView {
                 ),
             ],
         )];
-        let read_only = !self.can_edit && !self.creating;
         if read_only {
             items.push(kit::notice(
                 "agents/read-only-box",
@@ -1171,16 +1176,23 @@ impl AgentsView {
                 kit::wrapping(kit::mono("agents/id", &self.draft_id)),
             ));
         }
-        identity.push(kit::field(
-            "agents/name-field",
-            "Display name",
-            field(
-                "agents/name",
+        identity.push(match read_only {
+            true => kit::kv(
+                "agents/name-row",
                 "Display name",
-                &self.draft_name,
-                Message::BindDraftName,
+                kit::wrapping(kit::text("agents/name", title)),
             ),
-        ));
+            false => kit::field(
+                "agents/name-field",
+                "Display name",
+                field(
+                    "agents/name",
+                    "Display name",
+                    &self.draft_name,
+                    Message::BindDraftName,
+                ),
+            ),
+        });
         items.push(section("agents/identity", "Identity", identity));
         let capability = host::or_empty(&self.draft_capability);
         let executor = if self.can_edit {

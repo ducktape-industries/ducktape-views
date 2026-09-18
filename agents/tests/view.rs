@@ -393,6 +393,26 @@ fn a_reader_who_is_not_the_controller_gets_the_record_read_only() {
     assert!(frame.requests.is_empty(), "{:?}", frame.requests);
 }
 
+/// A reader cannot save the record, so nothing on it takes typing: the
+/// display name is text, not a field, and the title is the STORED name. A
+/// title that followed a draft nobody can save named an agent that does not
+/// exist, while the list and the notice still said the stored one.
+#[test]
+fn a_read_only_record_takes_no_typing_and_keeps_its_stored_title() {
+    let (frame, _) = registered("9");
+    let frame = tick_native(press(&frame, "Reviewer Bot"));
+    let find = ducktape_view_guest::testing::find;
+    assert!(
+        !matches!(find(&frame, "agents/name"), Some(Node::Input { .. })),
+        "a record the reader may only read offers its name for typing"
+    );
+    assert!(matches!(
+        find(&frame, "agents/editor-title"),
+        Some(Node::Text { content, .. }) if content == "Reviewer Bot"
+    ));
+    assert!(has_text(&frame, "Reviewer Bot"));
+}
+
 #[test]
 fn the_controller_pauses_a_record_with_a_signed_op() {
     let (frame, _) = registered("7");
