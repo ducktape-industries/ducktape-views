@@ -44,8 +44,8 @@ impl Preview {
 }
 
 /// The snapshot that last touched the chosen path, once the walk answers.
-/// `rooted` says the walk reached the first snapshot, so a walk that found
-/// nothing found nothing anywhere.
+/// `rooted` says a walk that found nothing has nothing earlier to name: it
+/// reached the first snapshot, or the head does not hold the path.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Provenance {
     pub path: String,

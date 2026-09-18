@@ -339,8 +339,8 @@ impl FilesView {
                 ),
                 provenance.snapshot.author.clone(),
             ),
-            // the walk reached the first snapshot without finding the path:
-            // no snapshot holds it, so there is no change to name
+            // the walk reached the first snapshot without finding the path,
+            // or the head does not hold it: there is no change to name
             (false, true) => ("unknown".into(), "".into()),
             (false, false) => (
                 format!("earlier than the last {} snapshots", provenance.searched),

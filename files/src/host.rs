@@ -315,8 +315,8 @@ pub fn fold_author(author: &serde_json::Value) -> String {
 
 /// One item of the provenance subscription: the newest snapshot within
 /// [`PROVENANCE_DEPTH`] that touched the path, or "" when none of them did.
-/// `rooted` says the walk reached the FIRST snapshot — there is nothing
-/// earlier, so a path it did not find is a path no snapshot holds.
+/// `rooted` says there is no earlier change to name: the walk reached the
+/// FIRST snapshot, or the newest snapshot does not hold the path at all.
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
 pub struct ProvenanceItem {
     pub path: String,
@@ -342,57 +342,45 @@ pub fn provenance(
 }
 
 async fn load_provenance(path: String, history: Vec<FsSnapshot>) -> ProvenanceItem {
-    let mut searched = 0;
-    for snapshot in history.iter().take(PROVENANCE_DEPTH) {
-        searched += 1;
-        let touched = match snapshot_touches(snapshot, &path).await {
-            Ok(touched) => touched,
-            Err(error) => {
-                return ProvenanceItem {
-                    path,
-                    searched,
-                    error: format!("Could not read the file's history: {error}"),
-                    ..ProvenanceItem::default()
-                };
-            }
-        };
-        if touched {
-            return ProvenanceItem {
-                path,
-                snapshot: snapshot.clone(),
-                searched,
-                ..ProvenanceItem::default()
-            };
+    let mut item = ProvenanceItem {
+        path,
+        ..ProvenanceItem::default()
+    };
+    if let Err(error) = walk_provenance(&mut item, &history).await {
+        item.error = format!("Could not read the file's history: {error}");
+    }
+    item
+}
+
+async fn walk_provenance(item: &mut ProvenanceItem, history: &[FsSnapshot]) -> Result<(), String> {
+    let window = &history[..history.len().min(PROVENANCE_DEPTH)];
+    for snapshot in window {
+        item.searched += 1;
+        if snapshot_touches(snapshot, &item.path).await? {
+            item.snapshot = snapshot.clone();
+            return Ok(());
         }
     }
     // Nothing in the window touched the path. Where the walk stopped says
-    // whether anything earlier could have: at the first snapshot, nothing can.
-    let rooted = history
-        .iter()
-        .take(PROVENANCE_DEPTH)
-        .next_back()
-        .is_some_and(|oldest| oldest.parent.is_empty());
-    ProvenanceItem {
-        path,
-        searched,
-        rooted,
-        ..ProvenanceItem::default()
-    }
+    // whether anything earlier could have: at the first snapshot, nothing
+    // can. Short of it, "earlier than the window" is only true of a path that
+    // is there, so ONE stat at the newest snapshot — the head the listing was
+    // read at — says whether it is.
+    item.rooted = match (window.first(), window.last()) {
+        (_, Some(oldest)) if oldest.parent.is_empty() => true,
+        (Some(newest), _) => !holds(newest, &item.path).await?,
+        _ => false,
+    };
+    Ok(())
 }
 
 /// Did this snapshot change anything under `path`? Every snapshot but the
 /// first is read as the diff against its parent; the first has no parent to
-/// diff against, so it touched the path only if it HOLDS it — asked of the
-/// module as a stat at that snapshot, because a snapshot holding nothing of
-/// the path changed nothing about it.
+/// diff against, so it touched the path only if it HOLDS it — a snapshot
+/// holding nothing of the path changed nothing about it.
 async fn snapshot_touches(snapshot: &FsSnapshot, path: &str) -> Result<bool, String> {
     if snapshot.parent.is_empty() {
-        let reply = files_get(
-            "stat",
-            serde_json::json!({ "path": path, "snapshot": snapshot.id }),
-        )
-        .await?;
-        return Ok(!reply.is_null());
+        return holds(snapshot, path).await;
     }
     let reply = files_get(
         "diff",
@@ -401,6 +389,16 @@ async fn snapshot_touches(snapshot: &FsSnapshot, path: &str) -> Result<bool, Str
     .await?;
     let entries = reply["entries"].as_array().cloned().unwrap_or_default();
     Ok(!entries.is_empty())
+}
+
+/// Does this snapshot hold `path`? Asked of the module as a stat at it.
+async fn holds(snapshot: &FsSnapshot, path: &str) -> Result<bool, String> {
+    let reply = files_get(
+        "stat",
+        serde_json::json!({ "path": path, "snapshot": snapshot.id }),
+    )
+    .await?;
+    Ok(!reply.is_null())
 }
 
 // ---------- the preview ----------

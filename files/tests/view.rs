@@ -623,8 +623,29 @@ fn two_snapshots() -> Vec<u8> {
     .into_bytes()
 }
 
-/// Boots onto `/shared` with the two-snapshot history behind it.
-fn connected_with_two_snapshots() -> Frame {
+/// Nine snapshots, `s9` newest down to the first, `s1`: one more than the
+/// provenance walk looks through, so a walk that finds nothing stops one
+/// short of the first.
+fn nine_snapshots() -> Vec<u8> {
+    let snapshots: Vec<serde_json::Value> = (1..=9)
+        .rev()
+        .map(|n| {
+            let parent = match n {
+                1 => serde_json::Value::Null,
+                _ => format!("s{}", n - 1).into(),
+            };
+            serde_json::json!({ "id": format!("s{n}"), "parent": parent,
+                "author": { "Account": n }, "height": 90_000 + n, "message": format!("commit {n}") })
+        })
+        .collect();
+    serde_json::json!({ "snapshots": snapshots })
+        .to_string()
+        .into_bytes()
+}
+
+/// Boots onto `/shared` with `snapshots` as the history behind it: the frame
+/// on screen, and the session push the view holds.
+fn connected_with_history(snapshots: &[u8]) -> (Frame, u64) {
     let frame = boot();
     let session_id = request(&frame, "files.props").id;
     let frame = tick_native(vec![item(session_id, &session(true))]);
@@ -632,8 +653,29 @@ fn connected_with_two_snapshots() -> Frame {
     let frame = tick_native(vec![answer(ls, &listing())]);
     let home = ls_of(&frame, "/home").0.id;
     let frame = tick_native(vec![answer(home, &homes())]);
-    let snapshots = files_get(&frame, "history").0.id;
-    tick_native(vec![answer(snapshots, &two_snapshots())])
+    let history = files_get(&frame, "history").0.id;
+    (tick_native(vec![answer(history, snapshots)]), session_id)
+}
+
+/// Boots onto `/shared` with the two-snapshot history behind it.
+fn connected_with_two_snapshots() -> Frame {
+    connected_with_history(&two_snapshots()).0
+}
+
+/// Answers the walk through [`nine_snapshots`], newest first, each diff with
+/// nothing under `path`: the frame after the last diff the window holds.
+fn walk_nine_touching_nothing(mut frame: Frame, path: &str) -> Frame {
+    for n in (2..=9).rev() {
+        let (walk, params) = files_get(&frame, "diff");
+        assert_eq!(params["to"], format!("s{n}"));
+        assert_eq!(params["prefix"], path);
+        let walk = walk.id;
+        frame = tick_native(vec![answer(
+            walk,
+            serde_json::json!({ "entries": [] }).to_string().as_bytes(),
+        )]);
+    }
+    frame
 }
 
 /// The snapshot that last touched a path is found by diffing each snapshot
@@ -725,6 +767,90 @@ fn get_info_on_a_path_no_snapshot_holds_names_no_snapshot() {
         "—",
         "no author reads like no size and no object, not as a blank row"
     );
+}
+
+/// A history deeper than the walk stops it short of the first snapshot, and
+/// "earlier than the last 8 snapshots" is only true of a path that is there.
+/// One stat at the newest snapshot, the head the listing was read at, says
+/// a path the node does not hold is unknown however deep the history goes.
+#[test]
+fn get_info_on_a_path_the_head_does_not_hold_is_unknown_however_deep_the_history() {
+    let (_frame, session_id) = connected_with_history(&nine_snapshots());
+    let frame = tick_native(vec![item(
+        session_id,
+        &routed_session(true, "/shared/nowhere/missing.txt", 1),
+    )]);
+    let ls = ls_of(&frame, "/shared/nowhere").0.id;
+    let frame = walk_nine_touching_nothing(frame, "/shared/nowhere/missing.txt");
+    let probes = files_gets(&frame, "stat");
+    assert_eq!(
+        probes.len(),
+        1,
+        "a walk stopped short of the first snapshot asks once whether the path is there: {:?}",
+        texts(&frame)
+    );
+    let (probe, params) = &probes[0];
+    assert_eq!(params["path"], "/shared/nowhere/missing.txt");
+    assert_eq!(
+        params["snapshot"], "s9",
+        "asked at the head the listing was read at"
+    );
+    let frame = tick_native(vec![
+        refuse(ls, "files: path not found"),
+        answer(probe.id, b"null"),
+    ]);
+    assert!(
+        files_gets(&frame, "stat").is_empty() && files_gets(&frame, "diff").is_empty(),
+        "one stat beyond the walk, and nothing more: {:?}",
+        frame.requests
+    );
+    assert!(has_text(&frame, "unknown"), "{:?}", texts(&frame));
+    assert!(
+        !has_text(&frame, "earlier than the last 8 snapshots"),
+        "a path that is not there was not changed earlier: {:?}",
+        texts(&frame)
+    );
+    assert_eq!(author_row(&frame), "—");
+}
+
+/// A path that IS there and that no snapshot in the window changed was last
+/// changed before the window: Get Info says so, and how far it looked.
+#[test]
+fn get_info_on_a_path_the_window_never_touched_says_earlier_than_it() {
+    let (frame, _) = connected_with_history(&nine_snapshots());
+    let frame = tick_native(press(&frame, "Folder docs"));
+    let frame = walk_nine_touching_nothing(frame, "/shared/docs");
+    let (probe, params) = files_get(&frame, "stat");
+    assert_eq!(params["path"], "/shared/docs");
+    assert_eq!(params["snapshot"], "s9");
+    let frame = tick_native(vec![answer(probe.id, &stat_entry("/shared/docs"))]);
+    assert!(!has_request(&frame, "rpc.query"), "{:?}", frame.requests);
+    assert!(
+        has_text(&frame, "earlier than the last 8 snapshots"),
+        "{:?}",
+        texts(&frame)
+    );
+    assert_eq!(author_row(&frame), "—");
+}
+
+/// A refused stat is the refusal, never "unknown": the node did not say the
+/// path is not there.
+#[test]
+fn a_refused_stat_past_the_walk_reads_as_the_refusal() {
+    let (frame, _) = connected_with_history(&nine_snapshots());
+    let frame = tick_native(press(&frame, "Folder docs"));
+    let frame = walk_nine_touching_nothing(frame, "/shared/docs");
+    let probe = files_get(&frame, "stat").0.id;
+    let frame = tick_native(vec![refuse(probe, "files: busy")]);
+    assert!(
+        has_text(
+            &frame,
+            "Could not read the file's history: files: busy [module]"
+        ),
+        "{:?}",
+        texts(&frame)
+    );
+    assert!(!has_text(&frame, "unknown"), "{:?}", texts(&frame));
 }
 
 /// A name typed into the New folder prompt leaves as a duckfs commit the
