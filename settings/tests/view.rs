@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use ducktape_view_guest::testing::{answer, find, has_text, item, press, submit, texts, type_into};
 use ducktape_view_guest::wire::{ButtonContent, Frame, Node, Request, Wrapping};
-use settings_view::host::{KeyAdd, Name, Session, Tab, TasteRow, Unlock};
+use settings_view::host::{Endpoint, KeyAdd, Name, Session, Tab, TasteRow, Unlock};
 use settings_view::{boot_native, tick_native};
 
 const SEAT: &str = "8c4fa211";
@@ -31,6 +31,9 @@ fn facts() -> Session {
         account_exists: true,
         network_name: "testnet".into(),
         connected_rpc: "http://127.0.0.1:1".into(),
+        rpc_endpoint: "http://127.0.0.1:32989".into(),
+        rpc_endpoint_override: String::new(),
+        rpc_endpoint_refusal: String::new(),
         account_ceremony_phase: String::new(),
         account_ceremony_qr: String::new(),
         account_ceremony_detail: String::new(),
@@ -69,6 +72,9 @@ fn taste_row(tasting: bool, reason: &str) -> TasteRow {
 fn encoded(session: &Session) -> Vec<u8> {
     serde_json::to_vec(session).expect("session encodes")
 }
+
+/// The app's refusal of a URL that is not a node RPC URL, word for word.
+const ENDPOINT_REFUSAL: &str = "A node RPC URL is http:// or https:// followed by a host and an optional port, and nothing else.";
 
 fn kinds(requests: &[Request]) -> Vec<&str> {
     requests
@@ -678,6 +684,8 @@ const MAY_WRAP: &[&str] = &[
     "settings/error-text",          // why the node could not be read
     "settings/network-name",        // the network's own name, as its heading
     "settings/network-rpc",         // the endpoint, beside its Copy button
+    "settings/node-rpc",            // the node RPC URL in use
+    "settings/node-rpc-refusal",    // the app's refusal of a URL, a sentence
     "settings/updates-unavailable", // there is no launcher, in a sentence
     "settings/update-note",         // what the last check found
     "settings/seat",                // the seated public key, 64 hex digits
@@ -736,6 +744,7 @@ fn every_row_cell_keeps_one_line() {
         account_ceremony_qr: "https://auth.example/c".into(),
         account_ceremony_detail: "Scan this with your phone.".into(),
         account_ceremony_left: "1:07".into(),
+        rpc_endpoint_refusal: ENDPOINT_REFUSAL.into(),
         tasting: vec![taste_row(true, "")],
         ..facts()
     };
@@ -933,6 +942,148 @@ fn a_refused_staged_release_offers_a_discard_and_no_restart() {
     assert!(
         find(&frame, "settings/update-discard").is_none(),
         "nothing staged, nothing to discard: {:?}",
+        texts(&frame)
+    );
+}
+
+// ---------- node RPC URL ----------
+
+/// What the field with `key` reads now.
+fn field(frame: &Frame, key: &str) -> String {
+    let Some(Node::Input { value, .. }) = find(frame, key) else {
+        panic!("no field {key:?} in {:?}", texts(frame));
+    };
+    value.clone()
+}
+
+fn endpoint(intent: &Request) -> Endpoint {
+    assert_eq!(intent.kind, "settings.endpoint");
+    serde_json::from_slice(&intent.payload).expect("decodes")
+}
+
+/// The Network tab reads the node RPC URL in use, and Save sends the typed
+/// URL as it was typed. The app checks it; when it lands the stored URL is
+/// the one sent, and the field follows it.
+#[test]
+fn a_typed_node_rpc_url_leaves_as_the_endpoint_intent() {
+    let (frame, props, _) = connected(&facts(), 2);
+    let frame = tick_native(press(&frame, "Network"));
+    assert!(has_text(&frame, "Node RPC"), "{:?}", texts(&frame));
+    assert!(
+        has_text(&frame, "http://127.0.0.1:32989"),
+        "{:?}",
+        texts(&frame)
+    );
+    assert!(button_disabled(&frame, "Clear"), "nothing stored to clear");
+    assert!(button_disabled(&frame, "Save"), "nothing typed to save");
+
+    let frame = tick_native(type_into(
+        &frame,
+        "node RPC URL…",
+        "http://100.92.85.92:28990",
+    ));
+    let frame = tick_native(press(&frame, "Save"));
+    assert_eq!(
+        endpoint(one_intent(&frame)),
+        Endpoint {
+            url: "http://100.92.85.92:28990".into()
+        }
+    );
+
+    let stored = Session {
+        rpc_endpoint: "http://100.92.85.92:28990".into(),
+        rpc_endpoint_override: "http://100.92.85.92:28990".into(),
+        ..facts()
+    };
+    let frame = tick_native(vec![item(props, &encoded(&stored))]);
+    assert_eq!(
+        field(&frame, "settings/node-rpc-draft"),
+        "http://100.92.85.92:28990"
+    );
+    assert!(button_disabled(&frame, "Save"), "the stored URL is saved");
+    assert!(!button_disabled(&frame, "Clear"));
+}
+
+/// A REFUSED URL STAYS IN THE FIELD with the app's sentence under it: the
+/// stored URL did not move, so the draft that asked for it is not spent.
+#[test]
+fn a_refused_node_rpc_url_keeps_its_draft_under_the_refusal() {
+    let (frame, props, _) = connected(&facts(), 2);
+    let frame = tick_native(press(&frame, "Network"));
+    let frame = tick_native(type_into(&frame, "node RPC URL…", "ftp://node"));
+    let frame = tick_native(press(&frame, "Save"));
+    assert_eq!(endpoint(one_intent(&frame)).url, "ftp://node");
+
+    let refused = Session {
+        rpc_endpoint_refusal: ENDPOINT_REFUSAL.into(),
+        ..facts()
+    };
+    let frame = tick_native(vec![item(props, &encoded(&refused))]);
+    assert!(has_text(&frame, ENDPOINT_REFUSAL), "{:?}", texts(&frame));
+    assert_eq!(field(&frame, "settings/node-rpc-draft"), "ftp://node");
+    assert!(
+        !button_disabled(&frame, "Save"),
+        "the draft can be sent again"
+    );
+}
+
+/// A stored URL seeds the field and can be cleared: Clear sends the empty
+/// URL, and once the app drops the stored one the field is empty too.
+#[test]
+fn a_stored_node_rpc_url_is_cleared_with_the_empty_url() {
+    let stored = Session {
+        rpc_endpoint: "http://100.92.85.92:28990".into(),
+        rpc_endpoint_override: "http://100.92.85.92:28990".into(),
+        ..facts()
+    };
+    let (frame, props, _) = connected(&stored, 2);
+    let frame = tick_native(press(&frame, "Network"));
+    assert_eq!(
+        field(&frame, "settings/node-rpc-draft"),
+        "http://100.92.85.92:28990"
+    );
+    assert!(
+        button_disabled(&frame, "Save"),
+        "the field is the stored URL"
+    );
+    let frame = tick_native(press(&frame, "Clear"));
+    assert_eq!(endpoint(one_intent(&frame)).url, "");
+
+    let frame = tick_native(vec![item(props, &encoded(&facts()))]);
+    assert_eq!(field(&frame, "settings/node-rpc-draft"), "");
+    assert!(button_disabled(&frame, "Clear"), "nothing stored to clear");
+}
+
+/// An app that sends none of the node RPC facts (nor `update_refused`)
+/// still has its session read: the row is there, with no URL to show.
+#[test]
+fn a_session_from_an_older_app_draws_no_node_rpc_url() {
+    let mut older = serde_json::to_value(facts()).expect("session encodes");
+    let older_fields = older.as_object_mut().expect("an object");
+    for newer in [
+        "rpc_endpoint",
+        "rpc_endpoint_override",
+        "rpc_endpoint_refusal",
+        "update_refused",
+    ] {
+        assert!(older_fields.remove(newer).is_some(), "{newer} is sent");
+    }
+    let (_, props, _) = connected(&facts(), 2);
+    let frame = tick_native(vec![item(
+        props,
+        &serde_json::to_vec(&older).expect("encodes"),
+    )]);
+    let frame = tick_native(press(&frame, "Network"));
+    assert!(
+        find(&frame, "settings/error-text").is_none(),
+        "the older session reads: {:?}",
+        texts(&frame)
+    );
+    assert!(has_text(&frame, "Node RPC"), "{:?}", texts(&frame));
+    assert!(has_text(&frame, "—"), "{:?}", texts(&frame));
+    assert!(
+        !has_text(&frame, "http://127.0.0.1:32989"),
+        "{:?}",
         texts(&frame)
     );
 }
