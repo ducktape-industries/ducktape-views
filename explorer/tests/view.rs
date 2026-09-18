@@ -75,7 +75,9 @@ fn task_page(frame: &Frame) -> Option<(u64, String)> {
     frame.requests.iter().find_map(|request| {
         let ask: serde_json::Value = serde_json::from_slice(&request.payload).ok()?;
         (request.kind == "rpc.view" && ask["target"] == "tasks").then(|| {
-            let status = ask["query"]["by_status"]["status"].as_str().unwrap_or_default();
+            let status = ask["query"]["by_status"]["status"]
+                .as_str()
+                .unwrap_or_default();
             (request.id, status.to_owned())
         })
     })
@@ -284,7 +286,9 @@ fn search_hits_name_the_page_author_and_room_once() {
     let titles_read = frame
         .requests
         .iter()
-        .find(|request| request.kind == "rpc.view" && task_page(&frame).map(|(id, _)| id) != Some(request.id))
+        .find(|request| {
+            request.kind == "rpc.view" && task_page(&frame).map(|(id, _)| id) != Some(request.id)
+        })
         .expect("the page titles read")
         .id;
     empty_task_pages(frame);
