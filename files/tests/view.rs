@@ -520,8 +520,8 @@ fn a_sidebar_place_opens_its_directory() {
     assert_eq!(ls_of(&frame, "/home/acct:3").1["path"], "/home/acct:3");
 }
 
-/// A `duck://files/<path>` link is a SESSION fact, not a navigation the app
-/// performs: the shell resolves the address and moves the tab, and the view
+/// A `duck://<chain>/files/<path…>` link is a SESSION fact, not a navigation
+/// the app performs: the shell moves the tab with the address, and the view
 /// lands on the file — its directory listed, the file itself chosen and
 /// read. The serial is what says a push happened, so the SAME path pushed
 /// again navigates again instead of reading as an unchanged value.
@@ -575,7 +575,7 @@ fn a_duck_link_lands_the_view_on_the_file_it_names() {
 #[test]
 fn a_refused_address_says_why_and_leaves_the_view_where_it_was() {
     let (frame, held) = connected_with_listing();
-    let frame = with_preview(&frame, "# README");
+    let _ = with_preview(&frame, "# README");
     let frame = tick_native(vec![item(
         held.session,
         &routed_session(true, "duck://testnet-0a1b2c3d/files/shared/e%CC%81.md", 1),

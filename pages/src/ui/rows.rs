@@ -250,6 +250,7 @@ impl PagesView {
             .find(|page| page.id == self.page_menu_page)?;
         let key = format!("{PAGE_KEY}/page/{}/menu", page.id);
         let available = !self.unavailable();
+        let link = crate::host::page_address(&page.id, &self.chain);
         let items = match self.page_menu_moving {
             true => self.page_move_items(page, &key, available),
             false => vec![
@@ -271,11 +272,8 @@ impl PagesView {
                     format!("{key}/link"),
                     "🔗",
                     "Copy link",
-                    Message::CopyToClipboard(
-                        crate::host::page_address(&page.id, &self.chain),
-                        "Page link".into(),
-                    ),
-                    false,
+                    Message::CopyToClipboard(link.clone(), "Page link".into()),
+                    link.is_empty(),
                 ),
                 menu_item(
                     format!("{key}/delete"),

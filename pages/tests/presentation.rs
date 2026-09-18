@@ -57,7 +57,7 @@ fn flattened_runs_preserve_native_body_gaps_and_inline_precedence() {
 
 #[test]
 fn named_link_syntax_never_paints_even_under_the_caret() {
-    let line = "앞 [작업 보기](duck://agents/runs/abc) 뒤";
+    let line = "앞 [작업 보기](duck://testnet-0a1b2c3d/runs/abc) 뒤";
     let text = format!("Title\n{line}");
     let editor = Editor::new(&text);
     let state = ducktape_view_guest::EditorStateView {
@@ -95,7 +95,7 @@ fn named_link_syntax_never_paints_even_under_the_caret() {
         assert_eq!(&line[hit.start as usize..hit.end as usize], "작업 보기");
         assert_eq!(
             pages_view::inline::document_link_at(line, hit.start as usize).as_deref(),
-            Some("duck://agents/runs/abc")
+            Some("duck://testnet-0a1b2c3d/runs/abc")
         );
         assert_eq!(state.text, text);
         assert_eq!(state.cursor.position.column, 8);

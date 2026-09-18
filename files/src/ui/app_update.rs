@@ -196,10 +196,9 @@ impl FilesView {
         self.chain = next.chain;
         self.account = next.account;
         self.dark = next.dark;
-        // A duck:// LINK LANDS ON THE FILE. The shell resolved the address and
-        // moved the tab; the path itself is a session fact, and the SERIAL —
-        // not the path — says a push happened, so the same file twice opens
-        // twice.
+        // A duck:// LINK LANDS ON THE FILE. The shell moved the tab; the
+        // address itself is a session fact, and the SERIAL — not the address
+        // — says a push happened, so the same file twice opens twice.
         let routed = next.route_serial != self.route_serial && !next.route.is_empty();
         self.route_serial = next.route_serial;
         match routed {

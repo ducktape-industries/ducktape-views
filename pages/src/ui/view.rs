@@ -482,14 +482,14 @@ mod tests {
         app.update(Message::PictureReady(
             1,
             crate::host::PictureItem {
-                uri: "duck://files/shared/pages/alpha/p1/duck.png".into(),
+                uri: "duck://testnet-0a1b2c3d/files/shared/pages/alpha/p1/duck.png".into(),
                 alt: "duck.png".into(),
                 error: String::new(),
             },
         ));
         assert_eq!(
             crate::host::document_text(&app.document),
-            "Handbook\n![duck.png](duck://files/shared/pages/alpha/p1/duck.png)\n\nUnder it"
+            "Handbook\n![duck.png](duck://testnet-0a1b2c3d/files/shared/pages/alpha/p1/duck.png)\n\nUnder it"
         );
         assert_eq!(
             app.document.cursor().position,
