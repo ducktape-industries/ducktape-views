@@ -49,9 +49,7 @@ while (($#)); do
     -p) packages+=("$2"); shift 2 ;;
     # every workspace member whose package name ends in `-view`, sorted
     --all)
-      names=$("${CARGO:-cargo}" metadata --no-deps --format-version 1 \
-        --manifest-path "$repo/Cargo.toml" |
-        jq -r '.packages[].name | select(endswith("-view"))' | sort)
+      names=$(sed -n 's/^name = "\(.*-view\)"$/\1/p' "$repo"/*/Cargo.toml | sort)
       for name in $names; do packages+=("$name"); done
       shift ;;
     *) echo "expected -p <view-package> or --all, got $1" >&2; exit 1 ;;
@@ -69,3 +67,14 @@ for package in "${packages[@]}"; do
     -o "$repo/target/views/$library.wasm"
 done
 wasm-tools --version > "$repo/target/views/WASM_TOOLS_VERSION"
+# Each view again as the ONE unit a node's registry takes: `<id>/view.wasm`
+# beside that view's `assets/`, when it has any — the shape core's founding set
+# and `modules.update` read. Rebuilt whole, so a removed asset does not linger.
+for package in "${packages[@]}"; do
+  id=${package%-view}
+  unit="$repo/target/views/registry/$id"
+  rm -rf "$unit"
+  mkdir -p "$unit"
+  cp "$repo/target/views/${package//-/_}.wasm" "$unit/view.wasm"
+  [ ! -d "$repo/$id/assets" ] || cp -R "$repo/$id/assets" "$unit/assets"
+done
