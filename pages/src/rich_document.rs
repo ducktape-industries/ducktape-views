@@ -383,7 +383,7 @@ fn inline(content: &str) -> (String, MarkList) {
             continue;
         }
         let fence = FENCES.iter().find_map(|(marker, kind)| {
-            fenced(rest, marker).map(|body| (*marker, body, kind.clone()))
+            crate::inline::fenced(content, at, marker).map(|body| (*marker, body, kind.clone()))
         });
         let Some((marker, body, kind)) = fence else {
             let c = rest.chars().next().expect("inside the text");
@@ -392,18 +392,10 @@ fn inline(content: &str) -> (String, MarkList) {
             continue;
         };
         marks.push(Mark::new(kind, text.len()..text.len() + body.len()));
-        text.push_str(body);
-        at += marker.len() * 2 + body.len();
+        text.push_str(&content[body.clone()]);
+        at = body.end + marker.len();
     }
     (text, MarkList::from_marks(marks))
-}
-
-/// If `rest` opens with `marker` and a later `marker` closes a non-empty body,
-/// that body.
-fn fenced<'a>(rest: &'a str, marker: &str) -> Option<&'a str> {
-    let body = rest.strip_prefix(marker)?;
-    let close = body.find(marker)?;
-    (close > 0).then(|| &body[..close])
 }
 
 /// `[label](url)` at the start of `rest`: the label, the url, the source length.
@@ -943,6 +935,91 @@ mod tests {
                 ..Default::default()
             };
             assert_eq!(document(&edit).unwrap(), (text.to_owned(), cursor));
+        }
+    }
+
+    /// The host sends what the writer TYPED — plain text, no marks — and the
+    /// guest reads the saved text back through the dialect before the next
+    /// keystroke. Only a real fence may turn into a mark: an underscore inside
+    /// a word is part of the word, as in CommonMark. Reading it as a fence
+    /// drew `my_var_name` as "myvarname" and saved it as `my*var*name`.
+    #[test]
+    fn typed_text_keeps_its_characters_and_the_page_it_shows_round_trips() {
+        type Row = (
+            &'static str,
+            &'static str,
+            &'static [(&'static str, &'static str)],
+        );
+        // (typed, the text the page shows, the marks it wears over that text)
+        let table: &[Row] = &[
+            (
+                "snake case: my_var_name and file_name_v2.txt end",
+                "snake case: my_var_name and file_name_v2.txt end",
+                &[],
+            ),
+            ("column_0123456789_abc", "column_0123456789_abc", &[]),
+            ("a_b", "a_b", &[]),
+            ("_lead", "_lead", &[]),
+            ("trail_", "trail_", &[]),
+            ("trail_ and _lead", "trail_ and _lead", &[]),
+            ("my__dunder__var", "my__dunder__var", &[]),
+            ("x _ y _ z", "x _ y _ z", &[]),
+            ("a*b", "a*b", &[]),
+            (
+                "한글_변수_이름 and snake_case",
+                "한글_변수_이름 and snake_case",
+                &[],
+            ),
+            ("__dunder__", "dunder", &[("bold", "dunder")]),
+            ("*star*", "star", &[("italic", "star")]),
+            ("**bold**", "bold", &[("bold", "bold")]),
+            ("_foo_bar_", "foo_bar", &[("italic", "foo_bar")]),
+            (
+                "my_var_name is **굵게** and _기울임_ in 한_글",
+                "my_var_name is 굵게 and 기울임 in 한_글",
+                &[("bold", "굵게"), ("italic", "기울임")],
+            ),
+        ];
+        for (typed, text, marks) in table {
+            let title = RichBlock {
+                kind: types::HEADING.into(),
+                text: "T".into(),
+                level: 1,
+                ..Default::default()
+            };
+            let line = RichBlock {
+                kind: types::PARAGRAPH.into(),
+                text: (*typed).into(),
+                ..Default::default()
+            };
+            let snapshot = RichDocument {
+                blocks: vec![title, line],
+                ..Default::default()
+            };
+            let (saved, cursor) = canonical(&snapshot).expect("typed snapshot");
+            let shown = presentation(&saved, cursor).document;
+            let line = &shown.blocks[1];
+            let worn: Vec<(&str, &str)> = line
+                .marks
+                .iter()
+                .map(|mark| {
+                    let range = mark.start as usize..mark.end as usize;
+                    (mark.kind.as_str(), &line.text[range])
+                })
+                .collect();
+            assert_eq!(
+                (line.text.as_str(), worn.as_slice()),
+                (*text, *marks),
+                "{typed:?}"
+            );
+            // The next keystroke sends the page it was shown straight back:
+            // parse(serialise(doc)) is doc, and a line with no emphasis is
+            // saved exactly as it was typed.
+            let (again, cursor) = canonical(&shown).expect("shown snapshot");
+            assert_eq!(presentation(&again, cursor).document, shown, "{typed:?}");
+            if marks.is_empty() {
+                assert_eq!(again, format!("T\n{typed}"));
+            }
         }
     }
 

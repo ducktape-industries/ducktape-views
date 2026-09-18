@@ -220,6 +220,15 @@ fn clear_strips_every_inline_marker_and_keeps_the_block_prefix() {
     assert_eq!(format::clear(&after, 1), EditorDecision::Noop);
 }
 
+/// Clear reads the line with the same grammar the page is drawn with: an
+/// underscore inside a word is a letter of it, not a fence to strip.
+#[test]
+fn clear_keeps_the_underscores_inside_a_word() {
+    let before = doc("Title\nmy_var_name and file_name_v2 **bold**", 1, 0);
+    let after = apply(&before, format::clear(&before, 1));
+    assert_eq!(after.text, "Title\nmy_var_name and file_name_v2 bold");
+}
+
 trait LineText {
     fn line_text(&self, line: usize) -> String;
     fn offset_of_cursor(&self) -> usize;
