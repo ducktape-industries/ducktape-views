@@ -1350,12 +1350,25 @@ name = "forge-view"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "duck-address",
  "ducktape-view-composer",
  "ducktape-view-guest",
+ "forge-wire",
  "futures",
  "serde",
  "serde_json",
  "view-wire",
+]
+
+[[package]]
+name = "forge-wire"
+version = "0.1.0"
+source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#2af877933fc0164a12e3c9f26aa4b886201aec6c"
+dependencies = [
+ "chat-wire",
+ "duck-address",
+ "sdk",
+ "serde",
 ]
 
 [[package]]

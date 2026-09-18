@@ -533,14 +533,14 @@ impl ForgeView {
                 meta.push(subtle(
                     "forge/copy-item",
                     "Copy link",
-                    Some(Message::CopyToClipboard(
-                        host::duck_forge_item_link(
-                            &self.open_repo,
-                            self.forge_item_number,
-                            &self.network_chain_id,
-                        ),
-                        "Link copied".into(),
-                    )),
+                    // no address to give (no chain, no owner) is a
+                    // control drawn disabled
+                    host::duck_forge_item_link(
+                        &self.open_repo,
+                        self.forge_item_number,
+                        &self.network_chain_id,
+                    )
+                    .map(|link| Message::CopyToClipboard(link, "Link copied".into())),
                 ));
                 content.push(native::spaced(
                     native::column(
