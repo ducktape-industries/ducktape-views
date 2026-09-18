@@ -373,6 +373,13 @@ impl PagesView {
 mod tests {
     use super::*;
 
+    /// The tree the view paints, every control in it named and placed.
+    fn view(app: &PagesView) -> wire::Node {
+        let root = app.view();
+        assert_eq!(wire::accessibility_faults(&root), Vec::new());
+        root
+    }
+
     #[test]
     fn snapshots_reject_nonfinite_layout_in_every_coordinate() {
         let fields: [fn(&mut PagesView) -> &mut f64; 7] = [
@@ -535,7 +542,7 @@ mod tests {
         app.update(Message::OpenPageRowMenu("alpha-child".into()));
         app.update(Message::OfferPageMove);
         let frame = wire::Frame {
-            root: Some(app.view()),
+            root: Some(view(&app)),
             ..Default::default()
         };
         let present = keys(&frame);
@@ -583,7 +590,7 @@ mod tests {
         ];
         app.update(Message::TogglePageFold("alpha".into()));
         let frame = wire::Frame {
-            root: Some(app.view()),
+            root: Some(view(&app)),
             ..Default::default()
         };
         let present = keys(&frame);
@@ -605,7 +612,7 @@ mod tests {
         app.update(Message::PressedAt(120., 200.));
         app.update(Message::OpenPageRowMenu("beta".into()));
         let frame = wire::Frame {
-            root: Some(app.view()),
+            root: Some(view(&app)),
             ..Default::default()
         };
         let opened = keys(&frame);
@@ -619,7 +626,7 @@ mod tests {
         assert_eq!(app.page_menu_page, "", "the menu closes behind the dialog");
         assert_eq!(app.active_page, "alpha", "the open page is not the target");
         let frame = wire::Frame {
-            root: Some(app.view()),
+            root: Some(view(&app)),
             ..Default::default()
         };
         assert!(!has(&keys(&frame), "PagesView/root/pages/page/beta/menu"));
@@ -664,7 +671,7 @@ mod tests {
         }];
         app.update(Message::PressedAt(120., 200.));
         app.update(Message::OpenPageRowMenu("beta".into()));
-        let root = app.view();
+        let root = view(&app);
         let parent = parent_of_float(&root, "PagesView/root/pages/page/beta/menu")
             .expect("the row menu floats");
         let wire::Node::Container { width, height, .. } = parent else {
@@ -700,7 +707,7 @@ mod tests {
             page("beta", "", 0, 0),
         ];
         let frame = wire::Frame {
-            root: Some(app.view()),
+            root: Some(view(&app)),
             ..Default::default()
         };
         let present = keys(&frame);
@@ -723,7 +730,7 @@ mod tests {
 
         app.update(Message::TogglePageFold("alpha".into()));
         let frame = wire::Frame {
-            root: Some(app.view()),
+            root: Some(view(&app)),
             ..Default::default()
         };
         let folded = keys(&frame);
@@ -750,7 +757,7 @@ mod tests {
 
         app.update(Message::TogglePageFold("alpha".into()));
         let frame = wire::Frame {
-            root: Some(app.view()),
+            root: Some(view(&app)),
             ..Default::default()
         };
         assert!(
@@ -808,7 +815,7 @@ mod tests {
         app.reply_thread = "thread-a".into();
         let mut editor = false;
         let mut inputs = Vec::new();
-        app.view().for_each_mut(&mut |node| match node {
+        view(&app).for_each_mut(&mut |node| match node {
             Node::Editor {
                 key,
                 editable,
@@ -863,7 +870,7 @@ mod tests {
         let _ = app.update(Message::PagesPaneResized(1060., 700.));
         assert_eq!(app.pages_pane_width, 1060.);
         let mut constrained = false;
-        app.view().for_each_mut(&mut |node| {
+        view(&app).for_each_mut(&mut |node| {
             if let wire::Node::Container {
                 max_width: Some(width),
                 ..
@@ -883,7 +890,7 @@ mod tests {
             .stack_size(4 * 1024 * 1024)
             .spawn(|| {
                 let (app, _) = PagesView::boot();
-                let _ = app.view();
+                let _ = view(&app);
             })
             .unwrap()
             .join()
@@ -906,7 +913,7 @@ mod tests {
         }];
         let mut content = Vec::new();
         let mut keys = Vec::new();
-        app.view().for_each_mut(&mut |node| {
+        view(&app).for_each_mut(&mut |node| {
             if let Some(key) = node.key() {
                 keys.push(key.to_string());
             }
@@ -930,7 +937,7 @@ mod tests {
         app.page_search_draft = "missing".into();
         app.page_search_query = "missing".into();
         let mut found = false;
-        app.view().for_each_mut(&mut |node| {
+        view(&app).for_each_mut(&mut |node| {
             let Node::Overlay {
                 key,
                 children,
@@ -975,7 +982,7 @@ mod tests {
         app.page_search_draft = "  missing  ".into();
         let empty_answer = |app: &PagesView| {
             let mut found = false;
-            app.view().for_each_mut(&mut |node| {
+            view(&app).for_each_mut(&mut |node| {
                 if let Node::Text { content, .. } = node {
                     found |= content == "No matching pages";
                 }

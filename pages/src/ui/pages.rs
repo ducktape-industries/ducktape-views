@@ -66,6 +66,11 @@ impl PagesView {
         // answers, so a row's menu opens at the pointer.
         let screen = Node::MouseArea {
             key: format!("{PAGE_KEY}/press-area"),
+            role: None,
+            label: None,
+            expanded: None,
+            selected: None,
+            checked: None,
             on_press: None,
             on_release: None,
             on_double_click: None,
@@ -112,6 +117,11 @@ impl PagesView {
 fn page_menu_backdrop() -> Node {
     Node::MouseArea {
         key: format!("{PAGE_KEY}/menu-backdrop"),
+        role: Some(wire::Role::Button),
+        label: Some("Close the menu".into()),
+        expanded: None,
+        selected: None,
+        checked: None,
         on_press: Some(slots::message(Message::ClosePageMenu)),
         on_release: None,
         on_double_click: None,
@@ -570,6 +580,7 @@ impl PagesView {
             on_document,
             editable,
             placeholder: "Write with Markdown…".into(),
+            label: Some(format!("{} document", crate::host::titled(&self.active_page_title))),
             width: None,
             height: None,
             min_height: None,

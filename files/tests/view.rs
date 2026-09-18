@@ -8,8 +8,17 @@ use ducktape_view_guest::testing::{
     answer as raw_answer, edit, find, has_text, item, keys, press, refuse, texts, type_into,
 };
 use ducktape_view_guest::wire::{self, Event, Frame, Node, Request, keyboard};
+use files_view::boot_native;
 use files_view::host::Session;
-use files_view::{boot_native, tick_native};
+
+/// Every frame the view paints names and places each control it draws.
+fn tick_native(events: Vec<Event>) -> Frame {
+    let frame = files_view::tick_native(events);
+    if let Some(root) = &frame.root {
+        assert_eq!(wire::accessibility_faults(root), Vec::new());
+    }
+    frame
+}
 
 thread_local! {
     static FILES_REPLIES: std::cell::RefCell<std::collections::BTreeMap<u64, String>> = Default::default();

@@ -110,7 +110,7 @@ mod tests {
     #[test]
     fn view_and_snapshot_keep_fixture_document() {
         let (app, _) = PagesEditorFixture::boot();
-        let _ = app.view();
+        assert_eq!(wire::accessibility_faults(&app.view()), Vec::new());
         let snapshot = app.snapshot().unwrap();
         let restored = PagesEditorFixture::restore(&snapshot).unwrap();
         assert_eq!(restored.document.text(), "- 한글");

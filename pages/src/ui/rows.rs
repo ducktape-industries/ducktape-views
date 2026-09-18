@@ -88,6 +88,9 @@ impl PagesView {
                     };
                     *label = Some(format!("{verb} {title}"));
                 }
+                if let Node::Button { expanded, .. } = &mut toggle {
+                    *expanded = Some(!folded);
+                }
                 toggle
             }
             false => kit::space(Some(Length::Fixed(PAGE_FOLD_SLOT)), None),
@@ -160,6 +163,11 @@ impl PagesView {
         };
         let area = Node::MouseArea {
             key: format!("{key}/area"),
+            role: Some(wire::Role::Row),
+            label: Some(title.to_owned()),
+            expanded: (page.child_count > 0).then(|| !self.page_folded(page)),
+            selected: Some(selected),
+            checked: None,
             on_press: None,
             on_release: None,
             on_double_click: None,
@@ -367,20 +375,21 @@ impl PagesView {
             ),
             4.,
         );
-        kit::padded(
-            kit::list_row(
-                key,
-                content,
-                false,
-                (!self.unavailable()).then(|| {
-                    slots::message(Message::OpenPageSearchHit(
-                        hit.page_id.clone(),
-                        hit.block_id.clone(),
-                    ))
-                }),
-            ),
-            wire::Edges::all(8.),
-        )
+        let mut row = kit::list_row(
+            key,
+            content,
+            false,
+            (!self.unavailable()).then(|| {
+                slots::message(Message::OpenPageSearchHit(
+                    hit.page_id.clone(),
+                    hit.block_id.clone(),
+                ))
+            }),
+        );
+        if let Node::Button { label, .. } = &mut row {
+            *label = Some(format!("{}: {}", hit.page_title, hit.text));
+        }
+        kit::padded(row, wire::Edges::all(8.))
     }
 
     /// One thread, Notion's card: the opener's line (avatar, name, the

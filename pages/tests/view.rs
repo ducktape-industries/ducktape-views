@@ -7,11 +7,20 @@ use ducktape_view_guest::testing::{
     answer, edit, find, has_text, item, measure, press, submit, texts, type_into,
 };
 use ducktape_view_guest::wire::{self, Event, Frame, Length, Node, Request};
+use pages_view::boot_native;
 use pages_view::host::{
     PageCommentThread, PageCommentThreadRow, Session, comment_post_target,
     sidebar_width_after_delta,
 };
-use pages_view::{boot_native, tick_native};
+
+/// Every frame the view paints names and places each control it draws.
+fn tick_native(events: Vec<Event>) -> Frame {
+    let frame = pages_view::tick_native(events);
+    if let Some(root) = &frame.root {
+        assert_eq!(wire::accessibility_faults(root), Vec::new());
+    }
+    frame
+}
 
 /// The first editor in the tree, depth first.
 fn find_editor(node: &Node) -> Option<&Node> {
