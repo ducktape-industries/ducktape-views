@@ -42,6 +42,7 @@ pub struct SettingsView {
     pub(crate) update_current: String,
     pub(crate) update_previous: String,
     pub(crate) update_staged_display: String,
+    pub(crate) update_refused: String,
     pub(crate) update_channel: String,
     pub(crate) update_checked: String,
     pub(crate) update_note: String,
@@ -145,6 +146,7 @@ impl SettingsView {
             update_current: "".to_owned(),
             update_previous: "".to_owned(),
             update_staged_display: "".to_owned(),
+            update_refused: "".to_owned(),
             update_channel: "".to_owned(),
             update_checked: "".to_owned(),
             update_note: "".to_owned(),
@@ -174,7 +176,7 @@ impl SettingsView {
     pub(crate) const PREFERRED_WINDOW_SIZE: &'static str = "none";
     /// This state's layout, digested — `snapshot_schema` holds it here.
     pub(crate) const SNAPSHOT_SCHEMA: &'static str =
-        "ce3410128672865555ecb44ee823284c572ef8294638ae4679c536dbcecd241b";
+        "9b47bf10a0f99606ce4dff82bf22b3ddc0eac00445f8948edbfffbb5a4a5042f";
     pub(crate) fn snapshot(&self) -> Result<Vec<u8>, String> {
         wire::Snapshot {
             schema: Self::SNAPSHOT_SCHEMA.into(),
@@ -371,6 +373,7 @@ impl SettingsView {
         self.update_current = next.update_current.to_owned();
         self.update_previous = next.update_previous.to_owned();
         self.update_staged_display = next.update_staged_display.to_owned();
+        self.update_refused = next.update_refused.to_owned();
         self.update_channel = next.update_channel.to_owned();
         self.update_checked = next.update_checked.to_owned();
         self.update_note = next.update_note.to_owned();
@@ -923,8 +926,10 @@ impl SettingsView {
     }
     /// The "Updates" group: what runs, what is staged, when the network was
     /// last asked, and the controls — a check, the restart into a staged
-    /// release, the rollback to the kept one. Without a launcher (`make dev`
-    /// runs the binary bare) it says so and offers nothing.
+    /// release, discarding it, the rollback to the kept one. A staged release
+    /// its qualify refused reads as refused, with the app's reason, and has
+    /// no restart. Without a launcher (`make dev` runs the binary bare) it
+    /// says so and offers nothing.
     fn updates_section(&self) -> wire::Node {
         use ducktape_view_guest::kit;
         let unavailable = self.update_state == "unavailable";
@@ -941,6 +946,7 @@ impl SettingsView {
             );
         }
         let staged = self.update_state == "staged";
+        let refused = staged && !self.update_refused.is_empty();
         let rollback_offered = !self.update_previous.is_empty() && self.update_state == "idle";
         let current = kit::kv(
             "settings/update-current-row",
@@ -964,25 +970,46 @@ impl SettingsView {
         if staged {
             rows.push(kit::kv(
                 "settings/update-staged-row",
-                "Ready to install",
+                if refused {
+                    "Refused"
+                } else {
+                    "Ready to install"
+                },
                 kit::nowrap(kit::text(
                     "settings/update-staged",
                     &self.update_staged_display,
                 )),
             ));
         }
+        if refused {
+            rows.push(kit::kv(
+                "settings/update-refused-row",
+                "Reason",
+                kit::nowrap(kit::mono("settings/update-refused", &self.update_refused)),
+            ));
+        }
+        // the machine fetches while staged too: a newer release replaces it
         let mut actions = vec![settings_action(
             "settings/update-check",
             "Check now",
             Message::CheckForUpdate,
-            !self.update_busy && self.update_state == "idle",
+            !self.update_busy && (self.update_state == "idle" || staged),
         )];
-        if staged {
+        if staged && !refused {
             actions.push(settings_primary(
                 "settings/update-restart",
                 "Restart to update",
                 Message::RestartToUpdate,
                 true,
+            ));
+        }
+        // a roll-back from `staged` discards the staged release
+        if staged {
+            actions.push(settings_subtle(
+                "settings/update-discard",
+                &format!("Discard {}", self.update_staged_display),
+                Message::RollBackUpdate,
+                !self.update_busy,
             ));
         }
         if rollback_offered {

@@ -83,6 +83,10 @@ pub struct Session {
     pub update_previous: String,
     /// the display name of the release being downloaded or staged
     pub update_staged_display: String,
+    /// why the staged release's qualify refused it, as the app's token
+    /// ("" when nothing refused is staged; an older app does not send it)
+    #[serde(default)]
+    pub update_refused: String,
     pub update_channel: String,
     /// when the last check ran, in words ("never", "5 min ago")
     pub update_checked: String,
@@ -668,7 +672,8 @@ pub fn restart_to_update() -> bool {
     notify("settings.update_restart", &())
 }
 
-/// `settings.update_rollback` — relaunch into the previous release.
+/// `settings.update_rollback` — relaunch into the previous release, or,
+/// while a release is staged, discard it.
 pub fn roll_back_update() -> bool {
     notify("settings.update_rollback", &())
 }

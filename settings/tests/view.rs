@@ -6,7 +6,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ducktape_view_guest::testing::{answer, has_text, item, press, submit, texts, type_into};
+use ducktape_view_guest::testing::{answer, find, has_text, item, press, submit, texts, type_into};
 use ducktape_view_guest::wire::{ButtonContent, Frame, Node, Request, Wrapping};
 use settings_view::host::{KeyAdd, Name, Session, Tab, TasteRow, Unlock};
 use settings_view::{boot_native, tick_native};
@@ -43,6 +43,7 @@ fn facts() -> Session {
         update_current: String::new(),
         update_previous: String::new(),
         update_staged_display: String::new(),
+        update_refused: String::new(),
         update_channel: "stable".into(),
         update_checked: String::new(),
         update_note: String::new(),
@@ -738,6 +739,11 @@ fn every_row_cell_keeps_one_line() {
         tasting: vec![taste_row(true, "")],
         ..facts()
     };
+    // a staged release its qualify refused
+    let refused = Session {
+        update_refused: "qualify_exit_3".into(),
+        ..rich.clone()
+    };
     // no account yet, the seat locked, a proposed view this node refuses
     let enrol = Session {
         account_exists: false,
@@ -748,7 +754,7 @@ fn every_row_cell_keeps_one_line() {
         ..facts()
     };
     let mut drawn = Vec::new();
-    for session in [facts(), rich, enrol] {
+    for session in [facts(), rich, refused, enrol] {
         drawn.extend(every_pane(connected(&session, 2).0));
     }
     // a session the view cannot read draws its error over the pane
@@ -795,8 +801,8 @@ fn every_row_cell_keeps_one_line() {
 
 /// Without a launcher the Updates group says so and offers no control;
 /// installed, its rows read the facts and each control leaves as its own
-/// intent: `Check now` while idle, `Restart to update` only while staged,
-/// `Roll back to <previous>` only while idle with a previous release.
+/// intent: `Check now` while idle or staged, `Restart to update` only while
+/// staged, `Roll back to <previous>` only while idle with a previous release.
 #[test]
 fn the_updates_group_reads_the_facts_and_each_control_is_one_intent() {
     let (frame, props, _) = connected(&facts(), 2);
@@ -849,8 +855,8 @@ fn the_updates_group_reads_the_facts_and_each_control_is_one_intent() {
     let frame = tick_native(vec![item(props, &encoded(&staged))]);
     assert!(has_text(&frame, "2026.09.2+abc1234"), "{:?}", texts(&frame));
     assert!(
-        button_disabled(&frame, "Check now"),
-        "staged: nothing to check for"
+        !button_disabled(&frame, "Check now"),
+        "staged: a newer release may still replace it"
     );
     let pressed = tick_native(press(&frame, "Restart to update"));
     assert_eq!(one_intent(&pressed).kind, "settings.update_restart");
@@ -872,6 +878,63 @@ fn the_updates_group_reads_the_facts_and_each_control_is_one_intent() {
     let frame = tick_native(vec![item(props, &encoded(&busy))]);
     assert!(has_text(&frame, "Checking…"), "{:?}", texts(&frame));
     assert!(button_disabled(&frame, "Check now"));
+}
+
+/// A STAGED RELEASE ITS QUALIFY REFUSED reads as refused, as the app's
+/// console strip does: the reason token beside it, no restart into it, and
+/// a discard (the roll-back intent, which from `staged` discards). A ready
+/// release keeps its restart and offers the same discard beside it; idle
+/// keeps its roll-back and offers no discard.
+#[test]
+fn a_refused_staged_release_offers_a_discard_and_no_restart() {
+    let staged = Session {
+        update_state: "staged".into(),
+        update_current: "1a2b3c4".into(),
+        update_previous: "9f8e7d6".into(),
+        update_staged_display: "2026.09.2+abc1234".into(),
+        update_refused: "qualify_exit_3".into(),
+        ..facts()
+    };
+    let (frame, props, _) = connected(&staged, 2);
+    for expected in ["Refused", "2026.09.2+abc1234", "qualify_exit_3"] {
+        assert!(
+            has_text(&frame, expected),
+            "missing {expected:?} in {:?}",
+            texts(&frame)
+        );
+    }
+    assert!(!has_text(&frame, "Ready to install"), "{:?}", texts(&frame));
+    assert!(
+        find(&frame, "settings/update-restart").is_none(),
+        "no restart into a refused release: {:?}",
+        texts(&frame)
+    );
+    assert!(!button_disabled(&frame, "Check now"));
+    let pressed = tick_native(press(&frame, "Discard 2026.09.2+abc1234"));
+    assert_eq!(one_intent(&pressed).kind, "settings.update_rollback");
+
+    let ready = Session {
+        update_refused: String::new(),
+        ..staged.clone()
+    };
+    let frame = tick_native(vec![item(props, &encoded(&ready))]);
+    assert!(has_text(&frame, "Ready to install"), "{:?}", texts(&frame));
+    assert!(!has_text(&frame, "qualify_exit_3"), "{:?}", texts(&frame));
+    assert!(!button_disabled(&frame, "Restart to update"));
+    assert!(!button_disabled(&frame, "Check now"));
+    assert!(!button_disabled(&frame, "Discard 2026.09.2+abc1234"));
+
+    let idle = Session {
+        update_state: "idle".into(),
+        ..ready
+    };
+    let frame = tick_native(vec![item(props, &encoded(&idle))]);
+    assert!(!button_disabled(&frame, "Roll back to 9f8e7d6"));
+    assert!(
+        find(&frame, "settings/update-discard").is_none(),
+        "nothing staged, nothing to discard: {:?}",
+        texts(&frame)
+    );
 }
 
 #[test]
