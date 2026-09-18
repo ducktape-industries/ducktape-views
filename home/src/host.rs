@@ -334,6 +334,8 @@ fn sync_label(phase: &str, applied: i64, target: i64) -> String {
 pub struct PeerRow {
     pub key: String,
     pub role: String,
+    /// this node holds a link to the peer (`connected`); false says only
+    /// that no link is held, never that the peer is down
     pub live: bool,
 }
 
@@ -412,12 +414,13 @@ async fn load_blocks() -> BlocksItem {
     }
 }
 
-/// The block rows that carried operations, newest first as the node lists
-/// them. The endpoint is not uniformly filtered: a follower's boundary
-/// marker and an idle block come back with no ops, and neither is a block
-/// a dashboard has anything to say about.
+/// The newest [`BLOCK_ROWS`] block rows that carried operations, newest
+/// first. The node lists its window oldest-first, so the order is the
+/// fold's own, by height. The endpoint is not uniformly filtered: a
+/// follower's boundary marker and an idle block come back with no ops, and
+/// neither is a block a dashboard has anything to say about.
 pub fn fold_blocks(reply: &serde_json::Value) -> Vec<BlockRow> {
-    reply
+    let mut rows: Vec<BlockRow> = reply
         .as_array()
         .cloned()
         .unwrap_or_default()
@@ -430,8 +433,10 @@ pub fn fold_blocks(reply: &serde_json::Value) -> Vec<BlockRow> {
                 op_count: count_i64(ops),
             })
         })
-        .take(BLOCK_ROWS)
-        .collect()
+        .collect();
+    rows.sort_by_key(|row| std::cmp::Reverse(row.height));
+    rows.truncate(BLOCK_ROWS);
+    rows
 }
 
 // ---------- the roster ----------

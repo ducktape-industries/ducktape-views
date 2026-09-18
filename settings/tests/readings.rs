@@ -2,8 +2,8 @@
 //! used to live in `app/src/backend/`.
 
 use settings_view::host::{
-    AccountKeyRow, connection_serial_after, fold_agent_count, fold_key_rows, fold_standing,
-    headcount, keep_draft, renamed_to, seat_keys,
+    AccountKeyRow, account_holds_node_key, connection_serial_after, fold_agent_count,
+    fold_key_rows, fold_standing, headcount, keep_draft, renamed_to, seat_keys,
 };
 
 fn keys(names: &[&str]) -> Vec<String> {
@@ -36,6 +36,32 @@ fn a_seated_key_reads_its_standing_off_the_two_lists() {
     let resident = fold_standing("ab", &keys(&["cd"]), &keys(&["ab"]), 0);
     assert_eq!(resident.tier, "resident");
     assert!(!resident.admin, "a resident holds no quorum seat");
+}
+
+/// The standing is read off the NODE's key (`rpc.status`), so it is this
+/// account's only when the node signs with a key the account holds: the seat
+/// itself, or one of the account's keys. A throwaway seat reaching a
+/// validator over the network holds neither, and the validator's standing is
+/// not its own (#40).
+#[test]
+fn the_nodes_standing_is_the_accounts_only_when_it_holds_the_nodes_key() {
+    let standing = fold_standing("ab", &keys(&["ab"]), &[], 0);
+    assert_eq!(standing.node_key, "ab", "the standing names whose it is");
+    let laptop = AccountKeyRow {
+        scheme: "ed25519".into(),
+        pubkey: "ab".into(),
+        label: "laptop".into(),
+    };
+    assert!(!account_holds_node_key("ab", "cd", &[]), "a remote node");
+    assert!(
+        account_holds_node_key("ab", "ab", &[]),
+        "the seat is the node's key"
+    );
+    assert!(
+        account_holds_node_key("ab", "cd", &[laptop]),
+        "an account key"
+    );
+    assert!(!account_holds_node_key("", "", &[]), "no node read yet");
 }
 
 /// The headcount counts PEOPLE and MACHINES, and says each in the singular
