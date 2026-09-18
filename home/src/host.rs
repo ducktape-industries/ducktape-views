@@ -334,6 +334,8 @@ fn sync_label(phase: &str, applied: i64, target: i64) -> String {
 pub struct PeerRow {
     pub key: String,
     pub role: String,
+    /// this node holds a link to the peer (`connected`); false says only
+    /// that no link is held, never that the peer is down
     pub live: bool,
 }
 

@@ -265,7 +265,8 @@ fn a_connected_view_reads_every_card_through_the_kernel() {
         "Resident",
         "Online",
         "0badf00d",
-        "Offline",
+        // a peer this node has no link to, in Members' words (#9)
+        "Not linked",
         // the blocks card: the op-carrying block alone
         "abababab",
         "3 ops",
@@ -289,7 +290,7 @@ fn a_connected_view_reads_every_card_through_the_kernel() {
     }
     // a DM room, an archived room, a settled proposal and an op-less block
     // are not on the dashboard
-    for absent in ["#two", "#old", "Signal", "0 ops"] {
+    for absent in ["#two", "#old", "Signal", "0 ops", "Offline"] {
         assert!(
             !has_text(&frame, absent),
             "{absent} drawn: {:?}",

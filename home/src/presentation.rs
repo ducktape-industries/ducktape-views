@@ -405,9 +405,12 @@ impl HomeView {
         let mut rows = Vec::new();
         for peer in self.peers.iter().take(host::PEER_ROWS) {
             let key = format!("home/peer/{}", peer.key);
+            // `live` is this node's own link to the peer, not the peer's
+            // health: with no link the peer may still be up, so the word
+            // names the link, as Members says it (#9).
             let (state, tone) = match peer.live {
                 true => ("Online", Tone::Success),
-                false => ("Offline", Tone::Neutral),
+                false => ("Not linked", Tone::Neutral),
             };
             rows.push(kit::sized(
                 kit::spaced(
