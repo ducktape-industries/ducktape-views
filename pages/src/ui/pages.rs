@@ -257,6 +257,7 @@ impl PagesView {
         if let Node::Button { checked, .. } = &mut comments {
             *checked = Some(self.block_comments_open);
         }
+        let comments = disclosure(comments, self.block_comments_open);
         let mut controls = vec![
             kit::nowrap(kit::text_size(
                 kit::tone_text("pages/toolbar/save-status", status.0, status.1),
@@ -710,15 +711,18 @@ impl PagesView {
         if !resolved.is_empty() {
             threads.push(leading(
                 "pages/comments/resolved/lead",
-                named(
-                    action(
-                        "pages/comments/resolved",
-                        crate::host::resolved_label(&resolved),
-                        Message::ToggleResolvedComments,
-                        true,
-                        ButtonPreset::Text,
+                disclosure(
+                    named(
+                        action(
+                            "pages/comments/resolved",
+                            crate::host::resolved_label(&resolved),
+                            Message::ToggleResolvedComments,
+                            true,
+                            ButtonPreset::Text,
+                        ),
+                        "Resolved threads",
                     ),
-                    "Resolved threads",
+                    self.resolved_open,
                 ),
             ));
             if self.resolved_open {

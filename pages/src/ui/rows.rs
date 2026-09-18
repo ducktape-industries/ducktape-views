@@ -88,10 +88,7 @@ impl PagesView {
                     };
                     *label = Some(format!("{verb} {title}"));
                 }
-                if let Node::Button { expanded, .. } = &mut toggle {
-                    *expanded = Some(!folded);
-                }
-                toggle
+                disclosure(toggle, !folded)
             }
             false => kit::space(Some(Length::Fixed(PAGE_FOLD_SLOT)), None),
         };
@@ -445,19 +442,22 @@ impl PagesView {
         let toggle = crate::host::reply_toggle_label(thread, expanded);
         if !toggle.is_empty() {
             rows.push(kit::padded(
-                named(
-                    action(
-                        format!("{key}/replies"),
-                        toggle,
-                        Message::ToggleThreadReplies(thread.id.clone()),
-                        !disabled,
-                        ButtonPreset::Text,
+                disclosure(
+                    named(
+                        action(
+                            format!("{key}/replies"),
+                            toggle,
+                            Message::ToggleThreadReplies(thread.id.clone()),
+                            !disabled,
+                            ButtonPreset::Text,
+                        ),
+                        if expanded {
+                            "Fewer replies"
+                        } else {
+                            "Show every reply"
+                        },
                     ),
-                    if expanded {
-                        "Fewer replies"
-                    } else {
-                        "Show every reply"
-                    },
+                    expanded,
                 ),
                 wire::Edges {
                     top: 0.,
