@@ -257,7 +257,7 @@ impl NodeView {
     }
     fn on_logs_arrived(&mut self, item: crate::host::LogItem) -> Task<Message> {
         self.host_error = item.error;
-        self.log_lines = host::push_logs(&self.log_lines, &item.lines);
+        host::push_logs(&mut self.log_lines, item.lines);
         Task::none()
     }
     /// The node's answer to a retune lands beside the control that asked,
