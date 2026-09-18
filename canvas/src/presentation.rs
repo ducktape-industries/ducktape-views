@@ -466,6 +466,11 @@ impl BoardsView {
         vec![
             Node::MouseArea {
                 key: "boards/menu-backdrop".into(),
+                role: Some(wire::Role::Button),
+                label: Some("Close menu".into()),
+                expanded: None,
+                selected: None,
+                checked: None,
                 on_press: Some(slots::message(Message::CloseMenu)),
                 on_release: None,
                 on_double_click: None,
@@ -1402,6 +1407,14 @@ impl BoardsView {
         };
         let mouse = Node::MouseArea {
             key: "boards/canvas".into(),
+            // The drawing surface: a press starts whatever the tool in hand
+            // draws. The wire has no canvas role; a button is what it is to
+            // the keyboard and the reader.
+            role: Some(wire::Role::Button),
+            label: Some("Board canvas".into()),
+            expanded: None,
+            selected: None,
+            checked: None,
             on_press: Some(slots::message(Message::Begin)),
             on_press_at: Some(slots::handler(Box::new(|(x, y)| {
                 Some(Message::Position(x, y))
@@ -3590,6 +3603,14 @@ impl BoardsView {
             // card still says it, where the box is the card's own and nothing
             // can crop it.
             placeholder: String::new(),
+            label: Some(
+                match shape.kind {
+                    Kind::Note => "Note text",
+                    Kind::Text => "Text",
+                    _ => "Shape label",
+                }
+                .into(),
+            ),
             width: Some((size[0] - 2. * letters.inset).max(40.)),
             // The editor fills the card. It cannot be asked to lay out to its
             // own content instead — a shrunk editor collapses to its first
