@@ -629,10 +629,10 @@ pub struct LogItem {
 }
 
 /// How many frames one item may carry. The ring's whole contents replay on
-/// subscribe, and one item per line would be one fold and one frame per
-/// line — 4,096 of each for a full ring. Chunking the frames that are
-/// ALREADY READY costs nothing when the stream is live (one line, one item)
-/// and turns the replay into a handful of folds.
+/// subscribe; chunking the frames that are ALREADY READY costs nothing when
+/// the stream is live (one line, one item). It does NOT batch a replay: the
+/// driver settles every host answer on its own, so a replay still reaches
+/// the fold one line per item — which is why [`push_logs`] costs the line.
 const LOG_FRAMES_PER_ITEM: usize = 512;
 
 /// The node's own log ring, as the `logs` topic: `rpc.stream` opens it under
@@ -736,23 +736,23 @@ fn clock_of(time: &str) -> String {
     format!("{secs}.{millis}")
 }
 
-/// A batch of lines onto the timeline, bounded and deduplicated by cursor:
-/// the ring replays on every re-subscribe, and a line already held is the
-/// same line.
-pub fn push_logs(lines: &[LogRow], arrived: &[LogRow]) -> Vec<LogRow> {
-    let mut next: Vec<LogRow> = lines.to_vec();
+/// A batch of lines onto the timeline IN PLACE, bounded and deduplicated by
+/// cursor: the ring replays on every re-subscribe, and a line already held
+/// is the same line. A replay reaches this fold one line at a time, up to
+/// 512 in one tick, so the fold costs the lines that arrived and never a
+/// copy of the timeline.
+pub fn push_logs(lines: &mut Vec<LogRow>, arrived: Vec<LogRow>) {
     for line in arrived {
         // ponytail: a bounded linear duplicate guard over 400 rows is
         // smaller than a second cursor index; revisit only if the window does
-        let duplicate = next.iter().any(|held| held.cursor == line.cursor);
+        let duplicate = lines.iter().any(|held| held.cursor == line.cursor);
         if duplicate {
             continue;
         }
-        next.push(line.clone());
+        lines.push(line);
     }
-    let overflow = next.len().saturating_sub(LOG_LINES_KEPT);
-    next.drain(..overflow);
-    next
+    let overflow = lines.len().saturating_sub(LOG_LINES_KEPT);
+    lines.drain(..overflow);
 }
 
 /// The tail of the timeline the frame draws, filtered by level and by text:

@@ -52,6 +52,7 @@ pub struct SettingsView {
     pub(crate) update_note: String,
     pub(crate) update_busy: bool,
     pub(crate) connection_serial: i64,
+    pub(crate) node_key: String,
     pub(crate) tier: String,
     pub(crate) admin: bool,
     pub(crate) members_line: String,
@@ -163,6 +164,7 @@ impl SettingsView {
             update_note: "".to_owned(),
             update_busy: false,
             connection_serial: 0,
+            node_key: "".to_owned(),
             tier: "".to_owned(),
             admin: false,
             members_line: "".to_owned(),
@@ -188,7 +190,7 @@ impl SettingsView {
     pub(crate) const PREFERRED_WINDOW_SIZE: &'static str = "none";
     /// This state's layout, digested — `snapshot_schema` holds it here.
     pub(crate) const SNAPSHOT_SCHEMA: &'static str =
-        "cc2dbf236ab7e71a54f26dee0d2ec0275e86875d2f9c8f9b57cd544a16678ad3";
+        "a82cb2074bcc93f6b90f7ae5323509f0400a00deeb8835c7791bdfe400a86ecd";
     pub(crate) fn snapshot(&self) -> Result<Vec<u8>, String> {
         wire::Snapshot {
             schema: Self::SNAPSHOT_SCHEMA.into(),
@@ -422,6 +424,7 @@ impl SettingsView {
         if !(item.error).is_empty() {
             return Task::none();
         }
+        self.node_key = item.next.node_key.to_owned();
         self.tier = item.next.tier.to_owned();
         self.admin = item.next.admin;
         self.members_line = item.next.members_line.to_owned();
@@ -1235,12 +1238,19 @@ impl SettingsView {
                                     "Node",
                                     kit::centered_row(
                                         "settings/node-row",
-                                        [settings_subtle(
-                                            "settings/view-node",
-                                            "Open node",
-                                            Message::ShowTab("node".into()),
-                                            true,
-                                        )],
+                                        [
+                                            kit::badge(
+                                                "settings/node-standing",
+                                                self.standing(),
+                                                kit::Tone::Neutral,
+                                            ),
+                                            settings_subtle(
+                                                "settings/view-node",
+                                                "Open node",
+                                                Message::ShowTab("node".into()),
+                                                true,
+                                            ),
+                                        ],
                                     ),
                                 ),
                                 rpc_endpoint,
@@ -1318,13 +1328,6 @@ impl SettingsView {
             );
         }
         let available = !self.account_busy && self.unlocked;
-        let tier = match self.tier.as_str() {
-            "validator" => "Validator",
-            "resident" => "Resident",
-            "guest" => "Guest",
-            _ => "",
-        };
-        let standing = self.reading(tier, self.members_answered);
         // the number sits beside its Copy button: wrapped, it would push the
         // button off the row
         let number = if self.account_number.is_empty() {
@@ -1351,11 +1354,6 @@ impl SettingsView {
                 )),
             ),
             kit::kv(
-                "settings/standing-row",
-                "Standing",
-                kit::badge("settings/standing", standing, kit::Tone::Neutral),
-            ),
-            kit::kv(
                 "settings/account-number-row",
                 "Number",
                 kit::centered_row(
@@ -1376,6 +1374,24 @@ impl SettingsView {
             ),
             kit::kv("settings/seat-row", "Key on this device", seat),
         ];
+        // the standing is the connected node's: it is yours only when the
+        // node signs with a key your account holds (#40)
+        if self.account_exists
+            && crate::host::account_holds_node_key(
+                &self.node_key,
+                &self.seat_key,
+                &self.account_key_rows,
+            )
+        {
+            identity.insert(
+                1,
+                kit::kv(
+                    "settings/standing-row",
+                    "Standing",
+                    kit::badge("settings/standing", self.standing(), kit::Tone::Neutral),
+                ),
+            );
+        }
         if self.account_exists {
             identity.push(setting_row(
                 "settings/rename-row",
@@ -1801,6 +1817,17 @@ impl SettingsView {
 impl SettingsView {
     /// A value the view reads for itself, or what stands in while it has
     /// not: the read is still out, or it failed and the notice above says so.
+    /// The connected node's standing in the roster, as a word.
+    fn standing(&self) -> String {
+        let tier = match self.tier.as_str() {
+            "validator" => "Validator",
+            "resident" => "Resident",
+            "guest" => "Guest",
+            _ => "",
+        };
+        self.reading(tier, self.members_answered)
+    }
+
     fn reading(&self, value: &str, answered: bool) -> String {
         let pending = !answered && self.host_error.is_empty();
         match (value.is_empty(), pending) {

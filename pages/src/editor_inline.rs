@@ -74,7 +74,8 @@ const OPENERS: &[char] = &['*', '_', '~', '+', '=', '`', 'h', '@', '<'];
 
 /// Byte-ranged mirror of `chat::client::inline_spans`, minus its account
 /// tokens: bare `http(s)://` runs, then the fences above, then `@name`
-/// mentions; unmatched or empty fences stay plain. Ranges land on char
+/// mentions; unmatched or empty fences stay plain. Unlike chat, an underscore
+/// inside a word is a letter — see [`fenced`]. Ranges land on char
 /// boundaries by construction — the scanner only advances through
 /// `char_indices`.
 pub fn inline_marks(line: &str) -> Vec<(Range<usize>, Inline)> {
@@ -107,14 +108,13 @@ pub fn inline_marks(line: &str) -> Vec<(Range<usize>, Inline)> {
             at = body.end + close;
             continue;
         }
-        let fence = FENCES
-            .iter()
-            .find_map(|(marker, kind)| fenced(rest, marker).map(|lens| (lens, *kind)));
-        let Some(((marker_len, inner_len), kind)) = fence else {
+        let fence = FENCES.iter().find_map(|(marker, kind)| {
+            fenced(line, at, marker).map(|body| (marker.len(), body, *kind))
+        });
+        let Some((marker_len, body, kind)) = fence else {
             at += rest.chars().next().map_or(1, char::len_utf8);
             continue;
         };
-        let body = at + marker_len..at + marker_len + inner_len;
         marks.push((at..body.start, Inline::Marker));
         marks.push((body.clone(), kind));
         marks.push((body.end..body.end + marker_len, Inline::Marker));
@@ -211,15 +211,39 @@ fn named_links(line: &str) -> Vec<(Range<usize>, Range<usize>, String)> {
     links
 }
 
-/// If `rest` opens with `marker` and a later closing `marker` encloses a
-/// non-empty body, `(marker byte length, body byte length)`.
-fn fenced(rest: &str, marker: &str) -> Option<(usize, usize)> {
-    let body = rest.strip_prefix(marker)?;
-    let close = body.find(marker)?;
-    if close == 0 {
+/// If `marker` opens at `at` and a later `marker` closes a non-empty body, the
+/// body's byte range. Both of the page's readers — this highlighter and the
+/// rich blocks — ask here, so they agree on what is a fence.
+///
+/// An underscore fence keeps CommonMark's flanking rule: a run of `_` opens
+/// only with no letter or digit before it and no space after, and closes only
+/// with no space before it and no letter or digit after. `my_var_name` is a
+/// word, not an italic `var`. `*` still emphasises inside a word, as in
+/// CommonMark.
+pub fn fenced(line: &str, at: usize, marker: &str) -> Option<Range<usize>> {
+    if !line[at..].starts_with(marker) {
         return None;
     }
-    Some((marker.len(), close))
+    let underscore = marker.starts_with('_');
+    let before = |edge: usize| line[..edge].trim_end_matches('_').chars().next_back();
+    let after = |edge: usize| line[edge..].trim_start_matches('_').chars().next();
+    let word = |c: Option<char>| c.is_some_and(char::is_alphanumeric);
+    let space = |c: Option<char>| c.is_none_or(char::is_whitespace);
+    if underscore && (word(before(at)) || space(after(at))) {
+        return None;
+    }
+    let start = at + marker.len();
+    let mut from = start;
+    loop {
+        let close = from + line[from..].find(marker)?;
+        if close == start {
+            return None;
+        }
+        if !underscore || !(space(before(close)) || word(after(close))) {
+            return Some(start..close);
+        }
+        from = close + marker.len();
+    }
 }
 
 /// If `rest` opens a bare link, its byte length: the renderer's rule — an

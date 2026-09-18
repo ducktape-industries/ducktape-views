@@ -4606,6 +4606,49 @@ fn the_save_chip_counts_one_change_in_the_singular() {
     let two = view.status();
     assert!(two.contains("2 changes"), "{two}");
 }
+/// Below a 960-wide stage the tool bar leaves the top for the bottom edge,
+/// where the camera island (bottom-left) and help (bottom-right) already
+/// stand. A centred bar 468 wide and a camera island about 280 wide meet on
+/// every such stage, and the camera, drawn later, covered Lock, Select and
+/// Pan. So the bar stands one island higher: an island is at most a tool
+/// square and its 4 + 1 chrome each side, and the bar's inset must clear that
+/// over the corner islands' inset, while still leaving the bar its width.
+#[test]
+fn a_compact_stage_stands_the_tool_bar_clear_of_the_bottom_islands() {
+    let mut view = view();
+    view.confirmed = Some(Board::new("Board".into(), "owner".into()).unwrap());
+    let island = presentation::TOOL + 2. * (4. + 1.);
+    for width in [640., 800., 959.] {
+        view.on_size(width, 700.);
+        let tree = view.view();
+        let inset = |key: &str| match node_at(&tree, key) {
+            Some(wire::Node::Overlay {
+                padding, align_y, ..
+            }) => (*padding, *align_y),
+            other => panic!("{key} is an island's overlay: {other:?}"),
+        };
+        let (bar, bar_y) = inset("boards/tools-float");
+        assert_eq!(
+            bar_y,
+            wire::AlignY::Bottom,
+            "at {width} the bar is on the bottom edge"
+        );
+        for corner in ["boards/camera-float", "boards/help-float"] {
+            let (corner_inset, corner_y) = inset(corner);
+            assert_eq!(corner_y, wire::AlignY::Bottom);
+            assert!(
+                bar >= corner_inset + island,
+                "at {width} the bar at {bar} from the bottom runs into {corner}, \
+                 {island} tall at {corner_inset}"
+            );
+        }
+        assert!(
+            width - 2. * bar >= presentation::TOOL_BAR,
+            "at {width} the bar's inset {bar} leaves it less than its width"
+        );
+    }
+}
+
 /// The chip sits after the board's name, and a long name pushed it under the
 /// tool bar where nobody could read it. The menu is given the room left of the
 /// tool bar and no more, and in it the chip is the rigid one: the name gives

@@ -599,6 +599,78 @@ fn the_activity_tab_streams_the_node_log_ring() {
     );
 }
 
+/// Counts the allocations made on the calling thread, so a test can weigh a
+/// tick natively: a wasm view has a fixed instruction budget per tick, and
+/// copying a string is an allocation here and a charge there.
+struct Counting;
+
+thread_local! {
+    static ALLOCATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+// SAFETY: every call goes straight to the system allocator; the counter is
+// a const-initialized thread local, which allocates nothing itself.
+unsafe impl std::alloc::GlobalAlloc for Counting {
+    unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+        let _ = ALLOCATIONS.try_with(|count| count.set(count.get() + 1));
+        unsafe { std::alloc::System.alloc(layout) }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+        unsafe { std::alloc::System.dealloc(ptr, layout) }
+    }
+}
+
+#[global_allocator]
+static ALLOCATOR: Counting = Counting;
+
+/// The ring replays WHOLE on subscribe — 4,096 frames on a busy node — and
+/// the app hands a view up to 512 stream items in ONE tick (its stream
+/// backlog), each settled on its own. The tick's budget is fixed, so folding
+/// a line must cost the line and never what the timeline already holds: a
+/// fold that copied the held window for every line made that tick hundreds
+/// of window copies, and the app stopped the whole view for running out of
+/// fuel the moment the Activity tab opened.
+#[test]
+fn a_replayed_ring_folds_each_line_without_copying_the_timeline() {
+    const BACKLOG: u64 = 512;
+    let (frame, _) = connected();
+    let (_, left) = settle(tick_native(press(&frame, "Node activity")));
+    let stream = left
+        .iter()
+        .find(|request| request.kind == "rpc.stream")
+        .unwrap_or_else(|| panic!("no `rpc.stream` request in {left:?}"))
+        .id;
+    let replay = |from: u64| -> Vec<Event> {
+        (from..from + BACKLOG)
+            .map(|cursor| {
+                let line = format!(
+                    "2026-09-18T14:03:29.{cursor:06}Z  INFO ducktape::consensus: finalized height={}",
+                    200_000 + cursor
+                );
+                item(stream, log_frame(cursor, &line).to_string().as_bytes())
+            })
+            .collect()
+    };
+    // the first backlog fills the timeline past what it keeps
+    tick_native(replay(1));
+    let events = replay(1 + BACKLOG);
+    let before = ALLOCATIONS.with(std::cell::Cell::get);
+    let frame = tick_native(events);
+    let per_line = (ALLOCATIONS.with(std::cell::Cell::get) - before) / BACKLOG as usize;
+    // the frame, its row and the render share are a few dozen; a fold that
+    // copies the timeline pays four strings for every row it holds
+    assert!(
+        per_line < 200,
+        "{per_line} allocations per replayed line: the fold copies the timeline"
+    );
+    let tail = format!(
+        "ducktape::consensus: finalized height={}",
+        200_000 + 2 * BACKLOG
+    );
+    assert!(has_text(&frame, &tail), "{:?}", texts(&frame));
+}
+
 /// Every cell of a fixed-height row keeps ONE LINE, on every tab. A reading
 /// is 24px, a list row 28px and a module row 32px, and the panel is as
 /// narrow as the pane: a height, a count, a digest, a capability name or a

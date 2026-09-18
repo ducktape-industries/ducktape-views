@@ -308,8 +308,12 @@ impl PagesView {
             *max_height = Some(size.1 as f32);
         }
         let shade = if kit::is_dark() { 0.5 } else { 0.16 };
-        Some(Node::Float {
-            key,
+        // The box around the float, not the card inside it: the host lays a
+        // float out in the box it is handed and paints its surface across
+        // that box. The stack layer is the whole screen — a slab from the
+        // press to the right edge over the page title.
+        let float = Node::Float {
+            key: key.clone(),
             x: x as f32,
             y: y as f32,
             scale: 1.,
@@ -321,7 +325,12 @@ impl PagesView {
             },
             radius: Some([8.; 4]),
             content: Box::new(card),
-        })
+        };
+        Some(kit::sized(
+            kit::container(format!("{key}/box"), float),
+            Some(Length::Fixed(size.0 as f32)),
+            Some(Length::Fixed(size.1 as f32)),
+        ))
     }
 
     fn search_result(&self, hit: &crate::host::PageSearchHit) -> Node {

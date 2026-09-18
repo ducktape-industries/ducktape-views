@@ -754,6 +754,22 @@ impl AgentsView {
                 kit::spaced(kit::column("agents/receipt-body", facts), 6.),
             ));
         }
+        if let host::OutputConnection::Refused(sentence) = &self.live.connection {
+            items.push(kit::notice(
+                "agents/output-refused",
+                kit::column(
+                    "agents/output-refused-body",
+                    [
+                        kit::strong(
+                            "agents/output-refused-title",
+                            "You cannot watch this run's output",
+                        ),
+                        kit::wrapping(kit::secondary("agents/output-refused-text", sentence)),
+                    ],
+                ),
+                Tone::Neutral,
+            ));
+        }
         if let host::OutputConnection::Failed(error) = &self.live.connection {
             items.push(kit::notice(
                 "agents/output-error",
@@ -909,10 +925,14 @@ impl AgentsView {
             ));
         }
         if self.live.answer.is_empty() && !show_progress {
-            items.push(kit::secondary(
-                "agents/conversation-empty",
-                "No reply is available for this run.",
-            ));
+            // a refused reader cannot know: the reply is in the output
+            let empty = match self.live.connection {
+                host::OutputConnection::Refused(_) => {
+                    "The reply comes with the run's output, which you cannot watch."
+                }
+                _ => "No reply is available for this run.",
+            };
+            items.push(kit::secondary("agents/conversation-empty", empty));
         }
         kit::spaced(kit::column("agents/conversation-panel", items), 14.)
     }
@@ -1065,18 +1085,24 @@ impl AgentsView {
     }
 
     fn editor(&self) -> Node {
+        let read_only = !self.can_edit && !self.creating;
+        // A reader cannot save, so the record reads as stored: a title that
+        // followed a draft would name an agent that does not exist.
+        let stored = self
+            .rows
+            .iter()
+            .find(|row| row.id == self.selected)
+            .map(|row| row.name.as_str());
+        let title = match (self.creating, stored) {
+            (true, _) => "New agent",
+            (false, Some(stored)) if read_only => stored,
+            (false, _) => &self.draft_name,
+        };
         let mut items = vec![kit::centered_row(
             "agents/editor-heading",
             [
                 kit::sized(
-                    kit::wrapping(kit::heading(
-                        "agents/editor-title",
-                        if self.creating {
-                            "New agent"
-                        } else {
-                            &self.draft_name
-                        },
-                    )),
+                    kit::wrapping(kit::heading("agents/editor-title", title)),
                     Some(Length::Fill),
                     None,
                 ),
@@ -1087,7 +1113,6 @@ impl AgentsView {
                 ),
             ],
         )];
-        let read_only = !self.can_edit && !self.creating;
         if read_only {
             items.push(kit::notice(
                 "agents/read-only-box",
@@ -1151,16 +1176,23 @@ impl AgentsView {
                 kit::wrapping(kit::mono("agents/id", &self.draft_id)),
             ));
         }
-        identity.push(kit::field(
-            "agents/name-field",
-            "Display name",
-            field(
-                "agents/name",
+        identity.push(match read_only {
+            true => kit::kv(
+                "agents/name-row",
                 "Display name",
-                &self.draft_name,
-                Message::BindDraftName,
+                kit::wrapping(kit::text("agents/name", title)),
             ),
-        ));
+            false => kit::field(
+                "agents/name-field",
+                "Display name",
+                field(
+                    "agents/name",
+                    "Display name",
+                    &self.draft_name,
+                    Message::BindDraftName,
+                ),
+            ),
+        });
         items.push(section("agents/identity", "Identity", identity));
         let capability = host::or_empty(&self.draft_capability);
         let executor = if self.can_edit {
@@ -1499,7 +1531,7 @@ impl AgentsView {
     pub(crate) const PREFERRED_WINDOW_SIZE: &'static str = "none";
     /// This state's layout, digested — `snapshot_schema` holds it here.
     pub(crate) const SNAPSHOT_SCHEMA: &'static str =
-        "b4af6857860fc1fedcbf5402adbf1fa3df726117feef73754437cd57fc4e005c";
+        "db839e7472373284f8d555195220d0f64449d110b06dd35b4fa6c1b86ec14dfa";
     pub(crate) fn snapshot(&self) -> Result<Vec<u8>, String> {
         self.validate_snapshot()?;
         wire::Snapshot {

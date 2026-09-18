@@ -263,11 +263,15 @@ pub(super) const ISLAND: f32 = 12.;
 /// would put the same action in two different spots.
 const MENU_WIDTH: f32 = 200.;
 /// The side of an icon-only tool.
-const TOOL: f32 = 36.;
+pub(super) const TOOL: f32 = 36.;
 /// How wide the tool bar stands: the lock and the tools are `TOOL` squares,
 /// and the hairline after the lock, the gaps and the island's inset and border
 /// come to less than one more.
 pub(super) const TOOL_BAR: f32 = (TOOLS.len() + 2) as f32 * TOOL;
+/// How far from an edge a float stands to clear the row of islands along that
+/// edge: their inset, then an island — at most a `TOOL` square and its chrome —
+/// and a gap.
+const PAST_ISLANDS: f32 = ISLAND + TOOL + 20.;
 /// The width of the zoom readout. Fixed on purpose — a readout that resized as
 /// you zoomed would shuffle the whole camera island sideways under the pointer
 /// that was zooming — which means it has to be wide enough for the WIDEST
@@ -361,14 +365,20 @@ impl BoardsView {
             dismiss,
         );
         if let Some(board) = &board {
-            let tools_y = if compact { AlignY::Bottom } else { AlignY::Top };
+            // A compact stage has no room at the top beside the menu, and no
+            // room at the bottom between the camera and help: the bar stands
+            // over them, one island up.
+            let (tools_y, tools_inset) = match compact {
+                true => (AlignY::Bottom, PAST_ISLANDS),
+                false => (AlignY::Top, ISLAND),
+            };
             stage = float(
                 "boards/tools-float",
                 stage,
                 self.tool_island(),
                 AlignX::Center,
                 tools_y,
-                ISLAND,
+                tools_inset,
                 None,
             );
             if let Some(inspector) = self.inspector_island(board) {
@@ -421,7 +431,7 @@ impl BoardsView {
                 card,
                 AlignX::Center,
                 AlignY::Top,
-                ISLAND + TOOL + 20.,
+                PAST_ISLANDS,
                 None,
             );
         }

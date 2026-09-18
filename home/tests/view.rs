@@ -4,7 +4,7 @@
 //! as `host.open_link` carrying a `duck://` address.
 
 use ducktape_view_guest::testing::{answer, find, has_text, item, measure, press, refuse, texts};
-use ducktape_view_guest::wire::{Frame, Node, Request};
+use ducktape_view_guest::wire::{Frame, Length, Node, Request};
 use home_view::host::Session;
 use home_view::{boot_native, tick_native};
 
@@ -265,7 +265,8 @@ fn a_connected_view_reads_every_card_through_the_kernel() {
         "Resident",
         "Online",
         "0badf00d",
-        "Offline",
+        // a peer this node has no link to, in Members' words (#9)
+        "Not linked",
         // the blocks card: the op-carrying block alone
         "abababab",
         "3 ops",
@@ -289,7 +290,7 @@ fn a_connected_view_reads_every_card_through_the_kernel() {
     }
     // a DM room, an archived room, a settled proposal and an op-less block
     // are not on the dashboard
-    for absent in ["#two", "#old", "Signal", "0 ops"] {
+    for absent in ["#two", "#old", "Signal", "0 ops", "Offline"] {
         assert!(
             !has_text(&frame, absent),
             "{absent} drawn: {:?}",
@@ -335,6 +336,29 @@ fn the_columns_follow_the_measured_pane() {
         assert!(has_text(&frame, card), "{card} lost: {:?}", texts(&frame));
     }
     assert!(frame.requests.is_empty(), "a measurement reads nothing");
+}
+
+/// Every rail is exactly its share of the pane, whatever its cards hold.
+/// The host draws `FillPortion` as a flex item no narrower than its widest
+/// one-line row, so one long room name or file message ran its rail past
+/// the pane's edge and cut the other rail (#35); `Fill` is 100% and gives
+/// way, so equal `Fill` rails split the row evenly and a long row's own
+/// `Fill` text is what gets cut.
+#[test]
+fn every_rail_gives_way_to_the_pane() {
+    let (frame, _) = connected_dashboard();
+    for width in [600., 900., 1400.] {
+        let frame = tick_native(measure(&frame, "home/viewport", width, 800.));
+        let Some(Node::Linear { children, .. }) = find(&frame, "home/columns") else {
+            panic!("no columns row at {width}");
+        };
+        for rail in children {
+            let Node::Linear { key, width: w, .. } = rail else {
+                panic!("a rail is a column: {rail:?}");
+            };
+            assert_eq!(*w, Some(Length::Fill), "{key} at {width}");
+        }
+    }
 }
 
 /// Every text in a card row keeps ONE line: the rows are built at a fixed

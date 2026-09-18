@@ -393,6 +393,26 @@ fn a_reader_who_is_not_the_controller_gets_the_record_read_only() {
     assert!(frame.requests.is_empty(), "{:?}", frame.requests);
 }
 
+/// A reader cannot save the record, so nothing on it takes typing: the
+/// display name is text, not a field, and the title is the STORED name. A
+/// title that followed a draft nobody can save named an agent that does not
+/// exist, while the list and the notice still said the stored one.
+#[test]
+fn a_read_only_record_takes_no_typing_and_keeps_its_stored_title() {
+    let (frame, _) = registered("9");
+    let frame = tick_native(press(&frame, "Reviewer Bot"));
+    let find = ducktape_view_guest::testing::find;
+    assert!(
+        !matches!(find(&frame, "agents/name"), Some(Node::Input { .. })),
+        "a record the reader may only read offers its name for typing"
+    );
+    assert!(matches!(
+        find(&frame, "agents/editor-title"),
+        Some(Node::Text { content, .. }) if content == "Reviewer Bot"
+    ));
+    assert!(has_text(&frame, "Reviewer Bot"));
+}
+
 #[test]
 fn the_controller_pauses_a_record_with_a_signed_op() {
     let (frame, _) = registered("7");
@@ -1123,12 +1143,15 @@ fn stream_errors_show_outside_the_disclosure_and_reconnect_the_same_run() {
     let frame = tick_native(vec![Event::Response {
         id: stream.id,
         result: Err(ducktape_view_guest::wire::Refusal::new(
-            "unauthorized",
-            "HTTP error: 403 Forbidden",
+            "stream_open_failed",
+            "could not open the node stream: connection reset",
         )),
         done: true,
     }]);
-    assert!(has_text(&frame, "HTTP error: 403 Forbidden"));
+    assert!(has_text(
+        &frame,
+        "could not open the node stream: connection reset"
+    ));
     assert!(!has_text(
         &frame,
         "No process details are available from this node. Older output may have expired."
@@ -1151,12 +1174,69 @@ fn stream_errors_show_outside_the_disclosure_and_reconnect_the_same_run() {
         .to_string()
         .as_bytes(),
     )]);
-    assert!(!has_text(&frame, "HTTP error: 403 Forbidden"));
+    assert!(!has_text(
+        &frame,
+        "could not open the node stream: connection reset"
+    ));
     let frame = tick_native(press(&frame, "Trace"));
     assert!(has_text(
         &frame,
         "Connected to the session. Waiting for its first process details…"
     ));
+}
+
+/// A run this key may not watch is a state of the reader, not a broken
+/// connection: no Reconnect changes who is asking. Both ways the node says so
+/// arrive here — a topic refused in band with the stream's `forbidden` code,
+/// then the close; or the upgrade itself refused, which the kernel classes
+/// `unauthorized`. The panel says the output is not this reader's, gives the
+/// node's own sentence for who may watch, offers no Reconnect, and the
+/// conversation does not claim there is no reply: it is in that output.
+#[test]
+fn a_run_this_key_may_not_watch_reads_as_a_state_and_offers_no_reconnect() {
+    let sentence = "run output requires the workspace token, the requester, or its program \
+                    controller — open `/v1/ws?run=<dispatch>` signed by an authorized key";
+    let in_band = |id: u64| {
+        vec![
+            item(
+                id,
+                json!({"type":"error","topic":"run-output:dispatch-foreign",
+                       "code":"forbidden","detail":sentence})
+                .to_string()
+                .as_bytes(),
+            ),
+            Event::Response {
+                id,
+                result: Ok(Vec::new()),
+                done: true,
+            },
+        ]
+    };
+    let at_upgrade = |id: u64| {
+        vec![Event::Response {
+            id,
+            result: Err(ducktape_view_guest::wire::Refusal::new(
+                "unauthorized",
+                sentence,
+            )),
+            done: true,
+        }]
+    };
+    for refusal in [&in_band as &dyn Fn(u64) -> Vec<Event>, &at_upgrade] {
+        let (_, left) = connect(booted(), "7", "dispatch-foreign", 1);
+        let stream = left
+            .iter()
+            .find(|request| request.kind == "rpc.stream")
+            .unwrap();
+        let frame = tick_native(refusal(stream.id));
+        assert!(has_text(&frame, "You cannot watch this run's output"));
+        assert!(has_text(&frame, sentence), "{:?}", texts(&frame));
+        assert!(
+            ducktape_view_guest::testing::find(&frame, "agents/output-retry").is_none(),
+            "a Reconnect here can only draw the same refusal"
+        );
+        assert!(!has_text(&frame, "No reply is available for this run."));
+    }
 }
 
 fn begin_registration() -> (Frame, u64) {
