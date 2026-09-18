@@ -256,7 +256,7 @@ pub(super) struct Lettering {
     pub(super) legible: bool,
 }
 /// The inset every island keeps from the stage's edge.
-const ISLAND: f32 = 12.;
+pub(super) const ISLAND: f32 = 12.;
 /// The width of the board's own menu. Fixed, because a menu whose width came
 /// from its longest row would change shape as rows come and go — and the rows
 /// come and go with what is under the cursor, so the same press in two places
@@ -264,6 +264,10 @@ const ISLAND: f32 = 12.;
 const MENU_WIDTH: f32 = 200.;
 /// The side of an icon-only tool.
 const TOOL: f32 = 36.;
+/// How wide the tool bar stands: the lock and the tools are `TOOL` squares,
+/// and the hairline after the lock, the gaps and the island's inset and border
+/// come to less than one more.
+pub(super) const TOOL_BAR: f32 = (TOOLS.len() + 2) as f32 * TOOL;
 /// The width of the zoom readout. Fixed on purpose — a readout that resized as
 /// you zoomed would shuffle the whole camera island sideways under the pointer
 /// that was zooming — which means it has to be wide enough for the WIDEST
@@ -340,10 +344,17 @@ impl BoardsView {
         // re-renders the card out from under the click.
         let picker_open = self.picking_a_board();
         let dismiss = (picker_open && board.is_some()).then_some(Message::BoardPicker);
+        // The menu shares the top edge with the tool bar whenever a board is
+        // open on a wide stage, and stops an inset short of it; otherwise only
+        // the stage's own edge stands in its way.
+        let menu_room = match board.is_some() && !compact {
+            true => (w - TOOL_BAR) / 2. - 2. * ISLAND,
+            false => w - 2. * ISLAND,
+        };
         stage = float(
             "boards/menu-float",
             stage,
-            self.menu_island(&board, picker_open),
+            self.menu_island(&board, picker_open, menu_room),
             AlignX::Left,
             AlignY::Top,
             ISLAND,
@@ -529,37 +540,59 @@ impl BoardsView {
         (card, height - GAP)
     }
     /// Top-left: the board's name and its save state; open, the board list.
-    fn menu_island(&self, board: &Option<Board>, open: bool) -> Node {
+    /// No wider than `room`, and the name is what gives way to it: the chip
+    /// is the one place a board says whether its work is kept, and a long
+    /// name used to push it under the tool bar.
+    fn menu_island(&self, board: &Option<Board>, open: bool, room: f32) -> Node {
         let title = board.as_ref().map_or("Boards", |b| b.title.as_str());
+        let mut switcher = action(
+            "boards/switcher",
+            title,
+            "Choose a board",
+            Message::BoardPicker,
+            board.is_some(),
+        );
+        // Inside the button only the name gives way; the ▾ is a word of its
+        // own after it, so the ellipsis cannot take it.
+        if let Node::Button { content, width, .. } = &mut switcher {
+            let name = wide(kit::nowrap(kit::text("boards/switcher/name", title)));
+            let caret = kit::nowrap(kit::text("boards/switcher/caret", "▾"));
+            let label = kit::spaced(kit::row("boards/switcher/label", [name, caret]), 6.);
+            *content = wire::ButtonContent::Child(Box::new(wide(label)));
+            *width = Some(Length::Fill);
+        }
+        // The host never shrinks a button, however it is sized, so the room
+        // the button gets is its box's: a box that gives the chip its width
+        // first and keeps what is left.
         let head = kit::spaced(
-            kit::centered_row(
+            wide(kit::centered_row(
                 "boards/menu-head",
                 [
-                    action(
-                        "boards/switcher",
-                        &format!("{title}  ▾"),
-                        "Choose a board",
-                        Message::BoardPicker,
-                        board.is_some(),
-                    ),
+                    kit::container("boards/switcher/room", switcher),
                     kit::nowrap(kit::caption("boards/sync", self.status())),
                 ],
-            ),
+            )),
             6.,
         );
-        if !open {
-            return island("boards/menu", head);
+        let mut menu = match open {
+            false => island("boards/menu", head),
+            true => {
+                let mut rows = vec![head, kit::divider("boards/menu-rule")];
+                rows.extend(self.picker());
+                kit::sized(
+                    island(
+                        "boards/menu",
+                        kit::spaced(kit::column("boards/menu-body", rows), 6.),
+                    ),
+                    Some(Length::Fixed(room.min(260.))),
+                    None,
+                )
+            }
+        };
+        if let Node::Container { max_width, .. } = &mut menu {
+            *max_width = Some(room);
         }
-        let mut rows = vec![head, kit::divider("boards/menu-rule")];
-        rows.extend(self.picker());
-        kit::sized(
-            island(
-                "boards/menu",
-                kit::spaced(kit::column("boards/menu-body", rows), 6.),
-            ),
-            Some(Length::Fixed(260.)),
-            None,
-        )
+        menu
     }
     /// Top-centre: the lock, then the tools, icon-only with their keys.
     fn tool_island(&self) -> Node {
