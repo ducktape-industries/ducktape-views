@@ -637,6 +637,47 @@ mod tests {
         );
     }
 
+    /// The host lays a float out in the box it is handed and paints its
+    /// surface and shadow across that whole box. Handed the screen's stack
+    /// layer, the row menu drew a slab from the press to the window's right
+    /// edge over the page title; its box must be the card's own size.
+    #[test]
+    fn the_row_menu_float_is_laid_out_in_a_box_of_the_card_size() {
+        fn parent_of_float<'a>(node: &'a wire::Node, key: &str) -> Option<&'a wire::Node> {
+            let children = node.children();
+            if children
+                .iter()
+                .any(|child| matches!(child, wire::Node::Float { key: k, .. } if k == key))
+            {
+                return Some(node);
+            }
+            children.iter().find_map(|child| parent_of_float(child, key))
+        }
+        let (mut app, _) = PagesView::boot();
+        app.connected = true;
+        app.pages = vec![crate::host::PageItem {
+            id: "beta".into(),
+            title: "BETA".into(),
+            parent: String::new(),
+            prefix: String::new(),
+            child_count: 0,
+        }];
+        app.update(Message::PressedAt(120., 200.));
+        app.update(Message::OpenPageRowMenu("beta".into()));
+        let root = app.view();
+        let parent = parent_of_float(&root, "PagesView/root/pages/page/beta/menu")
+            .expect("the row menu floats");
+        let wire::Node::Container { width, height, .. } = parent else {
+            panic!("the float's box is not the card's own: {:?}", parent.key());
+        };
+        assert_eq!(*width, Some(Length::Fixed(PAGE_MENU_WIDTH as f32)));
+        let rows = 4.;
+        assert_eq!(
+            *height,
+            Some(Length::Fixed(PAGE_MENU_INSET * 2. + rows * PAGE_MENU_ITEM_HEIGHT))
+        );
+    }
+
     /// The sidebar is Notion's page tree: a child sits one step under its
     /// parent, a parent carries a fold toggle, and folding it hides its
     /// whole subtree — and only that.
