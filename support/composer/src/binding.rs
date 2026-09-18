@@ -267,6 +267,9 @@ pub fn editor<M: 'static>(
         on_document,
         editable,
         placeholder: placeholder.into(),
+        // the field's accessible name is what its placeholder asks for, the
+        // rule `kit::input` keeps for a plain input
+        label: (!placeholder.is_empty()).then(|| placeholder.into()),
         width: None,
         height: None,
         // one row of body text, and room to grow to about eight before the
