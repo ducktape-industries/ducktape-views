@@ -5,8 +5,8 @@
 
 use ducktape_view_guest::testing::{answer, has_text, item, press, refuse, texts};
 use ducktape_view_guest::wire::{Frame, Length, Node, Request, Wrapping};
-use governance_view::host::{Session, TasteRow};
 use governance_view::boot_native;
+use governance_view::host::{Session, TasteRow};
 
 /// The view's own tick, refusing a frame assistive technology cannot read:
 /// every tree these tests render is checked.

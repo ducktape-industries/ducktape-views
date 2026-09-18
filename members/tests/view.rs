@@ -6,8 +6,8 @@
 
 use ducktape_view_guest::testing::{answer, has_text, item, press, refuse, texts};
 use ducktape_view_guest::wire::{Event, Frame, Node, Request};
-use members_view::host::{Copy, Session};
 use members_view::boot_native;
+use members_view::host::{Copy, Session};
 
 /// The view's own tick, refusing a frame assistive technology cannot read:
 /// every tree these tests render is checked.
