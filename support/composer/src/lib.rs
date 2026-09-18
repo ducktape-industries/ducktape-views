@@ -289,33 +289,37 @@ mod document_snapshot {
 mod tests {
     use super::*;
 
+    /// Bold is `**…**` and italic `*…*`: the chat message parser reads
+    /// emphasis by the flanking rule, so an `_` inside a word is a letter.
     #[test]
     fn formatting_wraps_the_latest_selection_without_losing_mention_identity() {
         let choices = vec![MentionChoice {
             token: "<@7>".into(),
             label: "Ada".into(),
         }];
-        let mut draft = Draft::from_body("Hi <@7>", &choices);
-        draft.editor.move_to(wire::EditorCursor {
-            position: wire::EditorPosition { line: 0, column: 7 },
-            selection: Some(wire::EditorPosition { line: 0, column: 3 }),
-        });
-        let before = draft.editor.text();
-        let cursor = draft.editor.cursor();
-        let wire::EditorDecision::Apply {
-            patches,
-            cursor: next,
-            ..
-        } = draft.decide("bold", &choices, draft.editor.state_view())
-        else {
-            panic!("format decision");
-        };
-        let after = wire::patched_editor_text(&before, &patches, next).unwrap();
-        draft.committed(&before, &after, cursor, "bold", &choices);
-        draft
-            .editor
-            .replace(Editor::new(after), draft.editor.reset_revision());
-        assert_eq!(draft.body(), "Hi **<@7>**");
+        for (tag, body) in [("bold", "Hi **<@7>**"), ("italic", "Hi *<@7>*")] {
+            let mut draft = Draft::from_body("Hi <@7>", &choices);
+            draft.editor.move_to(wire::EditorCursor {
+                position: wire::EditorPosition { line: 0, column: 7 },
+                selection: Some(wire::EditorPosition { line: 0, column: 3 }),
+            });
+            let before = draft.editor.text();
+            let cursor = draft.editor.cursor();
+            let wire::EditorDecision::Apply {
+                patches,
+                cursor: next,
+                ..
+            } = draft.decide(tag, &choices, draft.editor.state_view())
+            else {
+                panic!("format decision");
+            };
+            let after = wire::patched_editor_text(&before, &patches, next).unwrap();
+            draft.committed(&before, &after, cursor, tag, &choices);
+            draft
+                .editor
+                .replace(Editor::new(after), draft.editor.reset_revision());
+            assert_eq!(draft.body(), body);
+        }
     }
 
     #[test]
