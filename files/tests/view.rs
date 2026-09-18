@@ -108,8 +108,8 @@ fn session(connected: bool) -> Vec<u8> {
     routed_session(connected, "", 0)
 }
 
-/// The session with a `duck://files/...` push on it: the path the shell
-/// resolved, and the serial that says a push happened.
+/// The session with a `duck://<chain>/files/<path…>` push on it: the
+/// address, and the serial that says a push happened.
 fn routed_session(connected: bool, route: &str, route_serial: i64) -> Vec<u8> {
     serde_json::to_vec(&Session {
         connected,
@@ -534,7 +534,7 @@ fn a_duck_link_lands_the_view_on_the_file_it_names() {
     // the push: a file in another directory
     let frame = tick_native(vec![item(
         held.session,
-        &routed_session(true, "/shared/docs/plan.md", 1),
+        &routed_session(true, "duck://testnet-0a1b2c3d/files/shared/docs/plan.md", 1),
     )]);
     assert_eq!(
         ls_of(&frame, "/shared/docs").1["path"],
@@ -560,7 +560,7 @@ fn a_duck_link_lands_the_view_on_the_file_it_names() {
     // not moved, so only the generation can make this land a second time
     let frame = tick_native(vec![item(
         held.session,
-        &routed_session(true, "/shared/docs/plan.md", 2),
+        &routed_session(true, "duck://testnet-0a1b2c3d/files/shared/docs/plan.md", 2),
     )]);
     assert_eq!(ls_of(&frame, "/shared/docs").1["path"], "/shared/docs");
     assert_eq!(
@@ -568,6 +568,26 @@ fn a_duck_link_lands_the_view_on_the_file_it_names() {
         serde_json::json!({}),
         "the same address twice reads the file again"
     );
+}
+
+/// An address duckfs could not hold a file at — here a name in decomposed,
+/// not NFC, form — lands nowhere and says why where the reader looks.
+#[test]
+fn a_refused_address_says_why_and_leaves_the_view_where_it_was() {
+    let (frame, held) = connected_with_listing();
+    let frame = with_preview(&frame, "# README");
+    let frame = tick_native(vec![item(
+        held.session,
+        &routed_session(true, "duck://testnet-0a1b2c3d/files/shared/e%CC%81.md", 1),
+    )]);
+    assert!(
+        texts(&frame)
+            .iter()
+            .any(|text| text.contains("not NFC-normalized")),
+        "{:?}",
+        texts(&frame)
+    );
+    assert!(has_text(&frame, "/shared/README.md"), "{:?}", texts(&frame));
 }
 
 /// A files block re-reads the workspace through the one live subscription.
@@ -749,7 +769,11 @@ fn get_info_on_a_path_no_snapshot_holds_names_no_snapshot() {
     // and the address itself is what the inspector describes
     let frame = tick_native(vec![item(
         held.session,
-        &routed_session(true, "/shared/nowhere/missing.txt", 1),
+        &routed_session(
+            true,
+            "duck://testnet-0a1b2c3d/files/shared/nowhere/missing.txt",
+            1,
+        ),
     )]);
     let (probe, params) = files_get(&frame, "stat");
     assert_eq!(params["path"], "/shared/nowhere/missing.txt");
@@ -787,7 +811,11 @@ fn get_info_on_a_path_the_head_does_not_hold_is_unknown_however_deep_the_history
     let (_frame, session_id) = connected_with_history(&nine_snapshots());
     let frame = tick_native(vec![item(
         session_id,
-        &routed_session(true, "/shared/nowhere/missing.txt", 1),
+        &routed_session(
+            true,
+            "duck://testnet-0a1b2c3d/files/shared/nowhere/missing.txt",
+            1,
+        ),
     )]);
     let ls = ls_of(&frame, "/shared/nowhere").0.id;
     let frame = walk_nine_touching_nothing(frame, "/shared/nowhere/missing.txt");
@@ -966,7 +994,7 @@ fn a_choice_survives_a_refusal_and_a_page_not_yet_walked() {
     // a deep link into a directory whose first page does not carry the file
     let frame = tick_native(vec![item(
         held.session,
-        &routed_session(true, "/shared/big/zz.md", 1),
+        &routed_session(true, "duck://testnet-0a1b2c3d/files/shared/big/zz.md", 1),
     )]);
     let ls = ls_of(&frame, "/shared/big").0.id;
     let frame = tick_native(vec![answer(
@@ -1786,7 +1814,7 @@ fn a_text_preview_gives_the_native_reader_a_scrollable_height() {
     let (_, held) = connected_with_listing();
     let frame = tick_native(vec![item(
         held.session,
-        &routed_session(true, "/shared/notes.txt", 1),
+        &routed_session(true, "duck://testnet-0a1b2c3d/files/shared/notes.txt", 1),
     )]);
     let head = files_get(&frame, "refs").0.id;
     let frame = tick_native(vec![answer(head, &refs())]);
@@ -1847,7 +1875,7 @@ fn a_drop_into_a_namespace_root_refuses_before_reading_device_bytes() {
     let (_, held) = connected_with_listing();
     let frame = tick_native(vec![item(
         held.session,
-        &routed_session(true, "/README.md", 1),
+        &routed_session(true, "duck://testnet-0a1b2c3d/files/README.md", 1),
     )]);
     let _ = settle_workspace(&frame, "/", &empty_listing());
     let frame = tick_native(vec![item(

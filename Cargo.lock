@@ -1091,8 +1091,10 @@ name = "ducktape-view-files"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "duck-address",
  "duckfs-core",
  "ducktape-view-guest",
+ "files-wire",
  "serde",
  "serde_json",
 ]
@@ -1319,6 +1321,16 @@ dependencies = [
  "serde",
  "serde_json",
  "view-wire",
+]
+
+[[package]]
+name = "files-wire"
+version = "0.1.0"
+source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#2af877933fc0164a12e3c9f26aa4b886201aec6c"
+dependencies = [
+ "duck-address",
+ "duckfs-core",
+ "refusal-class",
 ]
 
 [[package]]
@@ -2057,13 +2069,27 @@ name = "pages-view"
 version = "0.1.0"
 dependencies = [
  "design",
+ "duck-address",
  "ducktape-view-files",
  "ducktape-view-guest",
  "futures",
+ "pages-wire",
  "pulldown-cmark",
  "serde",
  "serde_json",
  "view-wire",
+]
+
+[[package]]
+name = "pages-wire"
+version = "0.1.0"
+source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#2af877933fc0164a12e3c9f26aa4b886201aec6c"
+dependencies = [
+ "duck-address",
+ "index-guest",
+ "sdk",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

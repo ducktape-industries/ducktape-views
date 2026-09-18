@@ -212,7 +212,14 @@ impl FilesView {
     /// is what the browser lists, the file itself is what the inspector
     /// reads. The same address twice is the same two subscription keys, so
     /// the generation is what makes the second push read again.
-    fn on_route_to(&mut self, target: String) -> Task<Message> {
+    fn on_route_to(&mut self, address: String) -> Task<Message> {
+        let target = match ducktape_view_files::address_path(&address) {
+            Ok(path) => path,
+            Err(refused) => {
+                self.notice = refused.sentence;
+                return Task::none();
+            }
+        };
         self.generation += 1;
         self.nav.go(&crate::host::fs_parent(&target));
         self.land();

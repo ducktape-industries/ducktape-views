@@ -75,7 +75,7 @@ pub struct FilesView {
     pub(crate) account: String,
     /// moves when the session comes up and after every write: every read restarts
     pub(crate) generation: i64,
-    /// the last `duck://files/...` push this view has landed on
+    /// the last `duck://<chain>/files/<path…>` push this view has landed on
     pub(crate) route_serial: i64,
     // ---- where the reader stands ----
     pub(crate) nav: Navigation,
