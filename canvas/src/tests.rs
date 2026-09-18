@@ -4614,14 +4614,26 @@ fn the_save_chip_counts_one_change_in_the_singular() {
 }
 /// The chip sits after the board's name, and a long name pushed it under the
 /// tool bar where nobody could read it. The menu is given the room left of the
-/// tool bar and no more; inside it the name is the one that gives way, cut to
-/// a line, while the chip keeps its own width.
+/// tool bar and no more, and in it the chip is the rigid one: the name gives
+/// way, cut to a line, and the ▾ after it stays.
+///
+/// The sizes mean what the host makes of them: `Fill` is the whole of the
+/// parent less what its rigid siblings keep, a one-line `Shrink` text keeps its
+/// width, and a button keeps whatever width it is given. So it is the box
+/// around the button that gives way, never the button.
 #[test]
 fn a_long_board_name_gives_way_to_the_save_chip_and_not_the_other_way() {
     let mut view = view();
     let title = "boards-views-accept-20260918t120040-c2-with-a-longer-tail-60";
     assert_eq!(title.len(), 60);
     view.confirmed = Some(Board::new(title.into(), "owner".into()).unwrap());
+    // The chip at its longest: a count of changes in two digits.
+    for i in 0..12 {
+        let _ = card(&mut view, &format!("c{i}"), i * 40);
+    }
+    assert!(view.status().contains("12 changes"), "{}", view.status());
+    let fill = Some(wire::Length::Fill);
+    let one_line = (Some(wire::Length::Shrink), Some(wire::Wrapping::None));
     // The narrowest stage that still keeps the tool bar at the top, the stage
     // the chip went missing on, and a wide one.
     for width in [960., 1080., 1440.] {
@@ -4639,50 +4651,90 @@ fn a_long_board_name_gives_way_to_the_save_chip_and_not_the_other_way() {
             "at {width} the board menu may run to {max_width:?}, under the tool bar at \
              {tools_start}"
         );
-        let Some(wire::Node::Button {
-            width: button,
-            content,
+        let Some(wire::Node::Linear {
+            width: head,
+            children,
             ..
-        }) = node_at(&tree, "boards/switcher")
+        }) = node_at(&tree, "boards/menu-head")
         else {
-            panic!("the board's name is the button that opens the list");
+            panic!("the board menu has no head");
         };
-        let wire::ButtonContent::Child(name) = content else {
-            panic!("the board's name is a bare label, which keeps its whole width: {content:?}");
-        };
-        let wire::Node::Text {
-            content: words,
-            width: name_width,
-            options,
-            ..
-        } = name.as_ref()
+        let [
+            wire::Node::Container {
+                key,
+                width: room,
+                content: switcher,
+                ..
+            },
+            wire::Node::Text {
+                content: chip,
+                width: chip_width,
+                options: chip_options,
+                ..
+            },
+        ] = children.as_slice()
         else {
-            panic!("the board's name is not a line of text: {name:?}");
+            panic!("the head is the switcher's box, then the chip: {children:?}");
         };
-        assert!(words.starts_with(title));
+        assert_eq!(key, "boards/switcher/room");
         assert_eq!(
-            (*button, *name_width, options.wrapping),
-            (
-                Some(wire::Length::Fill),
-                Some(wire::Length::Fill),
-                Some(wire::Wrapping::None)
-            ),
-            "the name has to take only the room it is given, on one line, and be cut there"
+            (*head, *room),
+            (fill, fill),
+            "the head spans the menu, and the switcher's box takes what the chip leaves"
         );
-        let Some(wire::Node::Text {
-            content: chip,
-            width: chip_width,
-            options,
-            ..
-        }) = node_at(&tree, "boards/sync")
-        else {
-            panic!("the save chip is not drawn");
-        };
         assert_eq!(*chip, view.status());
         assert_eq!(
-            (*chip_width, options.wrapping),
-            (Some(wire::Length::Shrink), Some(wire::Wrapping::None)),
+            (*chip_width, chip_options.wrapping),
+            one_line,
             "the chip has to keep its own width whatever the name beside it needs"
+        );
+        let wire::Node::Button {
+            width: button,
+            content: wire::ButtonContent::Child(label),
+            ..
+        } = switcher.as_ref()
+        else {
+            panic!("the board's name is the button that opens the list: {switcher:?}");
+        };
+        let wire::Node::Linear {
+            width: label_width,
+            children,
+            ..
+        } = label.as_ref()
+        else {
+            panic!("the button holds the name and the ▾ side by side: {label:?}");
+        };
+        let [
+            wire::Node::Text {
+                content: name,
+                width: name_width,
+                options,
+                ..
+            },
+            wire::Node::Text {
+                content: caret,
+                width: caret_width,
+                options: caret_options,
+                ..
+            },
+        ] = children.as_slice()
+        else {
+            panic!("the button holds the name, then the ▾: {children:?}");
+        };
+        assert_eq!(
+            (*button, *label_width),
+            (fill, fill),
+            "the button is as wide as its box, and the name and ▾ as the button"
+        );
+        assert_eq!(
+            (name.as_str(), *name_width, options.wrapping),
+            (title, fill, Some(wire::Wrapping::None)),
+            "the name has to take only the room the ▾ leaves, on one line, and be cut there"
+        );
+        assert_eq!(
+            (caret.as_str(), (*caret_width, caret_options.wrapping)),
+            ("▾", one_line),
+            "the ▾ is a word of its own, not the tail an ellipsis cuts off the name"
         );
     }
 }

@@ -545,28 +545,33 @@ impl BoardsView {
     /// name used to push it under the tool bar.
     fn menu_island(&self, board: &Option<Board>, open: bool, room: f32) -> Node {
         let title = board.as_ref().map_or("Boards", |b| b.title.as_str());
-        let label = format!("{title}  ▾");
         let mut switcher = action(
             "boards/switcher",
-            &label,
+            title,
             "Choose a board",
             Message::BoardPicker,
             board.is_some(),
         );
+        // Inside the button only the name gives way; the ▾ is a word of its
+        // own after it, so the ellipsis cannot take it.
         if let Node::Button { content, width, .. } = &mut switcher {
-            let name = kit::nowrap(kit::text("boards/switcher/name", label));
-            *content =
-                wire::ButtonContent::Child(Box::new(kit::sized(name, Some(Length::Fill), None)));
+            let name = wide(kit::nowrap(kit::text("boards/switcher/name", title)));
+            let caret = kit::nowrap(kit::text("boards/switcher/caret", "▾"));
+            let label = kit::spaced(kit::row("boards/switcher/label", [name, caret]), 6.);
+            *content = wire::ButtonContent::Child(Box::new(wide(label)));
             *width = Some(Length::Fill);
         }
+        // The host never shrinks a button, however it is sized, so the room
+        // the button gets is its box's: a box that gives the chip its width
+        // first and keeps what is left.
         let head = kit::spaced(
-            kit::centered_row(
+            wide(kit::centered_row(
                 "boards/menu-head",
                 [
-                    switcher,
+                    kit::container("boards/switcher/room", switcher),
                     kit::nowrap(kit::caption("boards/sync", self.status())),
                 ],
-            ),
+            )),
             6.,
         );
         let mut menu = match open {
