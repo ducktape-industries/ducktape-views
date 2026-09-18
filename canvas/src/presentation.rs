@@ -1075,7 +1075,7 @@ impl BoardsView {
                     [action(
                         "boards/lost-keep",
                         "Put it on a new card",
-                        "Put the words on a new card where the old one stood",
+                        "Put the words on a new card",
                         Message::KeepLostWords,
                         self.session.connected,
                     )],
