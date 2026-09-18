@@ -265,6 +265,41 @@ fn a_connected_view_reads_its_own_standing_and_key_rows() {
     }
 }
 
+/// A throwaway seat with no account, connected to a node that is a
+/// validator: the validator standing is the NODE's, read off its key. Your
+/// identity says nothing about a standing this key does not hold, and the
+/// network pane's Node row carries the node's own (#40).
+#[test]
+fn a_seat_without_an_account_is_not_given_the_nodes_standing() {
+    let session = Session {
+        seat_key: "3d55b0f0".into(),
+        account_name: String::new(),
+        account_number: String::new(),
+        account_exists: false,
+        ..facts()
+    };
+    let (frame, _, _) = connected(&session, 0);
+    let frame = tick_native(press(&frame, "Account"));
+    assert!(
+        has_text(&frame, "This device holds a key but no account yet."),
+        "{:?}",
+        texts(&frame)
+    );
+    for claim in ["Standing", "Validator"] {
+        assert!(!has_text(&frame, claim), "{claim}: {:?}", texts(&frame));
+    }
+    let frame = tick_native(press(&frame, "Network"));
+    assert_eq!(badge(&frame, "settings/node-standing"), "Validator");
+}
+
+/// The words of the badge keyed `key`.
+fn badge(frame: &Frame, key: &str) -> String {
+    match find(frame, &format!("{key}/text")) {
+        Some(Node::Text { content, .. }) => content.clone(),
+        other => panic!("no badge {key}: {other:?}"),
+    }
+}
+
 #[test]
 fn each_tab_selects_only_its_own_groups_inside_the_shared_scroll_root() {
     let panes = ["General", "Network", "Account", "Security"];
@@ -582,9 +617,10 @@ fn raw_tokens_read_as_words_and_a_pending_read_says_so() {
     let props = request(&frame, "settings.props").id;
     // the session is in, the standing and key reads are still out
     let frame = tick_native(vec![item(props, &encoded(&session))]);
-    let frame = tick_native(press(&frame, "Account"));
-    assert!(has_text(&frame, "Reading…"), "{:?}", texts(&frame));
+    let frame = tick_native(press(&frame, "Network"));
+    assert_eq!(badge(&frame, "settings/node-standing"), "Reading…");
     assert!(!has_text(&frame, "validator"), "{:?}", texts(&frame));
+    let frame = tick_native(press(&frame, "Account"));
     assert!(
         has_text(&frame, "This code expires in 1:07"),
         "{:?}",

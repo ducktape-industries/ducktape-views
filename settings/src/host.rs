@@ -198,10 +198,14 @@ pub fn connection_serial_after(was_connected: bool, connected: bool, serial: i64
 
 // ---------- this node's standing ----------
 
-/// What the network card says about this device: its standing, whether that
-/// standing is a quorum seat, and the workspace's headcount.
+/// What the network card says about the NODE this device is connected to:
+/// its standing, whether that standing is a quorum seat, and the
+/// workspace's headcount. It is this device's own only when the node signs
+/// with a key this account holds, see [`account_holds_node_key`].
 #[derive(Clone, Debug, Default, Hash, PartialEq)]
 pub struct Standing {
+    /// the key the standing was read for: the node's, off `rpc.status`
+    pub node_key: String,
     /// `validator` | `resident` | `guest`, or "" while the roster has not
     /// answered — the empty answer is load-bearing, see [`fold_standing`].
     pub tier: String,
@@ -310,10 +314,19 @@ pub fn fold_standing(
         (false, false, false) => "guest".into(),
     };
     Standing {
+        node_key: node_key.to_owned(),
         tier,
         admin,
         members_line: headcount(i64::try_from(humans).unwrap_or(i64::MAX), agents),
     }
+}
+
+/// Whether the node's standing is this account's own: the node signs with a
+/// key the account holds — the seat itself, or one of the account's keys. A
+/// node reached over the network holds its own key, and its standing says
+/// nothing about this seat (#40).
+pub fn account_holds_node_key(node_key: &str, seat_key: &str, rows: &[AccountKeyRow]) -> bool {
+    !node_key.is_empty() && (node_key == seat_key || rows.iter().any(|row| row.pubkey == node_key))
 }
 
 /// `N humans · M agents` — the workspace shows people AND machines.
