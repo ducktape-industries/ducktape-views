@@ -101,7 +101,7 @@ pub struct SessionItem {
 pub fn session() -> ducktape_view_guest::Subscription<SessionItem> {
     ducktape_view_guest::Subscription::run(|| {
         host::subscribe("files.props", &[]).map(|answer| {
-            let read = answer.map_err(host::said).and_then(|bytes| {
+            let read = answer.map_err(refusal_line).and_then(|bytes| {
                 serde_json::from_slice(&bytes).map_err(|error| error.to_string())
             });
             match read {
@@ -760,7 +760,7 @@ async fn submit_commit(
     });
     host::request("op.submit", &serde_json::to_vec(&op).expect("encodes"))
         .await
-        .map_err(host::said)?;
+        .map_err(refusal_line)?;
     Ok(())
 }
 
@@ -807,10 +807,25 @@ pub fn open_link(url: &str) -> bool {
 
 // ---------- the kernel calls ----------
 
+/// A refusal as this view draws it: the refusing module's sentence, then its
+/// token in brackets — `path not found: /x [files_query]`. It is the line
+/// duckfs's own `refusal_line` prints for the CLI and every rejection's
+/// `Display`, so the reader sees one shape of refusal wherever it surfaces;
+/// `host::said` would drop the token on the way in, and with it who refused.
+///
+/// Every refusal the view draws is written here and nowhere else. A reply
+/// this seam could not DECODE is its own words, not a refusal, and stays a
+/// plain sentence with no token nobody sent. Nothing branches on the token: the
+/// files module answers every query under the one `files_query` class, so it
+/// names the refusal and does not yet sort it.
+fn refusal_line(refused: host::Refusal) -> String {
+    format!("{} [{}]", refused.sentence, refused.reason)
+}
+
 async fn request(kind: &str, ask: &serde_json::Value) -> Result<serde_json::Value, String> {
     let bytes = host::request(kind, &serde_json::to_vec(ask).expect("encodes"))
         .await
-        .map_err(host::said)?;
+        .map_err(refusal_line)?;
     serde_json::from_slice(&bytes).map_err(|error| error.to_string())
 }
 
@@ -997,7 +1012,7 @@ pub fn drops()
     ducktape_view_guest::Subscription::run(|| {
         host::subscribe("fs.drops", b"{}").map(|reply| {
             reply
-                .map_err(host::said)
+                .map_err(refusal_line)
                 .and_then(|bytes| serde_json::from_slice(&bytes).map_err(|error| error.to_string()))
         })
     })
@@ -1030,7 +1045,7 @@ pub async fn upload_files(
             for pending in files {
                 ducktape_view_files::release(&pending.token).await;
             }
-            return Err(host::said(error));
+            return Err(refusal_line(error));
         }
     }
     Ok(())
