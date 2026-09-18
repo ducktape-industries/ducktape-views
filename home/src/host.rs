@@ -434,7 +434,7 @@ pub fn fold_blocks(reply: &serde_json::Value) -> Vec<BlockRow> {
             })
         })
         .collect();
-    rows.sort_by(|a, b| b.height.cmp(&a.height));
+    rows.sort_by_key(|row| std::cmp::Reverse(row.height));
     rows.truncate(BLOCK_ROWS);
     rows
 }
