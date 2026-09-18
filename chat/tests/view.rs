@@ -522,6 +522,28 @@ fn choosing_a_room_uses_the_common_link_intent() {
     });
 }
 
+/// A key on no account cannot hold a DM. Pressing a person says so, and the
+/// session the app pushes on the next block does not take the sentence away.
+#[test]
+fn a_dm_a_key_with_no_account_cannot_open_says_why_across_blocks() {
+    on_a_deep_stack(|| {
+        let mut seated = session(true);
+        seated.me = "user:cc".into();
+        seated.me_key = "cc".into();
+        let (frame, _, props) = connected_room_with(&seated, roots());
+        let frame = tick_native(press(&frame, "Ada Lovelace"));
+        let refusal = "Couldn’t open this conversation: this key is on no account — a DM needs one";
+        assert!(has_text(&frame, refusal), "{:?}", texts(&frame));
+        seated.block_height += 1;
+        let frame = tick_native(vec![item(props, &encoded(&seated))]);
+        assert!(
+            has_text(&frame, refusal),
+            "the next block's session took the refusal away: {:?}",
+            texts(&frame)
+        );
+    });
+}
+
 /// A reaction leaves as `op.submit` carrying chat's own message, and the chip
 /// is on screen before the block lands.
 #[test]

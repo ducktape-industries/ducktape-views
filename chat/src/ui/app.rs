@@ -191,6 +191,8 @@ pub struct ChatView {
     pub(crate) member_key_draft: String,
     pub(crate) thread_edit_draft: String,
     pub(crate) host_error: String,
+    /// The last session item failed, so the note on screen is the session's.
+    pub(crate) session_failed: bool,
     pub(crate) sent: bool,
     pub(crate) dark: bool,
 }
@@ -416,6 +418,7 @@ impl ChatView {
             member_key_draft: "".to_owned(),
             thread_edit_draft: "".to_owned(),
             host_error: "".to_owned(),
+            session_failed: false,
             sent: false,
             dark: false,
         }
@@ -426,7 +429,7 @@ impl ChatView {
     pub(crate) const PREFERRED_WINDOW_SIZE: &'static str = "none";
     /// This state's layout, digested — `snapshot_schema` holds it here.
     pub(crate) const SNAPSHOT_SCHEMA: &'static str =
-        "c27364dd4ab41bc0aac3719c4ddc27d5fea5ef598d33d1a4a29b950245c43f58";
+        "d28c98d11104ae78f3dcf46e40a9349356c6027b6a5bcd73b25ba0e6514fd6bd";
     pub(crate) fn snapshot(&self) -> Result<Vec<u8>, String> {
         self.validate_snapshot()?;
         wire::Snapshot {
@@ -664,6 +667,24 @@ mod tests {
             },
         ));
         assert!(state.host_error.is_empty());
+    }
+
+    #[test]
+    fn a_session_that_reads_again_takes_back_only_its_own_note() {
+        let mut state = ChatView::state();
+        let session = |error: &str| {
+            Message::SessionArrived(Box::new(crate::host::SessionItem {
+                error: error.into(),
+                ..Default::default()
+            }))
+        };
+        let _ = state.update(session("bad props"));
+        assert!(state.host_error.contains("bad props"));
+        let _ = state.update(session(""));
+        assert!(state.host_error.is_empty());
+        state.host_error = "Couldn’t open this conversation: refused".into();
+        let _ = state.update(session(""));
+        assert_eq!(state.host_error, "Couldn’t open this conversation: refused");
     }
 
     #[test]
