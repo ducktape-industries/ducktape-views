@@ -2428,9 +2428,8 @@ fn pin(key: &str, x: f32, y: f32, width: f32, content: Node) -> Node {
         content: Box::new(content),
     }
 }
-/// A card over the stage: the host's overlay, whose surface keeps a press
-/// from reaching the canvas under it and whose layer, given `dismiss`, closes
-/// the card on a press anywhere else.
+/// A card over the stage. Persistent islands are ordinary stacked layout;
+/// only a card with a dismissal boundary is a named modal overlay.
 fn float(
     key: &str,
     label: &str,
@@ -2440,14 +2439,43 @@ fn float(
     inset: f32,
     dismiss: Option<Message>,
 ) -> Node {
+    let Some(dismiss) = dismiss else {
+        let mut position = kit::container(format!("{key}/position"), card);
+        if let Node::Container {
+            width,
+            height,
+            padding,
+            align_x: x,
+            align_y: y,
+            ..
+        } = &mut position
+        {
+            *width = Some(Length::Fill);
+            *height = Some(Length::Fill);
+            *padding = Some(wire::Edges::all(inset));
+            *x = Some(align_x);
+            *y = Some(align_y);
+        }
+        return Node::Stack {
+            key: key.into(),
+            width: Some(Length::Fill),
+            height: Some(Length::Fill),
+            padding: None,
+            background: None,
+            border: None,
+            clip: false,
+            under: 0,
+            children: vec![base, position],
+        };
+    };
     Node::Overlay {
         key: key.into(),
-        label: dismiss.is_some().then(|| label.into()),
+        label: Some(label.into()),
         padding: inset,
         backdrop: Rgba([0.; 4]),
         align_x,
         align_y,
-        on_dismiss: dismiss.map(slots::message),
+        on_dismiss: Some(slots::message(dismiss)),
         children: vec![base, card],
     }
 }
@@ -2903,29 +2931,7 @@ fn modal(key: &str, label: &str, base: Node, card: Node, dismiss: Message) -> No
 }
 #[cfg(test)]
 fn assert_accessible(tree: &Node) {
-    fn layout_overlays(node: &Node, path: &mut Vec<String>, allowed: &mut Vec<Vec<String>>) {
-        path.push(node.key().unwrap_or_default().into());
-        if let Node::Overlay {
-            label: None,
-            children,
-            ..
-        } = node
-            && children.len() > 1
-        {
-            allowed.push(path.clone());
-        }
-        for child in node.children() {
-            layout_overlays(child, path, allowed);
-        }
-        path.pop();
-    }
-
-    let mut allowed = Vec::new();
-    layout_overlays(tree, &mut Vec::new(), &mut allowed);
-    let faults: Vec<_> = wire::accessibility_faults(tree)
-        .into_iter()
-        .filter(|fault| fault.kind != wire::FaultKind::Unnamed || !allowed.contains(&fault.path))
-        .collect();
+    let faults = wire::accessibility_faults(tree);
     assert!(
         faults.is_empty(),
         "{} accessibility fault(s):\n{}",

@@ -4480,14 +4480,42 @@ fn named_dialogs(node: &wire::Node) -> Vec<String> {
     dialogs
 }
 
+fn unnamed_overlays(node: &wire::Node) -> Vec<String> {
+    fn walk(node: &wire::Node, overlays: &mut Vec<String>) {
+        if let wire::Node::Overlay {
+            key,
+            label: None,
+            children,
+            ..
+        } = node
+            && children.len() > 1
+        {
+            overlays.push(key.clone());
+        }
+        for child in node.children() {
+            walk(child, overlays);
+        }
+    }
+
+    let mut overlays = Vec::new();
+    walk(node, &mut overlays);
+    overlays
+}
+
 #[test]
 fn overlays_are_named_only_when_blocking() {
     let mut ordinary = view();
     ordinary.on_size(1400., 900.);
+    card(&mut ordinary, "a", 40);
     assert_eq!(
         named_dialogs(&ordinary.view()),
         Vec::<String>::new(),
         "persistent board islands must not be named dialogs"
+    );
+    assert_eq!(
+        unnamed_overlays(&ordinary.view()),
+        Vec::<String>::new(),
+        "persistent board islands must be ordinary layout, not unnamed overlays"
     );
 
     let mut menu = view();
@@ -4744,11 +4772,13 @@ fn a_compact_stage_stands_the_tool_bar_clear_of_the_bottom_islands() {
     for width in [640., 800., 959.] {
         view.on_size(width, 700.);
         let tree = view.view();
-        let inset = |key: &str| match node_at(&tree, key) {
-            Some(wire::Node::Overlay {
-                padding, align_y, ..
-            }) => (*padding, *align_y),
-            other => panic!("{key} is an island's overlay: {other:?}"),
+        let inset = |key: &str| match node_at(&tree, &format!("{key}/position")) {
+            Some(wire::Node::Container {
+                padding: Some(padding),
+                align_y: Some(align_y),
+                ..
+            }) => (padding.bottom, *align_y),
+            other => panic!("{key} is an aligned island: {other:?}"),
         };
         let (bar, bar_y) = inset("boards/tools-float");
         assert_eq!(
