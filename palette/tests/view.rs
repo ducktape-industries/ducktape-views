@@ -278,3 +278,47 @@ fn one_lane_refusing_still_answers_and_both_refusing_says_so() {
         "one lane refusing was reported as a dead search"
     );
 }
+
+/// The card fills a window narrower than it and stops at its width in a
+/// wider one; a search that failed is a danger notice, and one that found
+/// nothing is the kit's empty state — never a bare line.
+#[test]
+fn the_card_gives_way_to_a_narrow_window_and_its_states_are_the_kits() {
+    use ducktape_view_guest::testing::find;
+    use ducktape_view_guest::wire::{Length, Node};
+
+    let Seat { chord, .. } = seated();
+    let frame = tick_native(vec![item(chord, b"")]);
+    let Some(Node::Container {
+        width, max_width, ..
+    }) = find(&frame, "palette/card")
+    else {
+        panic!("no card");
+    };
+    assert_eq!((*width, *max_width), (Some(Length::Fill), Some(560.)));
+
+    let frame = tick_native(type_into(&frame, "palette/input", "ship"));
+    let frame = tick_native(vec![item(request(&frame, "clock.ticks").id, b"")]);
+    let refused = |id| ducktape_view_guest::wire::Event::Response {
+        id,
+        result: Err(ducktape_view_guest::wire::Refusal::new("module", "down")),
+        done: true,
+    };
+    let failed = tick_native(vec![
+        refused(view_asking(&frame, "chat", "search").id),
+        refused(view_asking(&frame, "pages", "search").id),
+    ]);
+    assert!(
+        matches!(find(&failed, "palette/error"), Some(Node::Container { .. })),
+        "{:?}",
+        texts(&failed)
+    );
+
+    let frame = tick_native(type_into(&failed, "palette/input", "nothing"));
+    let frame = tick_native(vec![item(request(&frame, "clock.ticks").id, b"")]);
+    let empty = tick_native(vec![
+        answer(view_asking(&frame, "chat", "search").id, br#"{"hits":[]}"#),
+        answer(view_asking(&frame, "pages", "search").id, br#"{"hits":[]}"#),
+    ]);
+    assert!(has_text(&empty, "Nothing matched"), "{:?}", texts(&empty));
+}
