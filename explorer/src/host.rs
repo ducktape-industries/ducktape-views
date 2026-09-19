@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 
 /// How many recent blocks the ledger reads. The window the screen has always
 /// shown.
-const LEDGER_BLOCKS: usize = 100;
+pub(crate) const LEDGER_BLOCKS: usize = 100;
 
 /// The most hits one text-searchable source answers with.
 const SEARCH_HITS: usize = 50;

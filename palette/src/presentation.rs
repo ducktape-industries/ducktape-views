@@ -1,8 +1,8 @@
 //! The palette's tree: nothing at all while it is closed, and while it is
-//! open the whole window — a scrim that dismisses, and the card the reader
+//! open the whole window — an overlay that dismisses, and the card the reader
 //! types in.
 //!
-//! The card is this view's, scrim included: what a palette looks like, where
+//! The card is this view's, overlay included: what a palette looks like, where
 //! it sits and what closes it are the same swap as what it finds.
 
 use crate::{Message, PaletteView, host};
@@ -26,19 +26,6 @@ impl PaletteView {
         if !self.open {
             return kit::column("palette/closed", Vec::new());
         }
-        let mut scrim = kit::button_child(
-            "palette/scrim",
-            kit::sized(
-                kit::column("palette/scrim-fill", Vec::new()),
-                Some(Length::Fill),
-                Some(Length::Fill),
-            ),
-            Some(slots::message(Message::Dismiss)),
-            wire::ButtonPreset::Subtle,
-        );
-        if let Node::Button { label, .. } = &mut scrim {
-            *label = Some("Close the palette".into());
-        }
         let card = kit::aligned(
             kit::column(
                 "palette/drop",
@@ -46,27 +33,49 @@ impl PaletteView {
             ),
             wire::AlignX::Center,
         );
-        Node::Stack {
+        // AN OVERLAY, NOT A STACK OF TWO CHILDREN: the variant is the dialog
+        // role, the label is the name read on open, and `on_dismiss` is the
+        // door the host opens on Escape. A stack with a scrim button had
+        // neither — the chord was the only way back out, which a reader who
+        // cannot press it does not have.
+        Node::Overlay {
             key: "palette/overlay".into(),
-            width: Some(Length::Fill),
-            height: Some(Length::Fill),
-            padding: None,
-            background: None,
-            border: None,
-            clip: false,
-            under: 0,
-            children: vec![scrim, card],
+            label: Some("Command palette".into()),
+            padding: 0.,
+            // as the scrim was: the card carries the weight, and the layer
+            // only catches the press that closes it
+            backdrop: wire::Rgba([0.; 4]),
+            align_x: wire::AlignX::Center,
+            align_y: wire::AlignY::Top,
+            on_dismiss: Some(slots::message(Message::Dismiss)),
+            children: vec![kit::spacer(), card],
         }
     }
 
     fn card(&self) -> Node {
         let typed = slots::handler(Box::new(|text: String| Some(Message::DraftChanged(text))));
-        let mut body = vec![kit::input(
-            "palette/input",
-            "Search messages and pages",
-            self.draft.clone(),
-            typed,
-            None,
+        // the named way out, beside the field: a dialog a pointer opened by
+        // chord is one a pointer has to be able to close.
+        let mut body = vec![kit::spaced(
+            kit::row(
+                "palette/bar",
+                [
+                    kit::input(
+                        "palette/input",
+                        "Search messages and pages",
+                        self.draft.clone(),
+                        typed,
+                        None,
+                    ),
+                    kit::button(
+                        "palette/close",
+                        "Close",
+                        Some(slots::message(Message::Dismiss)),
+                        wire::ButtonPreset::Subtle,
+                    ),
+                ],
+            ),
+            kit::spacing::XS as f32,
         )];
         body.extend(self.search_state());
         body.push(self.hits());
