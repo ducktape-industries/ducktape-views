@@ -1803,8 +1803,8 @@ fn a_key_with_no_account_reads_the_room_and_every_write_says_what_to_do() {
             texts(&frame)
         );
         let frame = tick_native(press(&frame, "React with 👍"));
-        let op: serde_json::Value = serde_json::from_slice(&request(&frame, "op.submit").payload)
-            .expect("an op decodes");
+        let op: serde_json::Value =
+            serde_json::from_slice(&request(&frame, "op.submit").payload).expect("an op decodes");
         assert_eq!(op["payload"]["add_reaction"]["emoji"], "👍");
     });
 }

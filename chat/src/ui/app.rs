@@ -950,6 +950,8 @@ mod tests {
         state.connected = true;
         state.active_channel = "room".into();
         state.active_channel_name = "Room".into();
+        // a reader who holds an account: the writes below are hers to make
+        state.me = "acct:1".into();
         state.unread_boundary = 1;
         state.unread_marker_seq = 2;
         state.rooms = vec![crate::host::ChatSidebarRow {
@@ -1143,6 +1145,8 @@ mod tests {
         state.connected = true;
         state.active_channel = "room".into();
         state.selected_message_seq = 1;
+        // a reader who holds an account: the writes below are hers to make
+        state.me = "acct:1".into();
         state.message_action = MessageAction::Reactions;
         let mut tree = state.view();
         let mut grids = 0;
