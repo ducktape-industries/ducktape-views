@@ -38,10 +38,14 @@ fn boot() -> Frame {
 }
 
 fn session(connected: bool) -> Vec<u8> {
+    session_at(connected, 84_912)
+}
+
+fn session_at(connected: bool, head: i64) -> Vec<u8> {
     serde_json::to_vec(&Session {
         connected,
         dark: false,
-        head: 84_912,
+        head,
         sync_line: "live".into(),
     })
     .expect("session encodes")
@@ -788,4 +792,40 @@ fn accessibility_the_ledger_and_a_block_name_their_controls() {
     boot();
     let (frame, _live) = connected_with_ledger();
     tick_native(press(&frame, "Block 84912, 1 op"));
+}
+
+/// A QUIET WINDOW IS NOT AN EMPTY CHAIN. The list reads the last hundred
+/// blocks, so on a chain whose titlebar prints a head the empty plate names
+/// the window it read; "No blocks yet" is kept for the chain that has nothing
+/// in it at all.
+#[test]
+fn an_empty_ledger_names_the_window_it_read() {
+    let frame = boot();
+    let session_id = request(&frame, "explorer.props").id;
+    let frame = tick_native(vec![item(session_id, &session_at(true, 84_912))]);
+    let feed = request(&frame, "rpc.blocks").id;
+    // the window answered, and nothing in it carried operations
+    let quiet = br#"[{"height":84912,"hash":"","commit_hash":"aa11bb22","ops":[]}]"#;
+    let frame = tick_native(vec![answer(feed, quiet)]);
+    assert!(
+        has_text(&frame, "No operations in the last 100 blocks"),
+        "{:?}",
+        texts(&frame)
+    );
+    assert!(!has_text(&frame, "No blocks yet"), "{:?}", texts(&frame));
+}
+
+#[test]
+fn a_chain_with_no_head_still_says_no_blocks_yet() {
+    let frame = boot();
+    let session_id = request(&frame, "explorer.props").id;
+    let frame = tick_native(vec![item(session_id, &session_at(true, 0))]);
+    let feed = request(&frame, "rpc.blocks").id;
+    let frame = tick_native(vec![answer(feed, b"[]")]);
+    assert!(has_text(&frame, "No blocks yet"), "{:?}", texts(&frame));
+    assert!(
+        !has_text(&frame, "No operations in the last 100 blocks"),
+        "{:?}",
+        texts(&frame)
+    );
 }

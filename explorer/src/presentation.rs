@@ -222,6 +222,15 @@ impl ExplorerView {
                         ButtonPreset::Secondary,
                     ),
                 ),
+                // A CHAIN WITH A HEAD IS NOT AN EMPTY CHAIN: the list reads a
+                // window, and a quiet window is what "no blocks yet" would be
+                // lying about under a titlebar printing block 10,984. The
+                // count names the window this screen actually read.
+                (false, true) if self.head > 0 => kit::empty_state(
+                    "explorer/empty-ledger",
+                    format!("No operations in the last {} blocks", host::LEDGER_BLOCKS),
+                    "Blocks that carry operations appear here as the network writes them.",
+                ),
                 (false, true) => kit::empty_state(
                     "explorer/empty-ledger",
                     "No blocks yet",
