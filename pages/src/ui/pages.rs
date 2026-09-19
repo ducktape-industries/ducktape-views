@@ -33,9 +33,9 @@ impl PagesView {
                     )],
                 ),
                 wire::Edges {
-                    top: 12.,
+                    top: kit::spacing::LG as f32,
                     right: 16.,
-                    bottom: 12.,
+                    bottom: kit::spacing::LG as f32,
                     left: 16.,
                 },
             ));
@@ -151,7 +151,7 @@ impl PagesView {
                     [
                         header_bar(
                             "pages/sidebar/header",
-                            12.,
+                            kit::spacing::LG as f32,
                             [kit::nowrap(kit::heading("pages/sidebar/title", "Pages"))],
                         ),
                         kit::divider("pages/sidebar/rule"),
@@ -163,7 +163,7 @@ impl PagesView {
         let mut rows = vec![
             header_bar(
                 "pages/sidebar/header",
-                12.,
+                kit::spacing::LG as f32,
                 [
                     kit::nowrap(kit::heading("pages/sidebar/title", "Pages")),
                     kit::badge(
@@ -199,10 +199,10 @@ impl PagesView {
             kit::padded(
                 kit::spaced(kit::column("pages/sidebar/list", list), 1.),
                 wire::Edges {
-                    top: 6.,
-                    right: 6.,
-                    bottom: 8.,
-                    left: 6.,
+                    top: kit::spacing::XS as f32,
+                    right: kit::spacing::XS as f32,
+                    bottom: kit::spacing::SM as f32,
+                    left: kit::spacing::XS as f32,
                 },
             ),
         ));
@@ -305,7 +305,7 @@ impl PagesView {
             );
         }
         let heading = kit::sized(
-            kit::spaced(kit::centered_row("pages/toolbar/heading", crumb), 6.),
+            kit::spaced(kit::centered_row("pages/toolbar/heading", crumb), kit::spacing::XS as f32),
             Some(Length::Fill),
             None,
         );
@@ -319,17 +319,17 @@ impl PagesView {
                         [
                             heading,
                             kit::aligned(
-                                kit::spaced(kit::wrapped_row("pages/toolbar/controls", controls), 6.),
+                                kit::spaced(kit::wrapped_row("pages/toolbar/controls", controls), kit::spacing::XS as f32),
                                 wire::AlignX::Center,
                             ),
                         ],
                     ),
-                    6.,
+                    kit::spacing::XS as f32,
                 ),
                 wire::Edges {
-                    top: 6.,
-                    right: 8.,
-                    bottom: 6.,
+                    top: kit::spacing::XS as f32,
+                    right: kit::spacing::SM as f32,
+                    bottom: kit::spacing::XS as f32,
                     left: 16.,
                 },
             )
@@ -340,7 +340,7 @@ impl PagesView {
                 [
                     heading,
                     kit::sized(
-                        kit::spaced(kit::centered_row("pages/toolbar/controls", controls), 6.),
+                        kit::spaced(kit::centered_row("pages/toolbar/controls", controls), kit::spacing::XS as f32),
                         Some(Length::Shrink),
                         None,
                     ),
@@ -442,11 +442,11 @@ impl PagesView {
                                         ),
                                     ],
                                 ),
-                                6.,
+                                kit::spacing::XS as f32,
                             ),
                         ],
                     ),
-                    6.,
+                    kit::spacing::XS as f32,
                 ),
                 Tone::Accent,
             ));
@@ -473,7 +473,7 @@ impl PagesView {
                 "pages/document/surface",
                 fill(kit::spaced(
                     kit::column("pages/document/content", content),
-                    12.,
+                    kit::spacing::LG as f32,
                 )),
             ),
             wire::Edges {
@@ -540,7 +540,7 @@ impl PagesView {
                     results,
                 ],
             ),
-            10.,
+            kit::spacing::MD as f32,
         ));
         let mut panel = modal(
             "pages/search/panel",
@@ -810,11 +810,11 @@ impl PagesView {
             kit::column(
                 "pages/comments/content",
                 [
-                    kit::spaced(kit::centered_row("pages/comments/header", header), 4.),
+                    kit::spaced(kit::centered_row("pages/comments/header", header), kit::spacing::XXS as f32),
                     kit::divider("pages/comments/rule"),
                     kit::scroll(
                         "pages/comments/scroll",
-                        kit::spaced(kit::column("pages/comments/threads", threads), 6.),
+                        kit::spaced(kit::column("pages/comments/threads", threads), kit::spacing::XS as f32),
                     ),
                     kit::wrapping(kit::caption("pages/comments/hint", compose_hint)),
                     kit::column("pages/comments/working", working_row),
@@ -840,11 +840,11 @@ impl PagesView {
                                 ),
                             ],
                         ),
-                        6.,
+                        kit::spacing::XS as f32,
                     ),
                 ],
             ),
-            8.,
+            kit::spacing::SM as f32,
         ));
         let limit =
             crate::host::comment_card_height(self.comment_anchor_y, self.pages_viewport_height)
@@ -861,7 +861,7 @@ impl PagesView {
         {
             *clip = true;
             *width = Some(Length::Fill);
-            *padding = Some(wire::Edges::all(12.));
+            *padding = Some(wire::Edges::all(kit::spacing::LG as f32));
         }
         // The card is as tall as its threads: a block with one note is a
         // short card, not 400px of blank under it. The limit is a ceiling the
