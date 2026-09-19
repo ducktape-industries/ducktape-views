@@ -4457,6 +4457,58 @@ fn node_at<'a>(node: &'a wire::Node, key: &str) -> Option<&'a wire::Node> {
     node.children().iter().find_map(|child| node_at(child, key))
 }
 
+fn named_dialogs(node: &wire::Node) -> Vec<String> {
+    fn walk(node: &wire::Node, dialogs: &mut Vec<String>) {
+        if let wire::Node::Overlay {
+            key,
+            label,
+            children,
+            ..
+        } = node
+            && label.is_some()
+            && children.len() > 1
+        {
+            dialogs.push(key.clone());
+        }
+        for child in node.children() {
+            walk(child, dialogs);
+        }
+    }
+
+    let mut dialogs = Vec::new();
+    walk(node, &mut dialogs);
+    dialogs
+}
+
+#[test]
+fn overlays_are_named_only_when_blocking() {
+    let mut ordinary = view();
+    ordinary.on_size(1400., 900.);
+    assert_eq!(
+        named_dialogs(&ordinary.view()),
+        Vec::<String>::new(),
+        "persistent board islands must not be named dialogs"
+    );
+
+    let mut picker = view();
+    picker.on_size(1400., 900.);
+    picker.on_board_picker();
+    assert_eq!(
+        named_dialogs(&picker.view()),
+        ["boards/menu-float"],
+        "the open board picker is the only blocking overlay"
+    );
+
+    let mut help = view();
+    help.on_size(1400., 900.);
+    help.on_help();
+    assert_eq!(
+        named_dialogs(&help.view()),
+        ["boards/help-modal"],
+        "the open Help sheet is the only blocking overlay"
+    );
+}
+
 /// A connector's plate exists to rub the run out from under its words, and only
 /// the paper's own colour does that. Anything else is a chip printed over the
 /// line — which is what a canvas must never look like, and what a second colour
