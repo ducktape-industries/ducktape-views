@@ -23,6 +23,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 
 use duck_address::forge::{ForgeLocator, ForgeRepoAddress, ForgeTarget};
+use duck_address::identity::AccountAddress;
 use duck_address::{Address, ChainId};
 use ducktape_view_guest::host;
 use futures::{Stream, StreamExt, stream};
@@ -1148,6 +1149,20 @@ pub fn own_chain(session: &Session) -> String {
 /// chain, the name carries no `<owner>/` (the forge's namespace is flat
 /// today and forge-wire maps nothing silently), or the target does not
 /// validate (a blob's rev is a 40-hex commit id, never a branch name).
+/// `duck://<chain>/identity/<account>` for a pressed mention; any other link
+/// is already an address and passes through. Nothing without a chain.
+pub fn pressed_link(link: String, chain: &str) -> String {
+    let Ok(account) = link.parse::<u64>() else {
+        return link;
+    };
+    chain
+        .parse::<ChainId>()
+        .ok()
+        .and_then(|chain| AccountAddress { account }.address(chain).ok())
+        .map(|address| address.to_string())
+        .unwrap_or_default()
+}
+
 fn forge_address(chain: &str, repo: &str, target: ForgeTarget) -> Option<String> {
     let chain = chain.parse::<ChainId>().ok()?;
     let repo = ForgeRepoAddress::from_name(repo).ok()?;
@@ -1464,7 +1479,10 @@ pub struct Copy {
 /// A link a body or the reader's document carried, handed to the kernel's
 /// ONE open door.
 pub fn open_link(url: &str) -> bool {
-    ducktape_view_guest::host::open_link(url);
+    // a mention pressed with no chain has no address to open
+    if !url.is_empty() {
+        ducktape_view_guest::host::open_link(url);
+    }
     true
 }
 

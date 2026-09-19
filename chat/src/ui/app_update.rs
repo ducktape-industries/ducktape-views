@@ -974,7 +974,8 @@ impl super::ChatView {
         self.retire_channel_creation();
         self.channel_create_open = false;
         self.preview_link = "".to_owned();
-        self.sent = crate::host::send_open_link(::std::convert::AsRef::as_ref(&(url)));
+        let url = crate::host::pressed_link(url, &self.network_chain_id);
+        self.sent = crate::host::send_open_link(&url);
         ::ducktape_view_guest::Task::none()
     }
     /// The preview card opens over the screen on the file pressed. A

@@ -18,6 +18,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 
 use duck_address::chat::MessageAddress;
+use duck_address::identity::AccountAddress;
 use duck_address::runs::RunAddress;
 use duck_address::{Address, ChainId, Refused};
 use ducktape_view_guest::host;
@@ -97,7 +98,7 @@ pub struct ChatMember {
 #[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
 pub struct ChatSpan {
     pub mention: String,
-    pub mention_link: String,
+    pub mention_account: String,
     pub link_text: String,
     pub link: String,
     pub bold_italic: String,
@@ -2193,7 +2194,7 @@ fn run_spans(runs: &[serde_json::Value], names: &Names) -> Vec<ChatSpan> {
             _ => None,
         });
         let mention = marks.iter().find_map(|mark| match tagged(mark) {
-            ("mention", party) => Some(mention_link(party)),
+            ("mention", party) => Some(mention_account(party)),
             _ => None,
         });
         let bold = marks.iter().any(|mark| mark.as_str() == Some("bold"));
@@ -2206,7 +2207,7 @@ fn run_spans(runs: &[serde_json::Value], names: &Names) -> Vec<ChatSpan> {
             }
             (None, Some(link), _, _) => {
                 rendered.mention = text;
-                rendered.mention_link = link;
+                rendered.mention_account = link;
             }
             (None, None, true, true) => rendered.bold_italic = text,
             (None, None, true, false) => rendered.bold = text,
@@ -2218,13 +2219,23 @@ fn run_spans(runs: &[serde_json::Value], names: &Names) -> Vec<ChatSpan> {
     out
 }
 
-/// `duck://account/<n>` — the address a mention of an account opens (the DM
+/// The account a mention names, in decimal: what its span hands back when
+/// pressed, and `account_link` turns into the address the app opens (the DM
 /// with that account). A mention naming a bare key addresses no account the
-/// app can open, so it carries no link and draws as a plate alone.
-fn mention_link(party: &serde_json::Value) -> String {
+/// app can open, so it carries none and draws as a plate alone.
+fn mention_account(party: &serde_json::Value) -> String {
     match tagged(party) {
-        ("account", number) => format!("duck://account/{}", number.as_u64().unwrap_or(0)),
+        ("account", number) => number.as_u64().unwrap_or(0).to_string(),
         _ => String::new(),
+    }
+}
+
+/// `duck://<chain>/identity/<account>` for a pressed mention; any other link
+/// is already an address and passes through. Nothing without a chain.
+pub fn pressed_link(link: String, chain_id: &str) -> String {
+    match link.parse::<u64>() {
+        Ok(account) => minted(chain_id, |chain| AccountAddress { account }.address(chain)),
+        Err(_) => link,
     }
 }
 
@@ -2488,7 +2499,10 @@ pub fn send_join_voice(id: &str) -> bool {
 
 /// A pressed link, handed to the kernel's ONE open door.
 pub fn send_open_link(url: &str) -> bool {
-    ducktape_view_guest::host::open_link(url);
+    // a mention pressed with no chain has no address to open
+    if !url.is_empty() {
+        ducktape_view_guest::host::open_link(url);
+    }
     true
 }
 

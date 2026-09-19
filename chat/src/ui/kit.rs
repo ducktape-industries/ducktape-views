@@ -599,7 +599,7 @@ impl ChatView {
             for (content, link, weight, italic) in [
                 (
                     &part.mention,
-                    Some(&part.mention_link),
+                    Some(&part.mention_account),
                     wire::Weight::Medium,
                     false,
                 ),

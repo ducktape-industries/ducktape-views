@@ -54,7 +54,11 @@ fn a_mention_renders_as_a_name_and_drafts_as_a_token() {
         .find(|span| !span.mention.is_empty())
         .expect("the mention is its own run");
     assert_eq!(span.mention, "@mallard");
-    assert_eq!(span.mention_link, "duck://account/7");
+    assert_eq!(span.mention_account, "7");
+    assert_eq!(
+        chat_view::host::pressed_link("7".into(), "testnet#0a1b2c3d"),
+        "duck://testnet-0a1b2c3d/identity/7"
+    );
 }
 
 /// Emphasis, links and code survive the round trip into an editable draft.
