@@ -516,11 +516,17 @@ pub fn view<M: Clone + 'static>(
                         wire::ButtonPreset::Subtle,
                     ));
                 }
-                kit::spaced(kit::centered_row(format!("{at}/held"), carried), kit::spacing::XXS as f32)
+                kit::spaced(
+                    kit::centered_row(format!("{at}/held"), carried),
+                    kit::spacing::XXS as f32,
+                )
             })
             .collect();
         rows.push(inset(
-            kit::spaced(kit::wrapped_row(format!("{key}/attachments"), chips), kit::spacing::XS as f32),
+            kit::spaced(
+                kit::wrapped_row(format!("{key}/attachments"), chips),
+                kit::spacing::XS as f32,
+            ),
             TEXT_INSET,
         ));
     }
@@ -601,7 +607,10 @@ pub fn view<M: Clone + 'static>(
     ));
     plate(
         key,
-        kit::spaced(kit::column(format!("{key}/rows"), rows), kit::spacing::XS as f32),
+        kit::spaced(
+            kit::column(format!("{key}/rows"), rows),
+            kit::spacing::XS as f32,
+        ),
     )
 }
 

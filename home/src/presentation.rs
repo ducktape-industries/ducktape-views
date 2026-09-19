@@ -238,7 +238,10 @@ impl HomeView {
             ));
         }
         children.push(body);
-        let body = kit::spaced(kit::column(format!("{key}/body"), children), kit::spacing::SM as f32);
+        let body = kit::spaced(
+            kit::column(format!("{key}/body"), children),
+            kit::spacing::SM as f32,
+        );
         kit::card(key, body)
     }
 
@@ -557,7 +560,10 @@ impl HomeView {
             ));
             let row = kit::list_row(
                 key.clone(),
-                kit::spaced(kit::centered_row(format!("{key}/row"), cells), kit::spacing::SM as f32),
+                kit::spaced(
+                    kit::centered_row(format!("{key}/row"), cells),
+                    kit::spacing::SM as f32,
+                ),
                 false,
                 Some(slots::message(Message::OpenRoom(room.id.clone()))),
             );

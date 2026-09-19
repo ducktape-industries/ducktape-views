@@ -355,7 +355,10 @@ impl ExplorerView {
                     Self::trace(&key, &op.trace),
                 ));
             }
-            content.push(kit::spaced(kit::column(format!("{key}/body"), lines), kit::spacing::XXS as f32));
+            content.push(kit::spaced(
+                kit::column(format!("{key}/body"), lines),
+                kit::spacing::XXS as f32,
+            ));
         }
         Self::filling(kit::spaced(
             kit::column(
@@ -366,7 +369,10 @@ impl ExplorerView {
                     kit::scroll(
                         "explorer/details",
                         kit::padded(
-                            kit::spaced(kit::column("explorer/detail-content", content), kit::spacing::SM as f32),
+                            kit::spaced(
+                                kit::column("explorer/detail-content", content),
+                                kit::spacing::SM as f32,
+                            ),
                             wire::Edges::all(kit::spacing::LG as f32),
                         ),
                     ),
@@ -450,7 +456,10 @@ impl ExplorerView {
         });
         kit::card(
             format!("{key}/payload/box"),
-            kit::spaced(kit::column(format!("{key}/payload/fields"), rows), kit::spacing::XXS as f32),
+            kit::spaced(
+                kit::column(format!("{key}/payload/fields"), rows),
+                kit::spacing::XXS as f32,
+            ),
         )
     }
 
@@ -467,7 +476,10 @@ impl ExplorerView {
         });
         kit::card(
             format!("{key}/trace/box"),
-            kit::spaced(kit::column(format!("{key}/trace/hops"), rows), kit::spacing::XXS as f32),
+            kit::spaced(
+                kit::column(format!("{key}/trace/hops"), rows),
+                kit::spacing::XXS as f32,
+            ),
         )
     }
 

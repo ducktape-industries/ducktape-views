@@ -145,7 +145,10 @@ fn message_chip(
             format!("{key}/preview"),
             &preview.body,
         )));
-        content.push(kit::spaced(kit::column(format!("{key}/quote"), quote), kit::spacing::XXS as f32));
+        content.push(kit::spaced(
+            kit::column(format!("{key}/quote"), quote),
+            kit::spacing::XXS as f32,
+        ));
         content.push(kit::row(
             format!("{key}/actions"),
             [action(format!("{key}/open-chat"), "Open in chat", open())],
@@ -153,7 +156,10 @@ fn message_chip(
     }
     kit::card(
         format!("{key}/message"),
-        kit::spaced(kit::column(format!("{key}/body"), content), kit::spacing::SM as f32),
+        kit::spaced(
+            kit::column(format!("{key}/body"), content),
+            kit::spacing::SM as f32,
+        ),
     )
 }
 
@@ -461,7 +467,10 @@ impl AgentsView {
                 line.push(kit::badge(format!("{key}/working"), "Working", Tone::Agent));
             }
             line.push(state_badge(format!("{key}/standing"), &agent.status));
-            let summary = kit::spaced(kit::centered_row(format!("{key}/summary"), line), kit::spacing::MD as f32);
+            let summary = kit::spaced(
+                kit::centered_row(format!("{key}/summary"), line),
+                kit::spacing::MD as f32,
+            );
             let mut button = kit::list_row(
                 &key,
                 summary,
@@ -783,7 +792,10 @@ impl AgentsView {
             );
             items.push(kit::card(
                 "agents/receipt-card",
-                kit::spaced(kit::column("agents/receipt-body", facts), kit::spacing::XS as f32),
+                kit::spaced(
+                    kit::column("agents/receipt-body", facts),
+                    kit::spacing::XS as f32,
+                ),
             ));
         }
         if let host::OutputConnection::Refused(sentence) = &self.live.connection {
@@ -893,16 +905,25 @@ impl AgentsView {
                 }
                 steps.push(kit::card(
                     &key,
-                    kit::spaced(kit::column(format!("{key}/content"), content), kit::spacing::XS as f32),
+                    kit::spaced(
+                        kit::column(format!("{key}/content"), content),
+                        kit::spacing::XS as f32,
+                    ),
                 ));
             }
             steps.push(kit::wrapping(kit::caption(
                 "agents/process-retention",
                 "Recent output retained by this node",
             )));
-            items.push(kit::spaced(kit::column("agents/process", steps), kit::spacing::SM as f32));
+            items.push(kit::spaced(
+                kit::column("agents/process", steps),
+                kit::spacing::SM as f32,
+            ));
         }
-        kit::spaced(kit::column("agents/trace-panel", items), kit::spacing::LG as f32)
+        kit::spaced(
+            kit::column("agents/trace-panel", items),
+            kit::spacing::LG as f32,
+        )
     }
 
     fn conversation_panel(&self) -> Node {
@@ -952,7 +973,10 @@ impl AgentsView {
             }
             items.push(kit::notice(
                 "agents/live",
-                kit::spaced(kit::column("agents/live-body", live), kit::spacing::XS as f32),
+                kit::spaced(
+                    kit::column("agents/live-body", live),
+                    kit::spacing::XS as f32,
+                ),
                 Tone::Agent,
             ));
         }
@@ -1044,7 +1068,10 @@ impl AgentsView {
                         self.message_preview_open.as_deref(),
                     ));
                 }
-                let body = kit::spaced(kit::column(format!("{key}/body"), lines), kit::spacing::XXS as f32);
+                let body = kit::spaced(
+                    kit::column(format!("{key}/body"), lines),
+                    kit::spacing::XXS as f32,
+                );
                 entries.push(kit::spaced(
                     kit::row(
                         &key,
@@ -1115,7 +1142,10 @@ impl AgentsView {
                 kit::spacing::XS as f32,
             ));
         }
-        kit::spaced(kit::column("agents/raw-panel", items), kit::spacing::XXS as f32)
+        kit::spaced(
+            kit::column("agents/raw-panel", items),
+            kit::spacing::XXS as f32,
+        )
     }
 
     fn editor(&self) -> Node {
@@ -1305,7 +1335,10 @@ impl AgentsView {
             }
             skills.push(kit::card(
                 key.clone(),
-                kit::spaced(kit::column(format!("{key}/body"), details), kit::spacing::XXS as f32),
+                kit::spaced(
+                    kit::column(format!("{key}/body"), details),
+                    kit::spacing::XXS as f32,
+                ),
             ));
         }
         if self.can_edit {

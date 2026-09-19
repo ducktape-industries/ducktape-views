@@ -1086,7 +1086,10 @@ impl SettingsView {
             "settings/updates-title",
             "Updates",
             "",
-            kit::spaced(kit::column("settings/updates-body", body), kit::spacing::MD as f32),
+            kit::spaced(
+                kit::column("settings/updates-body", body),
+                kit::spacing::MD as f32,
+            ),
         )
     }
     fn network_settings(&self) -> wire::Node {
@@ -1677,7 +1680,10 @@ impl SettingsView {
                 "settings/add-device",
                 "Add a device",
                 "A ticket admits one more key to this account.",
-                kit::spaced(kit::column("settings/add-body", add), kit::spacing::LG as f32),
+                kit::spaced(
+                    kit::column("settings/add-body", add),
+                    kit::spacing::LG as f32,
+                ),
             ));
         }
         match self.account_ceremony_phase.as_str() {
