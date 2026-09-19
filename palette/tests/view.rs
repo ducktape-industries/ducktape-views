@@ -322,3 +322,48 @@ fn the_card_gives_way_to_a_narrow_window_and_its_states_are_the_kits() {
     ]);
     assert!(has_text(&empty, "Nothing matched"), "{:?}", texts(&empty));
 }
+
+#[test]
+fn the_open_palette_is_one_named_dialog_with_a_named_way_out() {
+    use ducktape_view_guest::wire::Node;
+
+    /// Every `Overlay` in the tree, however deep.
+    fn overlays<'a>(node: &'a Node, found: &mut Vec<&'a Node>) {
+        if matches!(node, Node::Overlay { .. }) {
+            found.push(node);
+        }
+        for child in node.children() {
+            overlays(child, found);
+        }
+    }
+
+    fn named(node: &Node, name: &str) -> bool {
+        matches!(node, Node::Button { label: Some(label), .. } if label == name)
+            || node.children().iter().any(|child| named(child, name))
+    }
+
+    let Seat { chord, .. } = seated();
+    let frame = tick_native(vec![item(chord, b"")]);
+    let root = frame.root.as_ref().expect("an open palette draws");
+
+    // ONE DIALOG, NAMED, WITH A DOOR. The host closes overlays on Escape
+    // through `on_dismiss`; a stack of a scrim and a card had neither the
+    // role nor the door, so the chord was the only way back out.
+    let mut found = Vec::new();
+    overlays(root, &mut found);
+    assert_eq!(found.len(), 1, "{found:?}");
+    let Node::Overlay {
+        label, on_dismiss, ..
+    } = found[0]
+    else {
+        unreachable!("overlay")
+    };
+    assert_eq!(label.as_deref(), Some("Command palette"));
+    assert!(on_dismiss.is_some(), "no way out on Escape");
+
+    // and the same door a pointer can find: pressing it shuts the palette
+    // back down to the empty tree a closed one costs.
+    assert!(named(root, "Close"), "{:?}", texts(&frame));
+    let shut = tick_native(press(&frame, "palette/close"));
+    assert!(texts(&shut).is_empty(), "{:?}", texts(&shut));
+}
