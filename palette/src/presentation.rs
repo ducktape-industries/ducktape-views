@@ -13,7 +13,7 @@ use ducktape_view_guest::{
 
 /// How far below the window's top the card hangs.
 const DROP: f32 = 96.;
-/// The card's width, and the height its results may take.
+/// The card's widest, and the height its results may take.
 const CARD: f32 = 560.;
 const RESULTS: f32 = 420.;
 
@@ -68,38 +68,54 @@ impl PaletteView {
             typed,
             None,
         )];
-        if let Some(note) = self.note() {
-            body.push(kit::secondary("palette/note", note));
-        }
+        body.extend(self.search_state());
         body.push(self.hits());
-        kit::sized(
-            kit::card(
-                "palette/card",
-                kit::spaced(kit::column("palette/body", body), 6.),
-            ),
-            Some(Length::Fixed(CARD)),
-            None,
-        )
+        // the card fills a window narrower than it and stops at its width in
+        // a wider one: a fixed width ran past the edge of a narrow window
+        let mut card = kit::card(
+            "palette/card",
+            kit::spaced(kit::column("palette/body", body), kit::spacing::XS as f32),
+        );
+        if let Node::Container { max_width, .. } = &mut card {
+            *max_width = Some(CARD);
+        }
+        card
     }
 
-    /// The one line that says what the field is doing, or nothing when the
-    /// hits speak for themselves.
-    fn note(&self) -> Option<String> {
+    /// What the field is doing, or nothing when the hits speak for
+    /// themselves: the kit's empty state while it cannot answer or found
+    /// nothing, a notice when the search failed.
+    fn search_state(&self) -> Option<Node> {
         if !self.connected {
-            return Some("Not connected to a network.".into());
+            return Some(kit::empty_state(
+                "palette/disconnected",
+                "Not connected",
+                "Choose a network to search its messages and pages.",
+            ));
         }
         if self.searching {
-            return Some("Searching…".into());
+            return Some(kit::empty_state(
+                "palette/searching",
+                "Searching…",
+                "Messages and pages are asked together.",
+            ));
         }
         if !self.error.is_empty() {
-            return Some(self.error.clone());
+            return Some(kit::notice(
+                "palette/error",
+                kit::wrapping(kit::text("palette/error-text", &self.error)),
+                kit::Tone::Danger,
+            ));
         }
         let asked = !self.query.is_empty();
         let empty = self.chat.is_empty() && self.pages.is_empty();
-        match asked && empty {
-            true => Some("No messages or pages matched.".into()),
-            false => None,
-        }
+        (asked && empty).then(|| {
+            kit::empty_state(
+                "palette/empty",
+                "Nothing matched",
+                "No messages or pages matched this search.",
+            )
+        })
     }
 
     fn hits(&self) -> Node {

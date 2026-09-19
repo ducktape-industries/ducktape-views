@@ -66,7 +66,7 @@ impl FilesView {
         let body = match listing {
             Listing::Pending => kit::inset(
                 native::caption(format!("{key}/pending"), "Loading…"),
-                wire::Edges::all(10.),
+                wire::Edges::all(native::spacing::MD as f32),
             ),
             Listing::Failed(reason) => {
                 kit::error_plate(format!("{key}/failed"), reason, Message::Refresh)
@@ -114,7 +114,7 @@ impl FilesView {
         if rows.is_empty() {
             return kit::inset(
                 native::caption(format!("{key}/empty"), "Empty"),
-                wire::Edges::all(10.),
+                wire::Edges::all(native::spacing::MD as f32),
             );
         }
         let (keys, children): (Vec<_>, Vec<_>) = rows
@@ -134,9 +134,9 @@ impl FilesView {
             border: None,
             spacing: None,
             padding: Some(wire::Edges {
-                top: 4.,
+                top: native::spacing::XXS as f32,
                 right: 2.,
-                bottom: 6.,
+                bottom: native::spacing::XS as f32,
                 left: 2.,
             }),
             width: Some(wire::Length::Fill),
@@ -171,7 +171,10 @@ impl FilesView {
         if entry.is_dir() {
             cells.push(native::caption(format!("{key}/chevron"), "›"));
         }
-        let face = native::spaced(native::centered_row(format!("{key}/cells"), cells), 6.);
+        let face = native::spaced(
+            native::centered_row(format!("{key}/cells"), cells),
+            native::spacing::XS as f32,
+        );
         let mut button = native::list_row(
             format!("{key}/select"),
             face,
@@ -238,8 +241,11 @@ impl FilesView {
                 native::scroll(
                     format!("{key}/scroll"),
                     native::padded(
-                        native::spaced(native::column(format!("{key}/body"), body), 8.),
-                        wire::Edges::all(12.),
+                        native::spaced(
+                            native::column(format!("{key}/body"), body),
+                            native::spacing::SM as f32,
+                        ),
+                        wire::Edges::all(native::spacing::LG as f32),
                     ),
                 ),
             ],

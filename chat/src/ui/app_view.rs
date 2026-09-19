@@ -95,7 +95,7 @@ impl super::ChatView {
             Some(card) => wire::Node::Overlay {
                 key: format!("{node_scope}/create-overlay"),
                 label: Some("Create channel".into()),
-                padding: 24.,
+                padding: native::spacing::XL as f32,
                 backdrop: wire::Rgba([0., 0., 0., 0.55]),
                 align_x: wire::AlignX::Center,
                 align_y: wire::AlignY::Center,

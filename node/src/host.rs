@@ -454,7 +454,7 @@ pub fn capitalized(word: &str) -> String {
 /// call it theirs.
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PeerRow {
-    /// the whole key: the row shows [`short_label`] of it and copies all of it
+    /// the whole key: the row shows the first 8 characters of it and copies all of it
     pub key: String,
     pub role: String,
     pub live: bool,
@@ -517,7 +517,7 @@ pub struct ModuleRow {
     /// `workspace` | `developer` | `automation` | `system` — the status
     /// projection's presentation category. Never consensus state.
     pub category: String,
-    /// the whole digests: a row shows [`short_digest`] of each and copies
+    /// the whole digests: a row shows the first 12 characters of each and copies
     /// all of it, because a digest is what an operator compares across nodes
     pub root: String,
     pub code_hash: String,
@@ -930,24 +930,6 @@ fn grouped_digits(value: i64) -> String {
         grouped.push(digit);
     }
     grouped
-}
-
-/// The first 12 characters of a digest, marked as cut.
-pub fn short_digest(digest: &str) -> String {
-    let mut short: String = digest.chars().take(12).collect();
-    if digest.chars().count() > 12 {
-        short.push('…');
-    }
-    short
-}
-
-/// The first 8 characters of a peer key, marked as cut.
-pub fn short_label(id: &str) -> String {
-    let mut label: String = id.chars().take(8).collect();
-    if id.chars().count() > 8 {
-        label.push('…');
-    }
-    label
 }
 
 fn hex_encode(bytes: &[u8]) -> String {

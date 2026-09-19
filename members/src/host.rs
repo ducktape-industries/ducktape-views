@@ -145,7 +145,7 @@ async fn read_roster() -> Result<(Vec<MemberRow>, i64), String> {
             let hex = hex_encode(&json_bytes(&key));
             let is_this_node = hex == node_key;
             rows.push(MemberRow {
-                label: short_label(&hex),
+                label: ducktape_view_guest::kit::short_id(&hex, 8),
                 live: is_this_node || live_keys.contains(&hex),
                 is_this_node,
                 is_agent: false,
@@ -289,14 +289,6 @@ fn hex_decode(text: &str) -> Vec<u8> {
         bytes.push((high * 16 + low) as u8);
     }
     bytes
-}
-
-fn short_label(id: &str) -> String {
-    let mut label: String = id.chars().take(8).collect();
-    if id.chars().count() > 8 {
-        label.push('…');
-    }
-    label
 }
 
 // ---------- the writes ----------

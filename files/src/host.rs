@@ -275,7 +275,7 @@ pub fn fold_history(reply: &serde_json::Value) -> Vec<FsSnapshot> {
         .map(|snapshot| {
             let id = snapshot["id"].as_str().unwrap_or_default().to_string();
             FsSnapshot {
-                short_id: short_digest(&id),
+                short_id: ducktape_view_guest::kit::short_id(&id, 12),
                 parent: snapshot["parent"].as_str().unwrap_or_default().to_string(),
                 author: fold_author(&snapshot["author"]),
                 height: snapshot["height"].as_i64().unwrap_or(0),
@@ -306,7 +306,7 @@ pub fn fold_author(author: &serde_json::Value) -> String {
             .filter_map(serde_json::Value::as_u64)
             .map(|byte| format!("{byte:02x}"))
             .collect();
-        return format!("ext:{}", short_digest(&hex));
+        return format!("ext:{}", ducktape_view_guest::kit::short_id(&hex, 12));
     }
     String::new()
 }
@@ -980,14 +980,6 @@ fn head_within(text: &str, limit: usize) -> (String, bool) {
         return (text.to_owned(), false);
     }
     (text[..text.floor_char_boundary(limit)].to_owned(), true)
-}
-
-pub fn short_digest(digest: &str) -> String {
-    let mut short: String = digest.chars().take(12).collect();
-    if digest.chars().count() > 12 {
-        short.push('…');
-    }
-    short
 }
 
 /// The files read lane's wire: standard alphabet, padded — the same engine

@@ -1030,11 +1030,7 @@ fn user_handle(bytes: &[u8]) -> String {
 }
 
 fn short_label(id: &str) -> String {
-    let mut label: String = id.chars().take(8).collect();
-    if id.chars().count() > 8 {
-        label.push('…');
-    }
-    label
+    ducktape_view_guest::kit::ellipsize(id, 9)
 }
 
 fn hex_encode(bytes: &[u8]) -> String {

@@ -32,9 +32,9 @@ fn glyph(key: String, glyph: &str, label: &str, message: Message, disabled: bool
         *accessible = Some(label.into());
         *padding = Some(wire::Edges {
             top: 2.,
-            right: 6.,
+            right: native::spacing::XS as f32,
             bottom: 2.,
-            left: 6.,
+            left: native::spacing::XS as f32,
         });
     }
     button
@@ -109,15 +109,18 @@ fn section_row(key: String, name: &str, control: Option<wire::Node>) -> wire::No
     children.extend(control);
     native::padded(
         native::sized(
-            native::spaced(native::centered_row(key, children), 4.),
+            native::spaced(
+                native::centered_row(key, children),
+                native::spacing::XXS as f32,
+            ),
             Some(wire::Length::Fill),
-            Some(wire::Length::Fixed(28.)),
+            Some(wire::Length::Fixed(native::height::CONTROL as f32)),
         ),
         wire::Edges {
             top: 0.,
-            right: 4.,
+            right: native::spacing::XXS as f32,
             bottom: 0.,
-            left: 8.,
+            left: native::spacing::SM as f32,
         },
     )
 }
@@ -125,7 +128,7 @@ fn section_row(key: String, name: &str, control: Option<wire::Node>) -> wire::No
 /// one-line `Shrink` text at its whole width, so the title sits in a box sized
 /// to it that clips: the box shrinks to what its row leaves, and the title is
 /// cut to an ellipsis inside it. A short title keeps its own width.
-fn gives_way(key: String, title: wire::Node) -> wire::Node {
+pub(super) fn gives_way(key: String, title: wire::Node) -> wire::Node {
     let mut node = native::sized(
         native::container(key, native::nowrap(title)),
         Some(wire::Length::Shrink),
@@ -146,7 +149,7 @@ fn pane_header(key: String, children: impl IntoIterator<Item = wire::Node>) -> w
         ),
         wire::Edges {
             top: 0.,
-            right: 8.,
+            right: native::spacing::SM as f32,
             bottom: 0.,
             left: 16.,
         },
@@ -212,7 +215,7 @@ impl ChatView {
         }
         let top = vec![native::spaced(
             native::centered_row(format!("{key}/search-row"), field_row),
-            4.,
+            native::spacing::XXS as f32,
         )];
         let (mark, name) = if self.channel_create_open {
             ("✕", "Close")
@@ -244,7 +247,7 @@ impl ChatView {
         // voice rooms sit under their own heading, the way a voice channel
         // does: a press joins the room's huddle instead of opening it
         if !voice_rooms.is_empty() {
-            rooms.push(native::gap(8.));
+            rooms.push(native::gap(native::spacing::SM as f32));
             rooms.push(section_row(
                 format!("{key}/voice-heading-row"),
                 "Voice",
@@ -259,7 +262,7 @@ impl ChatView {
             ));
         }
         if !self.dm_rows.is_empty() {
-            rooms.push(native::gap(8.));
+            rooms.push(native::gap(native::spacing::SM as f32));
             rooms.push(section_row(
                 format!("{key}/dm-heading-row"),
                 "Direct messages",
@@ -277,18 +280,21 @@ impl ChatView {
         }
         let children = vec![
             native::padded(
-                native::spaced(native::column(format!("{key}/sidebar-top"), top), 6.),
-                wire::Edges::all(8.),
+                native::spaced(
+                    native::column(format!("{key}/sidebar-top"), top),
+                    native::spacing::XS as f32,
+                ),
+                wire::Edges::all(native::spacing::SM as f32),
             ),
             native::scroll(
                 format!("{key}/rooms"),
                 native::padded(
                     native::spaced(native::column(format!("{key}/room-list"), rooms), 2.),
                     wire::Edges {
-                        top: 4.,
-                        right: 8.,
-                        bottom: 12.,
-                        left: 8.,
+                        top: native::spacing::XXS as f32,
+                        right: native::spacing::SM as f32,
+                        bottom: native::spacing::LG as f32,
+                        left: native::spacing::SM as f32,
                     },
                 ),
             ),
@@ -359,7 +365,7 @@ impl ChatView {
                     native::wrapping(native::text(format!("{key}/error-text"), &self.host_error)),
                     Tone::Danger,
                 ),
-                wire::Edges::all(12.),
+                wire::Edges::all(native::spacing::LG as f32),
             ));
         }
         let query_matches =
@@ -401,7 +407,7 @@ impl ChatView {
                         ),
                         wire::AlignX::Center,
                     ),
-                    wire::Edges::all(8.),
+                    wire::Edges::all(native::spacing::SM as f32),
                 ));
             }
             // an empty room has nothing to scroll; its intro keeps the space
@@ -434,9 +440,9 @@ impl ChatView {
                         wire::AlignX::Center,
                     ),
                     wire::Edges {
-                        top: 4.,
+                        top: native::spacing::XXS as f32,
                         right: 16.,
-                        bottom: 4.,
+                        bottom: native::spacing::XXS as f32,
                         left: 16.,
                     },
                 ));
@@ -455,7 +461,7 @@ impl ChatView {
             children.push(native::padded(
                 self.composer_gate(format!("{key}/refusal")),
                 wire::Edges {
-                    top: 8.,
+                    top: native::spacing::SM as f32,
                     right: 16.,
                     bottom: 16.,
                     left: 16.,
@@ -531,10 +537,10 @@ impl ChatView {
                         ),
                     ),
                     wire::Edges {
-                        top: 8.,
-                        right: 8.,
-                        bottom: 4.,
-                        left: 8.,
+                        top: native::spacing::SM as f32,
+                        right: native::spacing::SM as f32,
+                        bottom: native::spacing::XXS as f32,
+                        left: native::spacing::SM as f32,
                     },
                 )];
                 rows.extend(self.search_hits.iter().map(|hit| {
@@ -552,7 +558,7 @@ impl ChatView {
             key.clone(),
             native::padded(
                 native::spaced(native::column(format!("{key}/rows"), children), 2.),
-                wire::Edges::all(8.),
+                wire::Edges::all(native::spacing::SM as f32),
             ),
         )
     }
@@ -593,16 +599,16 @@ impl ChatView {
                     [
                         native::title(format!("{key}/name"), name),
                         native::wrapping(native::secondary(format!("{key}/detail"), detail)),
-                        native::gap(4.),
+                        native::gap(native::spacing::XXS as f32),
                         native::divider(format!("{key}/rule")),
                     ],
                 ),
-                6.,
+                native::spacing::XS as f32,
             ),
             wire::Edges {
-                top: 24.,
+                top: native::spacing::XL as f32,
                 right: 16.,
-                bottom: 8.,
+                bottom: native::spacing::SM as f32,
                 left: 16.,
             },
         )
@@ -809,11 +815,14 @@ impl ChatView {
                     false,
                 );
                 let actions = native::padded(
-                    native::spaced(native::row(format!("{run_key}/actions"), [open, stop]), 6.),
+                    native::spaced(
+                        native::row(format!("{run_key}/actions"), [open, stop]),
+                        native::spacing::XS as f32,
+                    ),
                     wire::Edges {
                         top: 0.,
                         right: 16.,
-                        bottom: 4.,
+                        bottom: native::spacing::XXS as f32,
                         left: super::kit::RAIL,
                     },
                 );
@@ -829,9 +838,9 @@ impl ChatView {
             border: None,
             spacing: None,
             padding: Some(wire::Edges {
-                top: 8.,
+                top: native::spacing::SM as f32,
                 right: 0.,
-                bottom: 8.,
+                bottom: native::spacing::SM as f32,
                 left: 0.,
             }),
             width: Some(wire::Length::Fill),
@@ -916,7 +925,7 @@ impl ChatView {
             *height = Some(wire::Length::Fill);
             *padding = Some(wire::Edges {
                 top: 0.,
-                right: 12.,
+                right: native::spacing::LG as f32,
                 bottom: 0.,
                 left: 0.,
             });
@@ -942,12 +951,12 @@ impl ChatView {
                         )),
                     ],
                 ),
-                8.,
+                native::spacing::SM as f32,
             ),
             wire::Edges {
-                top: 6.,
+                top: native::spacing::XS as f32,
                 right: 16.,
-                bottom: 6.,
+                bottom: native::spacing::XS as f32,
                 left: 16.,
             },
         )
@@ -988,9 +997,9 @@ impl ChatView {
                 Tone::Accent,
             ),
             wire::Edges {
-                top: 4.,
+                top: native::spacing::XXS as f32,
                 right: 16.,
-                bottom: 4.,
+                bottom: native::spacing::XXS as f32,
                 left: 16.,
             },
         )
@@ -1018,7 +1027,7 @@ impl ChatView {
                                     ),
                                 ],
                             ),
-                            8.,
+                            native::spacing::SM as f32,
                         ),
                         Some(wire::Length::Fill),
                         None,
@@ -1045,7 +1054,7 @@ impl ChatView {
                     Message::LoadMoreThread,
                     self.thread_loading || self.busy,
                 ),
-                wire::Edges::all(8.),
+                wire::Edges::all(native::spacing::SM as f32),
             ));
         }
         children.push(self.message_list(
@@ -1111,7 +1120,10 @@ impl ChatView {
         );
         let unlinked = link.is_empty();
         let about = vec![
-            native::spaced(native::centered_row(format!("{key}/title-row"), title), 8.),
+            native::spaced(
+                native::centered_row(format!("{key}/title-row"), title),
+                native::spacing::SM as f32,
+            ),
             native::row(
                 format!("{key}/link-row"),
                 [glyph(
@@ -1497,7 +1509,7 @@ impl ChatView {
                                 ),
                             ],
                         ),
-                        6.,
+                        native::spacing::XS as f32,
                     ),
                     wire::AlignX::Right,
                 ));
@@ -1506,22 +1518,25 @@ impl ChatView {
         // The frame is what the host focuses when the menu opens; only the
         // edit sits in the stream's flow and wears the stream's inset.
         let frame_key = format!("{key}/{prefix}{focus}");
-        let menu = native::spaced(native::column(format!("{key}/{prefix}menu"), children), 8.);
+        let menu = native::spaced(
+            native::column(format!("{key}/{prefix}menu"), children),
+            native::spacing::SM as f32,
+        );
         let mut frame = native::card(frame_key, menu);
         if let wire::Node::Container { padding, .. } = &mut frame {
             *padding = Some(wire::Edges::all(match mode {
                 MessageAction::Toolbar | MessageAction::More => MENU_INSET,
                 MessageAction::Reactions => PICKER_INSET,
-                MessageAction::Editing | MessageAction::Delete => 12.,
+                MessageAction::Editing | MessageAction::Delete => native::spacing::LG as f32,
             }));
         }
         match mode {
             MessageAction::Editing => native::padded(
                 frame,
                 wire::Edges {
-                    top: 4.,
+                    top: native::spacing::XXS as f32,
                     right: 16.,
-                    bottom: 4.,
+                    bottom: native::spacing::XXS as f32,
                     left: 16.,
                 },
             ),
@@ -1567,10 +1582,13 @@ impl ChatView {
                     ),
                 ],
             ),
-            8.,
+            native::spacing::SM as f32,
         );
         let body = self.preview_body(&key, &path);
-        let card = native::spaced(native::column(key.clone(), [header, body]), 10.);
+        let card = native::spaced(
+            native::column(key.clone(), [header, body]),
+            native::spacing::MD as f32,
+        );
         Some(native::padded(card, wire::Edges::all(14.)))
     }
     fn preview_body(&self, key: &str, path: &str) -> wire::Node {
@@ -1657,7 +1675,10 @@ impl ChatView {
             ));
         }
         native::sized(
-            native::spaced(native::column(format!("{key}/document"), children), 6.),
+            native::spaced(
+                native::column(format!("{key}/document"), children),
+                native::spacing::XS as f32,
+            ),
             Some(wire::Length::Fixed(plate_width)),
             Some(wire::Length::Fixed(plate_height)),
         )
@@ -1669,20 +1690,20 @@ enum OpenMenu {
     Timeline(MessageAction),
     Thread(MessageAction),
 }
-const MENU_ITEM_HEIGHT: f32 = 28.;
+const MENU_ITEM_HEIGHT: f32 = native::height::CONTROL as f32;
 /// The room around a composer: the timeline's 16px sides, and air under it.
 const COMPOSER_MARGIN: wire::Edges = wire::Edges {
-    top: 4.,
+    top: native::spacing::XXS as f32,
     right: 16.,
-    bottom: 12.,
+    bottom: native::spacing::LG as f32,
     left: 16.,
 };
 const MENU_ITEM_GAP: f32 = 2.;
-const MENU_INSET: f32 = 6.;
+const MENU_INSET: f32 = native::spacing::XS as f32;
 const PICKER_COLUMNS: u32 = 8;
 pub(super) const PICKER_CELL: f32 = 32.;
 const PICKER_GAP: f32 = 2.;
-const PICKER_INSET: f32 = 8.;
+const PICKER_INSET: f32 = native::spacing::SM as f32;
 /// The "…" dropdown's box for `items` rows.
 fn menu_size(items: usize) -> (f64, f64) {
     let rows = items as f32;
@@ -1725,7 +1746,7 @@ fn menu_item(
                 native::nowrap(native::text(format!("{key}/label"), label)),
             ],
         ),
-        8.,
+        native::spacing::SM as f32,
     );
     let mut button = native::button_child(
         key,
@@ -1746,9 +1767,9 @@ fn menu_item(
         *height = Some(wire::Length::Fixed(MENU_ITEM_HEIGHT));
         *padding = Some(wire::Edges {
             top: 0.,
-            right: 8.,
+            right: native::spacing::SM as f32,
             bottom: 0.,
-            left: 8.,
+            left: native::spacing::SM as f32,
         });
     }
     button

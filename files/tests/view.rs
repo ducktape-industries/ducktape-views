@@ -1887,3 +1887,47 @@ fn a_drop_into_a_namespace_root_refuses_before_reading_device_bytes() {
     let frame = tick_native(vec![raw_answer(release.id, b"")]);
     assert!(has_text(&frame, "path is outside /home and /shared"));
 }
+
+/// A listing and a preview still being read are the kit's loading state —
+/// a titled block in the pane — never a lone caption in its corner.
+#[test]
+fn a_pending_listing_and_preview_draw_the_kits_loading_state() {
+    let frame = boot();
+    let session_id = request(&frame, "files.props").id;
+    let frame = tick_native(vec![item(session_id, &session(true))]);
+    assert!(
+        matches!(node_ending(&frame, "/pending/title"), Node::Text { .. }),
+        "{:?}",
+        keys(&frame)
+    );
+    let (frame, _held) = connected_with_listing();
+    let frame = tick_native(press(&frame, "File README.md"));
+    assert!(
+        matches!(node_ending(&frame, "/reading/title"), Node::Text { .. }),
+        "{:?}",
+        keys(&frame)
+    );
+}
+
+/// A refused history read is a danger notice in the sidebar, the same
+/// plate every other failure wears.
+#[test]
+fn a_refused_history_read_is_a_notice() {
+    let frame = boot();
+    let session_id = request(&frame, "files.props").id;
+    let frame = tick_native(vec![item(session_id, &session(true))]);
+    let ls = ls_of(&frame, "/shared").0.id;
+    let frame = tick_native(vec![answer(ls, &listing())]);
+    let home = ls_of(&frame, "/home").0.id;
+    let frame = tick_native(vec![answer(home, &homes())]);
+    let history = files_get(&frame, "history").0.id;
+    let frame = tick_native(vec![refuse(history, "index offline")]);
+    assert!(
+        matches!(
+            node_ending(&frame, "/history-error-box"),
+            Node::Container { .. }
+        ),
+        "{:?}",
+        texts(&frame)
+    );
+}

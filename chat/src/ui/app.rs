@@ -1261,6 +1261,77 @@ mod tests {
         );
     }
 
+    /// A long channel or person name in the list pane pushed the marks and
+    /// the unread dot after it out of the row, where the row's button clipped
+    /// them away: the name is the clipped box that gives way, as the header's.
+    #[test]
+    fn a_long_name_in_the_list_pane_gives_way_to_its_unread_dot() {
+        let name = "a-very-long-channel-name-that-is-wider-than-any-list-pane-the-reader-can-drag";
+        let mut state = ChatView::state();
+        state.connected = true;
+        state.rooms = vec![crate::host::ChatSidebarRow {
+            channel: crate::host::ChatChannel {
+                id: "room".into(),
+                name: name.into(),
+                members_only: true,
+                ..Default::default()
+            },
+            unread: true,
+        }];
+        state.dm_rows = vec![crate::host::DmSidebarRow {
+            peer: crate::host::DmPeer {
+                key: "peer".into(),
+                name: name.into(),
+                ..Default::default()
+            },
+            unread: true,
+        }];
+        let mut tree = state.view();
+        let mut rows = Vec::new();
+        tree.for_each_mut(&mut |node| {
+            if let wire::Node::Linear { key, children, .. } = node
+                && key.ends_with("/row")
+                && (key.contains("/channel/room/") || key.contains("/dm/peer/"))
+            {
+                rows.push((key.clone(), children.clone()));
+            }
+        });
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        for (key, children) in rows {
+            assert!(
+                children.iter().any(|node| matches!(
+                    node,
+                    wire::Node::Container {
+                        width: Some(wire::Length::Shrink),
+                        clip: true,
+                        ..
+                    }
+                )),
+                "{key}: the name gives way: {children:?}"
+            );
+        }
+    }
+
+    /// A room still reading its messages draws the kit's loading state, a
+    /// titled block, not a lone caption.
+    #[test]
+    fn a_loading_room_draws_the_kits_loading_state() {
+        let mut state = ChatView::state();
+        state.connected = true;
+        state.active_channel = "room".into();
+        state.loading = true;
+        let mut tree = state.view();
+        let mut titled = false;
+        tree.for_each_mut(&mut |node| {
+            if let wire::Node::Text { key, content, .. } = node
+                && key.ends_with("/loading/title")
+            {
+                titled |= content == "Loading messages…";
+            }
+        });
+        assert!(titled);
+    }
+
     /// With a thread open, Details drew a second side pane, and the two left
     /// the conversation ~170 px at 1280 and nothing at 1000: each pane's width
     /// is clamped as the only one beside the room. Details now stands in front

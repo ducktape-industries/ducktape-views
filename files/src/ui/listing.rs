@@ -98,9 +98,10 @@ impl FilesView {
             Listing::Pending => native::sized(
                 native::container(
                     format!("{key}/pending-box"),
-                    kit::inset(
-                        native::caption(format!("{key}/pending"), "Loading…"),
-                        wire::Edges::all(12.),
+                    native::empty_state(
+                        format!("{key}/pending"),
+                        "Loading…",
+                        "This folder's entries arrive next.",
                     ),
                 ),
                 Some(wire::Length::Fill),
@@ -165,9 +166,9 @@ impl FilesView {
             border: None,
             spacing: None,
             padding: Some(wire::Edges {
-                top: 4.,
+                top: native::spacing::XXS as f32,
                 right: 2.,
-                bottom: 6.,
+                bottom: native::spacing::XS as f32,
                 left: 2.,
             }),
             width: Some(wire::Length::Fill),
@@ -203,9 +204,9 @@ impl FilesView {
                                         ),
                                     ],
                                 ),
-                                8.,
+                                native::spacing::SM as f32,
                             ),
-                            wire::Edges::all(10.),
+                            wire::Edges::all(native::spacing::MD as f32),
                         ),
                     ],
                 ),
@@ -255,7 +256,10 @@ impl FilesView {
             KIND_WIDTH,
             wire::AlignX::Left,
         ));
-        let face = native::spaced(native::centered_row(format!("{key}/cells"), cells), 8.);
+        let face = native::spaced(
+            native::centered_row(format!("{key}/cells"), cells),
+            native::spacing::SM as f32,
+        );
         let mut button = native::list_row(
             format!("{key}/select"),
             face,

@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use ducktape_view_guest::testing::{answer, find, has_text, item, press, submit, texts, type_into};
-use ducktape_view_guest::wire::{ButtonContent, Frame, Node, Request, Wrapping};
+use ducktape_view_guest::wire::{ButtonContent, Frame, Length, Node, Request, Wrapping};
 use settings_view::boot_native;
 use settings_view::host::{Endpoint, KeyAdd, Name, Session, Tab, TasteRow, Unlock};
 
@@ -851,6 +851,74 @@ fn every_row_cell_keeps_one_line() {
         stale.is_empty(),
         "nothing on the page wraps under {stale:?}"
     );
+}
+
+/// A narrow pane holds every row: a setting row and each row of controls
+/// wrap (the words a portion, so a control drops under them only when it
+/// cannot sit beside them), and a one-line reading or a key's label takes
+/// its row's rest and truncates instead of running past the edge.
+#[test]
+fn a_narrow_pane_wraps_the_controls_and_truncates_long_readings() {
+    let long = Session {
+        account_name: "a name far longer than any settings pane is wide".into(),
+        update_state: "staged".into(),
+        update_staged_display: "2026.09.2+abc1234".into(),
+        update_previous: "9f8e7d6".into(),
+        ..facts()
+    };
+    let (frame, ..) = connected(&long, 2);
+    let panes = every_pane(frame);
+    let found = |key: &str| {
+        panes
+            .iter()
+            .find_map(|frame| find(frame, key).cloned())
+            .unwrap_or_else(|| panic!("no {key} on any pane"))
+    };
+    for key in [
+        "settings/theme",
+        "settings/node-rpc-edit",
+        "settings/rename-row",
+        "settings/node-rpc-controls",
+        "settings/rename-controls",
+        "settings/key-label-row",
+        "settings/update-actions",
+    ] {
+        let Node::Linear { wrap, .. } = found(key) else {
+            panic!("{key} is a row");
+        };
+        assert!(wrap.is_some(), "{key} wraps");
+    }
+    let Node::Linear { width, .. } = found("settings/theme/text") else {
+        panic!("a setting's words are a column");
+    };
+    assert_eq!(width, Some(Length::FillPortion(1)), "the words give way");
+    for key in [
+        "settings/account-name",
+        "settings/update-staged",
+        "settings/network-status",
+    ] {
+        let Node::Text { width, options, .. } = found(key) else {
+            panic!("{key} is text");
+        };
+        assert_eq!(
+            (width, options.wrapping),
+            (Some(Length::Fill), Some(Wrapping::None)),
+            "{key} truncates"
+        );
+    }
+}
+
+/// An account holds at least its first key, so an account with none read
+/// says the read is out — not "0 keys" over an empty list.
+#[test]
+fn an_account_whose_keys_are_not_read_says_so() {
+    let (frame, ..) = connected(&facts(), 0);
+    let frame = tick_native(press(&frame, "Account"));
+    assert!(has_text(&frame, "Reading keys…"), "{:?}", texts(&frame));
+    assert!(!has_text(
+        &frame,
+        "0 keys — each one signs for this account."
+    ));
 }
 
 // ---------- updates ----------

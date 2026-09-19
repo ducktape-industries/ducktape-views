@@ -1387,3 +1387,69 @@ fn an_at_in_a_comment_picks_who_it_mentions_and_says_it_is_working() {
         texts(&frame)
     );
 }
+
+// ---------- design: states and narrow panes ----------
+
+/// A workspace with no pages says so in the sidebar with the kit's empty
+/// state, not a loose line of secondary text.
+#[test]
+fn an_empty_workspace_draws_the_kits_empty_state_in_the_sidebar() {
+    let frame = boot();
+    let session_id = request(&frame, "pages.props").id;
+    let mut frame = tick_native(vec![item(session_id, &session(true))]);
+    for _ in 0..16 {
+        let Some(read) = frame
+            .requests
+            .iter()
+            .find(|one| one.kind == "rpc.view" || one.kind == "rpc.query")
+        else {
+            break;
+        };
+        let ask: serde_json::Value = serde_json::from_slice(&read.payload).unwrap();
+        let reply = match ask["query"]["list_pages"].is_null() {
+            true => answered(read),
+            false => br#"{"pages":{"pages":[],"has_more":false,"next_after":null}}"#.to_vec(),
+        };
+        frame = tick_native(vec![answer(read.id, &reply)]);
+    }
+    assert!(
+        find(&frame, "pages/sidebar/empty/title").is_some(),
+        "{:?}",
+        texts(&frame)
+    );
+}
+
+/// A document pane a phone's width across stacks the toolbar: the controls
+/// wrap under the title, and the title ends in an ellipsis instead of
+/// pushing them off the pane. A wide pane keeps them on one line.
+#[test]
+fn a_narrow_pane_stacks_the_toolbar_under_a_truncating_title() {
+    let wide = at_pane(1100.0);
+    let Some(Node::Linear { wrap, .. }) = find(&wide, "pages/toolbar/controls") else {
+        panic!("the toolbar's controls are a row");
+    };
+    assert!(wrap.is_none(), "a wide pane keeps one line");
+    let narrow = at_pane(400.0);
+    let Some(Node::Linear { wrap, .. }) = find(&narrow, "pages/toolbar/controls") else {
+        panic!("the toolbar's controls are a row");
+    };
+    assert!(wrap.is_some(), "a narrow pane wraps the controls");
+    let Some(Node::Text { width, options, .. }) = find(&narrow, "pages/toolbar/title") else {
+        panic!("the toolbar names the page");
+    };
+    assert_eq!(*width, Some(Length::Fill));
+    assert_eq!(options.wrapping, Some(wire::Wrapping::None));
+}
+
+/// A page row's menu floats as a card: its corners are the design's card
+/// radius, the same the chat message menu wears.
+#[test]
+fn a_page_row_menu_wears_the_card_radius() {
+    let (frame, _) = connected_with_register();
+    let frame = tick_native(press(&frame, "Actions for Alpha"));
+    let Some(Node::Float { radius, .. }) = float_in(frame.root.as_ref().expect("a root")) else {
+        panic!("no row menu in {:?}", texts(&frame));
+    };
+    let card = ducktape_view_guest::kit::radius::CARD as f32;
+    assert_eq!(*radius, Some([card; 4]));
+}

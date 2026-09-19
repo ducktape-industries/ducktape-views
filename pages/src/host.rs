@@ -636,11 +636,11 @@ impl Names {
     /// `module:{id}`, `system`) as a person's name.
     fn display(&self, handle: &str) -> String {
         match handle.split_once(':') {
-            Some(("user", key)) => self
-                .by_key
-                .get(key)
-                .cloned()
-                .unwrap_or_else(|| format!("user {}", short_label(key))),
+            Some(("user", key)) => {
+                self.by_key.get(key).cloned().unwrap_or_else(|| {
+                    format!("user {}", ducktape_view_guest::kit::short_id(key, 8))
+                })
+            }
             Some(("acct", number)) => number
                 .parse()
                 .ok()
@@ -720,14 +720,6 @@ fn hex_encode(bytes: &[u8]) -> String {
         let _ = write!(output, "{byte:02x}");
     }
     output
-}
-
-fn short_label(id: &str) -> String {
-    let mut label: String = id.chars().take(8).collect();
-    if id.chars().count() > 8 {
-        label.push('…');
-    }
-    label
 }
 
 fn page_comment(ordinal: usize, comment: &Value, names: &Names) -> PageComment {

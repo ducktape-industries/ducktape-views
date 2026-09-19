@@ -10,8 +10,8 @@ const PAGE_FOLD_SLOT: f32 = PAGE_TREE_STEP;
 /// The title's trailing pad: room for "…" and "+" to appear over it.
 const PAGE_ROW_ACTIONS_WIDTH: f32 = 52.;
 const PAGE_MENU_WIDTH: f64 = 200.;
-const PAGE_MENU_INSET: f32 = 6.;
-const PAGE_MENU_ITEM_HEIGHT: f32 = 28.;
+const PAGE_MENU_INSET: f32 = kit::spacing::XS as f32;
+const PAGE_MENU_ITEM_HEIGHT: f32 = kit::height::CONTROL as f32;
 /// The tallest a row menu grows before its list scrolls inside it.
 const PAGE_MENU_MAX_ROWS: usize = 12;
 /// A reply sits one avatar in from its opener.
@@ -151,7 +151,7 @@ impl PagesView {
             background: None,
             border: None,
             tint: Some(wash),
-            radius: 4.,
+            radius: kit::radius::CONTROL as f32,
             open: menu_open,
             children: vec![
                 line,
@@ -326,7 +326,7 @@ impl PagesView {
                 y: Some(4.),
                 blur: Some(16.),
             },
-            radius: Some([8.; 4]),
+            radius: Some([kit::radius::CARD as f32; 4]),
             content: Box::new(card),
         };
         Some(kit::sized(
@@ -357,7 +357,7 @@ impl PagesView {
                                 kit::badge(format!("{key}/kind"), &hit.kind, Tone::Neutral),
                             ],
                         ),
-                        6.,
+                        kit::spacing::XS as f32,
                     ),
                     kit::wrapping(kit::colored(
                         kit::text_size(
@@ -368,7 +368,7 @@ impl PagesView {
                     )),
                 ],
             ),
-            4.,
+            kit::spacing::XXS as f32,
         );
         let mut row = kit::list_row(
             key,
@@ -384,7 +384,7 @@ impl PagesView {
         if let Node::Button { label, .. } = &mut row {
             *label = Some(format!("{}: {}", hit.page_title, hit.text));
         }
-        kit::padded(row, wire::Edges::all(8.))
+        kit::padded(row, wire::Edges::all(kit::spacing::SM as f32))
     }
 
     /// One thread, Notion's card: the opener's line (avatar, name, the
@@ -473,7 +473,7 @@ impl PagesView {
         }
         kit::card(
             key.clone(),
-            kit::spaced(kit::column(format!("{key}/body"), rows), 6.),
+            kit::spaced(kit::column(format!("{key}/body"), rows), kit::spacing::XS as f32),
         )
     }
 
@@ -509,7 +509,7 @@ impl PagesView {
                 ButtonPreset::Primary,
             ));
         }
-        kit::spaced(kit::centered_row(format!("{key}/compose"), row), 6.)
+        kit::spaced(kit::centered_row(format!("{key}/compose"), row), kit::spacing::XS as f32)
     }
 
     /// One comment: who, then the words — or, while it is the one being
@@ -548,7 +548,7 @@ impl PagesView {
         if let Some(trailing) = trailing {
             who.push(trailing);
         }
-        let head = kit::spaced(kit::centered_row(format!("{key}/head"), who), 8.);
+        let head = kit::spaced(kit::centered_row(format!("{key}/head"), who), kit::spacing::SM as f32);
         let editing = !id.is_empty() && self.comment_edit_id == id;
         let words = if editing {
             kit::spaced(
@@ -579,12 +579,12 @@ impl PagesView {
                         ),
                     ],
                 ),
-                6.,
+                kit::spacing::XS as f32,
             )
         } else {
             kit::wrapping(kit::text(format!("{key}/text"), text))
         };
-        let entry = kit::spaced(kit::column(format!("{key}/entry"), [head, words]), 4.);
+        let entry = kit::spaced(kit::column(format!("{key}/entry"), [head, words]), kit::spacing::XXS as f32);
         let deleted_or_editing = id.is_empty() || editing;
         if deleted_or_editing {
             return entry;
@@ -624,7 +624,7 @@ impl PagesView {
             *border = Some(wire::Border {
                 color: Some(kit::rgba(kit::palette().border)),
                 width: Some(1.),
-                radius: Some([6.; 4]),
+                radius: Some([kit::radius::CARD as f32; 4]),
             });
             *padding = Some(wire::Edges::all(2.));
         }
@@ -692,7 +692,7 @@ fn page_row_actions(key: String, actions: Node) -> Node {
         *height = Some(Length::Fill);
         *padding = Some(wire::Edges {
             top: HOVER_FLOAT_LIFT,
-            right: 4.,
+            right: kit::spacing::XXS as f32,
             bottom: 0.,
             left: 0.,
         });

@@ -47,7 +47,11 @@ impl InboxView {
                 Tone::Danger,
             ));
         }
-        body.push(self.list());
+        // a failed read with nothing on screen is the notice alone: an empty
+        // state under it would say "Nothing new" about a queue never read
+        if self.error.is_empty() || !self.rows.is_empty() {
+            body.push(self.list());
+        }
         kit::page("inbox/content", body)
     }
 
@@ -74,12 +78,19 @@ impl InboxView {
             can_mark.then(|| slots::message(Message::MarkAllRead)),
             ButtonPreset::Secondary,
         ));
-        kit::spaced(kit::centered_row("inbox/head", cells), 8.)
+        kit::spaced(
+            kit::centered_row("inbox/head", cells),
+            kit::spacing::SM as f32,
+        )
     }
 
     fn list(&self) -> Node {
         if self.reading {
-            return kit::secondary("inbox/reading", "Reading your notifications…");
+            return kit::empty_state(
+                "inbox/reading",
+                "Reading your notifications…",
+                "The newest arrive first.",
+            );
         }
         if self.rows.is_empty() {
             return kit::empty_state(
@@ -114,7 +125,10 @@ impl InboxView {
             kit::column(
                 key.clone(),
                 [
-                    kit::spaced(kit::centered_row(format!("{key}/line"), line), 8.),
+                    kit::spaced(
+                        kit::centered_row(format!("{key}/line"), line),
+                        kit::spacing::SM as f32,
+                    ),
                     kit::nowrap(kit::secondary(format!("{key}/detail"), row.detail.clone())),
                 ],
             ),

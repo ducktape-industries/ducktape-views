@@ -107,8 +107,8 @@ pub(super) fn navigation(
     wire::Node::Tooltip {
         key: format!("{key}/tooltip"),
         position: wire::TooltipPosition::Bottom,
-        gap: 6.,
-        padding: 6.,
+        gap: native::spacing::XS as f32,
+        padding: native::spacing::XS as f32,
         delay_ms: 400,
         snap: true,
         style: Default::default(),
@@ -123,7 +123,7 @@ pub(super) fn navigation(
                             native::palette().foreground,
                         ),
                     ),
-                    wire::Edges::all(6.),
+                    wire::Edges::all(native::spacing::XS as f32),
                 ),
                 Some(wire::Length::Shrink),
                 None,
@@ -142,12 +142,15 @@ pub(super) fn inset(node: wire::Node, padding: wire::Edges) -> wire::Node {
 pub(super) fn bar(key: String, children: Vec<wire::Node>) -> wire::Node {
     native::sized(
         native::padded(
-            native::spaced(native::centered_row(key, children), 6.),
+            native::spaced(
+                native::centered_row(key, children),
+                native::spacing::XS as f32,
+            ),
             wire::Edges {
                 top: 0.,
-                right: 10.,
+                right: native::spacing::MD as f32,
                 bottom: 0.,
-                left: 10.,
+                left: native::spacing::MD as f32,
             },
         ),
         Some(wire::Length::Fill),
@@ -164,16 +167,19 @@ pub(super) fn header_strip(key: &str, cells: Vec<wire::Node>) -> wire::Node {
             [
                 native::sized(
                     native::padded(
-                        native::spaced(native::centered_row(key, cells), 8.),
+                        native::spaced(
+                            native::centered_row(key, cells),
+                            native::spacing::SM as f32,
+                        ),
                         wire::Edges {
                             top: 0.,
-                            right: 10.,
+                            right: native::spacing::MD as f32,
                             bottom: 0.,
-                            left: 10.,
+                            left: native::spacing::MD as f32,
                         },
                     ),
                     Some(wire::Length::Fill),
-                    Some(wire::Length::Fixed(26.)),
+                    Some(wire::Length::Fixed(native::height::ROW as f32)),
                 ),
                 native::divider(format!("{key}/rule")),
             ],
@@ -232,13 +238,13 @@ pub(super) fn error_plate(key: String, reason: &str, retry: Message) -> wire::No
                             format!("{key}/actions"),
                             [action(format!("{key}/retry"), "Try again", retry, false)],
                         ),
-                        8.,
+                        native::spacing::SM as f32,
                     ),
                 ],
             ),
-            8.,
+            native::spacing::SM as f32,
         ),
-        wire::Edges::all(12.),
+        wire::Edges::all(native::spacing::LG as f32),
     )
 }
 
@@ -266,7 +272,7 @@ pub(super) fn modal(
 fn dialog_card(key: String, children: Vec<wire::Node>) -> wire::Node {
     let mut card = native::card(
         format!("{key}/card"),
-        native::spaced(native::column(key, children), 12.),
+        native::spaced(native::column(key, children), native::spacing::LG as f32),
     );
     if let wire::Node::Container {
         padding,
@@ -328,7 +334,7 @@ impl FilesView {
                     ),
                 ],
             ),
-            8.,
+            native::spacing::SM as f32,
         ));
         dialog_card(key, children)
     }
@@ -407,7 +413,7 @@ impl FilesView {
                     ),
                 ],
             ),
-            8.,
+            native::spacing::SM as f32,
         ));
         dialog_card(key, children)
     }

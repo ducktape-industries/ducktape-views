@@ -8,26 +8,24 @@ impl ForgeView {
     pub(super) fn code_screen(&self) -> wire::Node {
         let mut tree = Vec::new();
         match (self.tree_phase.as_str(), self.tree_children.get("")) {
-            ("failed", _) => tree.push(native::wrapping(native::secondary(
-                "forge/tree-failed",
+            ("failed", _) => tree.push(super::kit::failed(
+                "forge/tree-failed".into(),
                 "Could not load the tree. Open the repository again to retry.",
-            ))),
-            (_, None) => tree.push(native::secondary(
+            )),
+            (_, None) => tree.push(native::empty_state(
                 "forge/tree-loading",
-                "Loading repository tree…",
+                "Loading the tree…",
+                "Its files and directories arrive next.",
             )),
             (_, Some(root)) => {
                 self.tree_rows("", 0, &mut tree);
                 if root.is_empty() {
-                    let empty = if !self.tree_born {
-                        "This repository has no commits yet."
+                    let (title, detail) = if !self.tree_born {
+                        ("No commits yet", "Push to this repository to fill it.")
                     } else {
-                        "This repository is empty."
+                        ("Empty repository", "Its commit holds no files.")
                     };
-                    tree.push(native::wrapping(native::secondary(
-                        "forge/tree-empty",
-                        empty,
-                    )));
+                    tree.push(native::empty_state("forge/tree-empty", title, detail));
                 }
                 if self.tree_truncated {
                     tree.push(native::caption(
@@ -43,7 +41,7 @@ impl ForgeView {
                 "forge/tree-scroll",
                 native::padded(
                     native::spaced(native::column("forge/tree", tree), 1.),
-                    wire::Edges::all(6.),
+                    wire::Edges::all(native::spacing::XS as f32),
                 ),
             ),
             wire::Length::Fixed(self.tree_width as f32),
@@ -99,10 +97,10 @@ impl ForgeView {
     fn tree_rows(&self, dir: &str, depth: usize, rows: &mut Vec<wire::Node>) {
         let p = native::palette();
         let inset = |depth: usize| wire::Edges {
-            top: 8.,
-            right: 8.,
-            bottom: 8.,
-            left: 8. + 14. * depth as f32,
+            top: native::spacing::SM as f32,
+            right: native::spacing::SM as f32,
+            bottom: native::spacing::SM as f32,
+            left: native::spacing::SM as f32 + 14. * depth as f32,
         };
         let Some(entries) = self.tree_children.get(dir) else {
             rows.push(native::padded(
@@ -131,7 +129,12 @@ impl ForgeView {
                 (true, false) => "▸",
                 (true, true) => "▾",
             };
-            let name = native::nowrap(native::text(format!("{key}/name"), &entry.name));
+            // a long name ends in an ellipsis at the pane's edge
+            let name = native::sized(
+                native::nowrap(native::text(format!("{key}/name"), &entry.name)),
+                Some(wire::Length::Fill),
+                None,
+            );
             let name = if directory {
                 native::weighted(name, wire::Weight::Medium)
             } else {
@@ -159,7 +162,7 @@ impl ForgeView {
                             name,
                         ],
                     ),
-                    4.,
+                    native::spacing::XXS as f32,
                 ),
                 Some(wire::Length::Fill),
                 None,
@@ -249,10 +252,14 @@ impl ForgeView {
             self.file_phase == "ready" && !self.file_binary && !self.file_picture && !markdown;
         let mut content = Vec::new();
         match self.file_phase.as_str() {
-            "loading" => content.push(native::secondary("forge/loading-file", "Loading file…")),
-            "failed" => content.push(native::tone_text(
+            "loading" => content.push(native::empty_state(
+                "forge/loading-file",
+                "Loading file…",
+                "Its contents at this commit arrive next.",
+            )),
+            "failed" => content.push(native::notice(
                 "forge/file-failed",
-                &self.file_note,
+                native::wrapping(native::text("forge/file-failed/text", &self.file_note)),
                 Tone::Danger,
             )),
             "ready" => {
@@ -310,17 +317,26 @@ impl ForgeView {
         // taking the pane's full height and overflowing by the header's row
         let body = match code {
             true => native::sized(
-                native::spaced(native::column("forge/file-body", content), 10.),
+                native::spaced(
+                    native::column("forge/file-body", content),
+                    native::spacing::MD as f32,
+                ),
                 Some(wire::Length::Fill),
                 Some(wire::Length::FillPortion(1)),
             ),
             false => native::scroll(
                 "forge/file-scroll",
-                native::spaced(native::column("forge/file-body", content), 10.),
+                native::spaced(
+                    native::column("forge/file-body", content),
+                    native::spacing::MD as f32,
+                ),
             ),
         };
         native::sized(
-            native::spaced(native::column("forge/file", [head, body]), 10.),
+            native::spaced(
+                native::column("forge/file", [head, body]),
+                native::spacing::MD as f32,
+            ),
             Some(wire::Length::Fill),
             Some(wire::Length::Fill),
         )
@@ -349,10 +365,10 @@ impl ForgeView {
         {
             *background = Some(native::rgba(p.surface_raised));
             *padding = Some(wire::Edges {
-                top: 4.,
-                right: 8.,
-                bottom: 4.,
-                left: 8.,
+                top: native::spacing::XXS as f32,
+                right: native::spacing::SM as f32,
+                bottom: native::spacing::XXS as f32,
+                left: native::spacing::SM as f32,
             });
         }
         framed
@@ -379,7 +395,7 @@ impl ForgeView {
                         )),
                     ],
                 ),
-                6.,
+                native::spacing::XS as f32,
             ),
             Some(wire::Length::Fill),
             None,
@@ -400,10 +416,10 @@ impl ForgeView {
             *label = Some(text.to_owned());
             *width = Some(wire::Length::Fill);
             *padding = Some(wire::Edges {
-                top: 4.,
-                right: 8.,
-                bottom: 4.,
-                left: 8.,
+                top: native::spacing::XXS as f32,
+                right: native::spacing::SM as f32,
+                bottom: native::spacing::XXS as f32,
+                left: native::spacing::SM as f32,
             });
         }
         let mut framed = native::row(format!("{key}/frame"), [head]);
@@ -456,9 +472,9 @@ impl ForgeView {
                     ),
                     wire::Edges {
                         top: 2.,
-                        right: 8.,
+                        right: native::spacing::SM as f32,
                         bottom: 2.,
-                        left: 8.,
+                        left: native::spacing::SM as f32,
                     },
                 ),
                 "file" => self.file_header(&key, &line.text),
@@ -475,9 +491,9 @@ impl ForgeView {
                     ),
                     wire::Edges {
                         top: 2.,
-                        right: 8.,
+                        right: native::spacing::SM as f32,
                         bottom: 2.,
-                        left: 8.,
+                        left: native::spacing::SM as f32,
                     },
                 ),
                 _ => {
@@ -522,9 +538,9 @@ impl ForgeView {
                         ),
                         wire::Edges {
                             top: 0.,
-                            right: 8.,
+                            right: native::spacing::SM as f32,
                             bottom: 0.,
-                            left: 8.,
+                            left: native::spacing::SM as f32,
                         },
                     );
                     if let wire::Node::Linear { background, .. } = &mut row {
@@ -671,7 +687,7 @@ impl ForgeView {
                 ));
                 content.push(native::spaced(
                     native::centered_row("forge/merge-row", row),
-                    10.,
+                    native::spacing::MD as f32,
                 ));
                 if !self.merge_conflicts.is_empty() {
                     let mut conflicts = vec![native::wrapping(native::text(
@@ -686,7 +702,10 @@ impl ForgeView {
                     }
                     content.push(native::notice(
                         "forge/conflicts",
-                        native::spaced(native::column("forge/conflict-list", conflicts), 4.),
+                        native::spaced(
+                            native::column("forge/conflict-list", conflicts),
+                            native::spacing::XXS as f32,
+                        ),
                         Tone::Warning,
                     ));
                 }
@@ -703,7 +722,11 @@ impl ForgeView {
     pub(super) fn review_screen(&self) -> wire::Node {
         let mut content = Vec::new();
         if self.forge_item_reviews.is_empty() {
-            content.push(native::secondary("forge/no-reviews", "No reviews yet."));
+            content.push(native::empty_state(
+                "forge/no-reviews",
+                "No reviews yet",
+                "A review lands here once a reviewer submits one.",
+            ));
         }
         for (index, review) in self.forge_item_reviews.iter().enumerate() {
             let key = format!("forge/review/{index}");
@@ -731,7 +754,10 @@ impl ForgeView {
                 ));
             }
             let mut details = vec![
-                native::spaced(native::wrapped_row(format!("{key}/head"), head), 8.),
+                native::spaced(
+                    native::wrapped_row(format!("{key}/head"), head),
+                    native::spacing::SM as f32,
+                ),
                 self.rich_body(
                     format!("{key}/body"),
                     Message::OpenMessageLink,
@@ -755,13 +781,13 @@ impl ForgeView {
                                 ),
                             ],
                         ),
-                        4.,
+                        native::spacing::XXS as f32,
                     ),
                     wire::Edges {
-                        top: 4.,
+                        top: native::spacing::XXS as f32,
                         right: 0.,
-                        bottom: 4.,
-                        left: 12.,
+                        bottom: native::spacing::XXS as f32,
+                        left: native::spacing::LG as f32,
                     },
                 );
                 if let wire::Node::Linear { border, .. } = &mut boxed {
@@ -775,7 +801,7 @@ impl ForgeView {
             }
             content.push(native::spaced(
                 native::column(format!("{key}/details"), details),
-                8.,
+                native::spacing::SM as f32,
             ));
         }
         section(
@@ -874,11 +900,11 @@ impl ForgeView {
                                         ),
                                     ],
                                 ),
-                                6.,
+                                native::spacing::XS as f32,
                             ),
                         ],
                     ),
-                    6.,
+                    native::spacing::XS as f32,
                 ),
                 Tone::Accent,
             ));
@@ -922,12 +948,12 @@ impl ForgeView {
                                         ),
                                     ],
                                 ),
-                                8.,
+                                native::spacing::SM as f32,
                             ),
                             native::wrapping(native::text(format!("{key}/body"), &comment.body)),
                         ],
                     ),
-                    4.,
+                    native::spacing::XXS as f32,
                 ),
             ));
         }
@@ -957,11 +983,14 @@ impl ForgeView {
                     ),
                 ],
             ),
-            6.,
+            native::spacing::XS as f32,
         ));
         native::card(
             "forge/compose",
-            native::spaced(native::column("forge/compose-column", compose), 8.),
+            native::spaced(
+                native::column("forge/compose-column", compose),
+                native::spacing::SM as f32,
+            ),
         )
     }
 
@@ -1007,11 +1036,11 @@ impl ForgeView {
                                     ),
                                 ],
                             ),
-                            6.,
+                            native::spacing::XS as f32,
                         ),
                     ],
                 ),
-                6.,
+                native::spacing::XS as f32,
             ),
         )
     }

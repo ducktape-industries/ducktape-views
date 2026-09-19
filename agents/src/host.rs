@@ -2750,19 +2750,11 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 fn short_label(id: &str) -> String {
-    let mut label: String = id.chars().take(8).collect();
-    if id.chars().count() > 8 {
-        label.push('…');
-    }
-    label
+    ducktape_view_guest::kit::ellipsize(id, 9)
 }
 
 fn short_pubkey(pubkey: &str) -> String {
-    let head: String = pubkey.chars().take(16).collect();
-    match head.len() < pubkey.len() {
-        true => format!("{head}…"),
-        false => head,
-    }
+    ducktape_view_guest::kit::ellipsize(pubkey, 17)
 }
 
 /// A chip's label is one line: the text's words, single-spaced. How much of

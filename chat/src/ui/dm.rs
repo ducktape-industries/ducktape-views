@@ -26,7 +26,8 @@ impl ChatView {
         };
         let mut children = vec![
             native::avatar(format!("{key}/avatar"), peer.initials.clone(), tone),
-            native::nowrap(name),
+            // a long name is cut, never the badge and the unread dot after it
+            super::chat::gives_way(format!("{key}/name-box"), name),
         ];
         if peer.is_agent {
             children.push(native::badge(format!("{key}/agent"), "Agent", Tone::Agent));
@@ -40,7 +41,10 @@ impl ChatView {
         } else {
             Some(slots::message(choose(peer.key)))
         };
-        let content = native::spaced(native::centered_row(format!("{key}/row"), children), 8.);
+        let content = native::spaced(
+            native::centered_row(format!("{key}/row"), children),
+            native::spacing::SM as f32,
+        );
         super::components::sidebar_row(native::list_row(key, content, selected, action), peer.name)
     }
 
