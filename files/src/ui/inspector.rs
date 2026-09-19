@@ -57,7 +57,7 @@ impl FilesView {
         body.push(native::divider(format!("{key}/facts-rule")));
         body.push(native::padded(
             self.row_actions(format!("{key}/actions"), &entry),
-            wire::Edges::all(8.),
+            wire::Edges::all(native::spacing::SM as f32),
         ));
         kit::filled_column(
             key.clone(),
@@ -176,15 +176,15 @@ impl FilesView {
                         max_height: None,
                     },
                 ),
-                wire::Edges::all(8.),
+                wire::Edges::all(native::spacing::SM as f32),
             );
         }
         native::padded(
             native::spaced(
                 native::column(format!("{key}/content"), self.preview_content(&key)),
-                6.,
+                native::spacing::XS as f32,
             ),
-            wire::Edges::all(12.),
+            wire::Edges::all(native::spacing::LG as f32),
         )
     }
 
@@ -310,8 +310,11 @@ impl FilesView {
         rows.push(fact("modified", "Modified", modified));
         rows.push(fact("author", "Author", author));
         native::padded(
-            native::spaced(native::column(key.clone(), rows), 6.),
-            wire::Edges::all(12.),
+            native::spaced(
+                native::column(key.clone(), rows),
+                native::spacing::XS as f32,
+            ),
+            wire::Edges::all(native::spacing::LG as f32),
         )
     }
 
@@ -415,7 +418,7 @@ impl FilesView {
                         open,
                     ],
                 ),
-                8.,
+                native::spacing::SM as f32,
             ));
         }
         if self.diff_omitted > 0 {
@@ -432,8 +435,11 @@ impl FilesView {
                 native::scroll(
                     format!("{key}/scroll"),
                     native::padded(
-                        native::spaced(native::column(format!("{key}/rows"), rows), 8.),
-                        wire::Edges::all(12.),
+                        native::spaced(
+                            native::column(format!("{key}/rows"), rows),
+                            native::spacing::SM as f32,
+                        ),
+                        wire::Edges::all(native::spacing::LG as f32),
                     ),
                 ),
             ],
