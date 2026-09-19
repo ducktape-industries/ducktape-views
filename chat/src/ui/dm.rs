@@ -41,7 +41,10 @@ impl ChatView {
         } else {
             Some(slots::message(choose(peer.key)))
         };
-        let content = native::spaced(native::centered_row(format!("{key}/row"), children), 8.);
+        let content = native::spaced(
+            native::centered_row(format!("{key}/row"), children),
+            native::spacing::SM as f32,
+        );
         super::components::sidebar_row(native::list_row(key, content, selected, action), peer.name)
     }
 
