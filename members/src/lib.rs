@@ -425,11 +425,23 @@ impl MembersView {
                 *label = Some(description.into());
                 *height = Some(wire::Length::Fixed(28.));
             }
+            // the chips wrap: four filters and their counts do not fit one
+            // line of a narrow pane
+            if let wire::Node::Linear { wrap, .. } = &mut strip {
+                *wrap = Some(wire::Wrap {
+                    spacing: None,
+                    align: None,
+                });
+            }
             roster.push(strip);
             let members = host::filter_members(&self.rows, self.filter);
             let waiting = !self.answered;
             if waiting {
-                roster.push(kit::secondary("members/loading", "Reading the roster…"));
+                roster.push(kit::empty_state(
+                    "members/loading",
+                    "Reading the roster…",
+                    "Validators, residents and registered agents arrive from the node.",
+                ));
             }
             // a refused read is the notice above, not an empty network
             let nobody = members.is_empty() && self.answered && self.host_error.is_empty();
@@ -450,6 +462,9 @@ impl MembersView {
         }
         // the page's Fill height would pin the content to the viewport and
         // leave nothing to scroll; the list is as tall as its rows
+        // under this width the roster and a record (never narrower than 260)
+        // cannot both be read side by side: the record stacks under the list
+        let stacked = self.viewport_width < STACK_BELOW;
         let mut panes = vec![kit::scroll(
             "members/roster",
             kit::sized(
@@ -463,30 +478,39 @@ impl MembersView {
             .iter()
             .find(|member| self.connected && member.key == self.selected)
         {
-            panes.push(wire::Node::ResizeHandle {
-                key: "members/member-resize".into(),
-                on_press: None,
-                on_release: None,
-                on_drag: Some(slots::handler::<(f64, f64), Message>(Box::new(
-                    |(dx, dy)| Some(Message::MemberResized(dx, dy)),
-                ))),
-                cursor: Some(wire::mouse::Cursor::ResizingHorizontally),
-                // a 10px grip around the hairline: the handle is as wide
-                // as its child, and a 1px rule is nothing to grab
-                content: Box::new(kit::sized(
-                    grip(
-                        "members/divider",
-                        kit::vertical_divider("members/divider/rule"),
-                    ),
-                    Some(wire::Length::Fixed(10.)),
-                    Some(wire::Length::Fill),
-                )),
-            });
-            panes.push(kit::pane(
-                "members/member",
-                kit::scroll("members/record-scroll", self.member_record(member)),
-                wire::Length::Fixed(self.member_width as f32),
-            ));
+            if stacked {
+                panes.push(kit::divider("members/divider"));
+                panes.push(kit::pane(
+                    "members/member",
+                    kit::scroll("members/record-scroll", self.member_record(member)),
+                    wire::Length::Fill,
+                ));
+            } else {
+                panes.push(wire::Node::ResizeHandle {
+                    key: "members/member-resize".into(),
+                    on_press: None,
+                    on_release: None,
+                    on_drag: Some(slots::handler::<(f64, f64), Message>(Box::new(
+                        |(dx, dy)| Some(Message::MemberResized(dx, dy)),
+                    ))),
+                    cursor: Some(wire::mouse::Cursor::ResizingHorizontally),
+                    // a 10px grip around the hairline: the handle is as wide
+                    // as its child, and a 1px rule is nothing to grab
+                    content: Box::new(kit::sized(
+                        grip(
+                            "members/divider",
+                            kit::vertical_divider("members/divider/rule"),
+                        ),
+                        Some(wire::Length::Fixed(10.)),
+                        Some(wire::Length::Fill),
+                    )),
+                });
+                panes.push(kit::pane(
+                    "members/member",
+                    kit::scroll("members/record-scroll", self.member_record(member)),
+                    wire::Length::Fixed(self.member_width as f32),
+                ));
+            }
         }
         let observe = || {
             slots::handler::<(f32, f32), Message>(Box::new(|(width, height)| {
@@ -502,7 +526,10 @@ impl MembersView {
             anticipate: None,
             delay: None,
             child: Box::new(kit::sized(
-                kit::row("members", panes),
+                match stacked {
+                    true => kit::spaced(kit::column("members", panes), 0.),
+                    false => kit::row("members", panes),
+                },
                 Some(wire::Length::Fill),
                 Some(wire::Length::Fill),
             )),
@@ -522,7 +549,14 @@ impl MembersView {
                 kit::initials(&member.label),
                 avatar_tone(member),
             ),
-            kit::nowrap(kit::strong(format!("{key}/name"), &member.label)),
+            // the name (and an agent's model) take the row's rest and
+            // truncate there: a label at its own width never shrinks, and a
+            // long one pushed the presence off the row
+            kit::sized(
+                kit::nowrap(kit::strong(format!("{key}/name"), &member.label)),
+                Some(wire::Length::Fill),
+                None,
+            ),
         ];
         if member.is_this_node {
             line.push(kit::badge(
@@ -537,12 +571,12 @@ impl MembersView {
             Tone::Neutral,
         ));
         if !member.model.is_empty() {
-            line.push(kit::nowrap(kit::caption(
-                format!("{key}/model"),
-                &member.model,
-            )));
+            line.push(kit::sized(
+                kit::nowrap(kit::caption(format!("{key}/model"), &member.model)),
+                Some(wire::Length::Fill),
+                None,
+            ));
         }
-        line.push(kit::space(Some(wire::Length::Fill), None));
         line.push(presence_chip(format!("{key}/live"), member));
         let mut button = kit::list_row(
             &key,
@@ -756,6 +790,8 @@ impl MembersView {
         )
     }
 }
+/// Below this pane width the roster and a member's record stack.
+const STACK_BELOW: f64 = 640.;
 /// A container that centres its child: the grip a hairline sits in.
 fn grip(key: &str, child: ducktape_view_guest::wire::Node) -> ducktape_view_guest::wire::Node {
     use ducktape_view_guest::{kit, wire};

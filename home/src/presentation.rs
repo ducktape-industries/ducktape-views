@@ -244,10 +244,21 @@ impl HomeView {
 
     fn reading(key: &str, name: &str, value: Node) -> Node {
         kit::sized(
-            kit::kv(key, name, value),
+            kit::kv(key, name, Self::rest(value)),
             None,
             Some(Length::Fixed(LIST_ROW)),
         )
+    }
+
+    /// A reading's text takes what its row leaves and truncates there: a
+    /// label's own width never shrinks, so a long sync line, or a digest
+    /// beside its Copy in a narrow pane, ran over the card's edge. A badge
+    /// keeps its own width.
+    fn rest(value: Node) -> Node {
+        match value {
+            Node::Text { .. } => kit::sized(value, Some(Length::Fill), None),
+            other => other,
+        }
     }
 
     /// A reading of a digest: its head in mono, and a button that copies
@@ -260,7 +271,7 @@ impl HomeView {
                     kit::kv(
                         format!("{key}/reading"),
                         name,
-                        mono(format!("{key}/value"), host::short_label(digest)),
+                        Self::rest(mono(format!("{key}/value"), host::short_label(digest))),
                     ),
                     Some(Length::Fill),
                     None,

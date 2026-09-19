@@ -763,17 +763,31 @@ fn setting_row(key: &str, name: &str, detail: &str, note: &str, control: wire::N
     if !note.is_empty() {
         lines.push(kit::wrapping(kit::caption(format!("{key}/note"), note)));
     }
-    kit::centered_row(
-        key,
-        [
-            kit::sized(
-                kit::spaced(kit::column(format!("{key}/text"), lines), 2.),
-                Some(wire::Length::Fill),
-                None,
-            ),
-            kit::sized(control, Some(wire::Length::Shrink), None),
-        ],
+    // the row wraps, and its words are a portion, not `Fill`: a portion's
+    // least width is its longest word, so the control sits beside the words
+    // while it fits and drops under them in a narrow pane, where a one-line
+    // row ran it past the edge
+    kit::aligned(
+        kit::wrapped_row(
+            key,
+            [
+                kit::sized(
+                    kit::spaced(kit::column(format!("{key}/text"), lines), 2.),
+                    Some(wire::Length::FillPortion(1)),
+                    None,
+                ),
+                kit::sized(control, Some(wire::Length::Shrink), None),
+            ],
+        ),
+        wire::AlignX::Center,
     )
+}
+/// A one-line reading beside its label: it takes the row's rest and
+/// truncates there, where a label at its own width never shrinks and ran
+/// past the pane.
+fn one_line(node: wire::Node) -> wire::Node {
+    use ducktape_view_guest::kit;
+    kit::sized(kit::nowrap(node), Some(wire::Length::Fill), None)
 }
 /// A run of settings rows: a hairline between them, every one in the same
 /// band, so the tab reads as one list and not as a stack of cards.
@@ -990,17 +1004,17 @@ impl SettingsView {
         let current = kit::kv(
             "settings/update-current-row",
             "Installed release",
-            kit::nowrap(kit::mono("settings/update-current", &self.update_current)),
+            one_line(kit::mono("settings/update-current", &self.update_current)),
         );
         let channel = kit::kv(
             "settings/update-channel-row",
             "Channel",
-            kit::nowrap(kit::text("settings/update-channel", &self.update_channel)),
+            one_line(kit::text("settings/update-channel", &self.update_channel)),
         );
         let checked = kit::kv(
             "settings/update-checked-row",
             "Last check",
-            kit::nowrap(kit::text(
+            one_line(kit::text(
                 "settings/update-checked",
                 update_check_words(&self.update_state, &self.update_checked, self.update_busy),
             )),
@@ -1014,7 +1028,7 @@ impl SettingsView {
                 } else {
                     "Ready to install"
                 },
-                kit::nowrap(kit::text(
+                one_line(kit::text(
                     "settings/update-staged",
                     &self.update_staged_display,
                 )),
@@ -1024,7 +1038,7 @@ impl SettingsView {
             rows.push(kit::kv(
                 "settings/update-refused-row",
                 "Reason",
-                kit::nowrap(kit::mono("settings/update-refused", &self.update_refused)),
+                one_line(kit::mono("settings/update-refused", &self.update_refused)),
             ));
         }
         // the machine fetches while staged too: a newer release replaces it
@@ -1066,7 +1080,7 @@ impl SettingsView {
                 &self.update_note,
             )));
         }
-        body.push(kit::row("settings/update-actions", actions));
+        body.push(kit::wrapped_row("settings/update-actions", actions));
         settings_section(
             "settings/updates",
             "settings/updates-title",
@@ -1133,7 +1147,7 @@ impl SettingsView {
                 },
             )),
         );
-        let mut rpc_field = vec![kit::row(
+        let mut rpc_field = vec![kit::wrapped_row(
             "settings/node-rpc-controls",
             [
                 settings_input(
@@ -1190,7 +1204,7 @@ impl SettingsView {
                                 kit::kv(
                                     "settings/network-status-row",
                                     "Status",
-                                    kit::nowrap(kit::text("settings/network-status", &self.status)),
+                                    one_line(kit::text("settings/network-status", &self.status)),
                                 ),
                                 kit::kv(
                                     "settings/network-rpc-row",
@@ -1344,7 +1358,7 @@ impl SettingsView {
             kit::kv(
                 "settings/account-name-row",
                 "Name",
-                kit::nowrap(kit::text(
+                one_line(kit::text(
                     "settings/account-name",
                     if self.account_name.is_empty() {
                         "Unnamed"
@@ -1398,7 +1412,7 @@ impl SettingsView {
                 "Account name",
                 "What this network calls you; every device you add answers to it.",
                 "",
-                kit::row(
+                kit::wrapped_row(
                     "settings/rename-controls",
                     [
                         settings_input(
@@ -1440,7 +1454,7 @@ impl SettingsView {
                             "New account",
                             "This device founds it and holds its first key.",
                             "",
-                            kit::row(
+                            kit::wrapped_row(
                                 "settings/create-controls",
                                 [
                                     settings_input(
@@ -1463,7 +1477,7 @@ impl SettingsView {
                             "Join with a ticket",
                             "A device that already signs for the account mints it.",
                             "",
-                            kit::row(
+                            kit::wrapped_row(
                                 "settings/join-controls",
                                 [
                                     settings_input(
@@ -1518,7 +1532,7 @@ impl SettingsView {
                                         kit::centered_row(
                                             format!("{key}/head"),
                                             [
-                                                kit::nowrap(kit::strong(
+                                                one_line(kit::strong(
                                                     format!("{key}/label"),
                                                     if row.label.is_empty() {
                                                         "No label"
@@ -1553,15 +1567,38 @@ impl SettingsView {
                     ],
                 ));
             }
+            // an account holds at least its first key: none here is a read
+            // still out, or one that failed and the notice above says why
+            let (help, keys) = match keys.is_empty() {
+                false => (
+                    format!(
+                        "{} — each one signs for this account.",
+                        kit_plural(self.account_key_rows.len(), "key", "keys")
+                    ),
+                    setting_list("settings/keys-rows", keys),
+                ),
+                true => (
+                    String::new(),
+                    match self.host_error.is_empty() {
+                        true => kit::empty_state(
+                            "settings/keys-reading",
+                            "Reading keys…",
+                            "This account's keys arrive from the node.",
+                        ),
+                        false => kit::empty_state(
+                            "settings/keys-unread",
+                            "Keys not read",
+                            "The node did not answer; the notice above says why.",
+                        ),
+                    },
+                ),
+            };
             content.push(settings_section(
                 "settings/keys",
                 "settings/keys-title",
                 "Account keys",
-                &format!(
-                    "{} — each one signs for this account.",
-                    kit_plural(self.account_key_rows.len(), "key", "keys")
-                ),
-                setting_list("settings/keys-rows", keys),
+                &help,
+                keys,
             ));
             let mut add = vec![
                 kit::field(
@@ -1577,7 +1614,7 @@ impl SettingsView {
                 kit::field(
                     "settings/key-label-field",
                     "Label",
-                    kit::row(
+                    kit::wrapped_row(
                         "settings/key-label-row",
                         [
                             settings_input(
@@ -1791,7 +1828,7 @@ impl SettingsView {
                 "Wallet password",
                 "Unlock this device's key for this session.",
                 "",
-                kit::row(
+                kit::wrapped_row(
                     "settings/unlock-controls",
                     [
                         kit::sized(password, Some(wire::Length::Fixed(FIELD_WIDTH)), None),

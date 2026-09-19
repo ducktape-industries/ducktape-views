@@ -15,6 +15,11 @@ const GUTTER: wire::Edges = wire::Edges {
     left: 12.,
 };
 
+/// Below this pane width the ledger (never narrower than 260) and a block's
+/// details cannot both be read side by side: they stack, and the search takes
+/// a bar of its own.
+const STACK_BELOW: f64 = 640.;
+
 // EVERY CELL OF A FIXED-HEIGHT ROW IS ONE LINE. The chrome bars (40 px), the
 // ledger rows (28 px), an operation's head line (28 px) and a search hit's line
 // (32 px) are each built at a stated height, and the kit's text constructors
@@ -29,33 +34,48 @@ impl ExplorerView {
     pub(crate) fn view(&self) -> Node {
         kit::set_dark(self.dark);
         let can_refresh = self.connected && !self.loading;
-        let toolbar = Self::bar(kit::centered_row(
-            "explorer/head",
-            [
-                kit::nowrap(kit::title("explorer/title", "Explorer")),
-                Self::height_badge(self.head),
+        let narrow = self.viewport_width < STACK_BELOW;
+        let search = kit::sized(
+            kit::input(
+                "explorer/search",
+                "Search messages, pages, issues, files, runs…",
+                &self.query,
+                slots::handler(Box::new(|value: String| Some(Message::BindQuery(value)))),
+                Some(slots::message(Message::SearchSubmit)),
+            ),
+            Some(match narrow {
+                true => Length::Fill,
+                false => Length::Fixed(320.),
+            }),
+            None,
+        );
+        // the sync line takes the bar's rest and truncates there: a label at
+        // its own width never shrinks and pushed the search off the bar
+        let mut head = vec![
+            kit::nowrap(kit::title("explorer/title", "Explorer")),
+            Self::height_badge(self.head),
+            kit::sized(
                 kit::nowrap(kit::caption("explorer/sync", &self.sync_line)),
-                kit::spacer(),
-                kit::sized(
-                    kit::input(
-                        "explorer/search",
-                        "Search messages, pages, issues, files, runs…",
-                        &self.query,
-                        slots::handler(Box::new(|value: String| Some(Message::BindQuery(value)))),
-                        Some(slots::message(Message::SearchSubmit)),
-                    ),
-                    Some(Length::Fixed(320.)),
-                    None,
-                ),
-                kit::button(
-                    "explorer/refresh",
-                    "Refresh",
-                    can_refresh.then(|| slots::message(Message::Refresh)),
-                    ButtonPreset::Secondary,
-                ),
-            ],
+                Some(Length::Fill),
+                None,
+            ),
+        ];
+        let search = match narrow {
+            true => Some(search),
+            false => {
+                head.push(search);
+                None
+            }
+        };
+        head.push(kit::button(
+            "explorer/refresh",
+            "Refresh",
+            can_refresh.then(|| slots::message(Message::Refresh)),
+            ButtonPreset::Secondary,
         ));
-        let mut body = vec![toolbar, kit::divider("explorer/head-edge")];
+        let mut body = vec![Self::bar(kit::centered_row("explorer/head", head))];
+        body.extend(search.map(|search| Self::bar(kit::row("explorer/search-bar", [search]))));
+        body.push(kit::divider("explorer/head-edge"));
         if !self.host_error.is_empty() {
             body.push(kit::padded(
                 kit::column(
@@ -75,12 +95,10 @@ impl ExplorerView {
                 "Not connected",
                 "Choose a network from the sidebar to read its ledger.",
             ),
-            (true, true, _) => kit::padded(
-                kit::column(
-                    "explorer/loading-box",
-                    [kit::secondary("explorer/loading-search", "Searching…")],
-                ),
-                wire::Edges::all(12.),
+            (true, true, _) => kit::empty_state(
+                "explorer/loading-search",
+                "Searching…",
+                "Every source is asked at once; the answers arrive here.",
             ),
             (true, false, false) => self.search_results(),
             (true, false, true) => self.ledger(),
@@ -185,15 +203,43 @@ impl ExplorerView {
             rows.push(button);
         }
         if rows.is_empty() {
-            let plate = match self.loading {
-                true => kit::padded(
-                    kit::column(
-                        "explorer/empty-ledger-box",
-                        [kit::secondary("explorer/empty-ledger", "Loading blocks…")],
-                    ),
-                    wire::Edges::all(12.),
+            let plate = match (self.loading, self.host_error.is_empty()) {
+                (true, _) => kit::empty_state(
+                    "explorer/empty-ledger",
+                    "Loading blocks…",
+                    "The blocks this node holds arrive here.",
                 ),
-                false => kit::empty_state(
+                // a read that failed is not an empty ledger: it says so, and
+                // offers the read again
+                (false, false) => kit::column(
+                    "explorer/unread-ledger",
+                    [
+                        kit::empty_state(
+                            "explorer/unread-ledger/state",
+                            "Blocks not read",
+                            "The node did not answer; the notice above says why.",
+                        ),
+                        kit::padded(
+                            kit::row(
+                                "explorer/unread-ledger/actions",
+                                [kit::button(
+                                    "explorer/retry",
+                                    "Retry",
+                                    self.connected.then(|| slots::message(Message::Refresh)),
+                                    ButtonPreset::Secondary,
+                                )],
+                            ),
+                            // under the empty state's words, which inset by 24
+                            wire::Edges {
+                                top: 0.,
+                                right: 24.,
+                                bottom: 24.,
+                                left: 24.,
+                            },
+                        ),
+                    ],
+                ),
+                (false, true) => kit::empty_state(
                     "explorer/empty-ledger",
                     "No blocks yet",
                     "Blocks that carry operations appear here as the network writes them.",
@@ -201,12 +247,28 @@ impl ExplorerView {
             };
             rows.push(plate);
         }
+        let blocks = kit::scroll(
+            "explorer/blocks",
+            kit::spaced(kit::column("explorer/block-list", rows), 0.),
+        );
+        if self.viewport_width < STACK_BELOW {
+            // stacked, the ledger and the details split the height, and there
+            // is no width to drag
+            return Self::filling(kit::spaced(
+                kit::column(
+                    "explorer/ledger",
+                    [
+                        kit::pane("explorer/ledger-pane", blocks, Length::Fill),
+                        kit::divider("explorer/ledger-edge"),
+                        self.block_details(),
+                    ],
+                ),
+                0.,
+            ));
+        }
         let list = kit::pane(
             "explorer/ledger-pane",
-            kit::scroll(
-                "explorer/blocks",
-                kit::spaced(kit::column("explorer/block-list", rows), 0.),
-            ),
+            blocks,
             Length::Fixed(self.ledger_width as f32),
         );
         let divider = Node::ResizeHandle {
@@ -475,23 +537,43 @@ impl ExplorerView {
                 Some(slots::message(Message::PickExplorerKind(kind.kind.clone()))),
             ));
         }
-        let filters = Self::bar(kit::centered_row(
-            "explorer/filters",
-            [
-                kit::sized(
-                    kit::tabs("explorer/filter", choices),
-                    Some(Length::Shrink),
-                    None,
+        // the chips wrap and the strip grows to hold them: seven sources'
+        // chips do not fit one line of a narrow pane
+        let mut chips = kit::sized(
+            kit::tabs("explorer/filter", choices),
+            Some(Length::Shrink),
+            None,
+        );
+        if let Node::Linear { wrap, .. } = &mut chips {
+            *wrap = Some(wire::Wrap {
+                spacing: None,
+                align: None,
+            });
+        }
+        let filters = kit::sized(
+            kit::padded(
+                kit::centered_row(
+                    "explorer/filters",
+                    [
+                        chips,
+                        kit::spacer(),
+                        kit::button(
+                            "explorer/clear",
+                            "Clear workspace search",
+                            Some(slots::message(Message::ClearExplorerSearch)),
+                            ButtonPreset::Text,
+                        ),
+                    ],
                 ),
-                kit::spacer(),
-                kit::button(
-                    "explorer/clear",
-                    "Clear workspace search",
-                    Some(slots::message(Message::ClearExplorerSearch)),
-                    ButtonPreset::Text,
-                ),
-            ],
-        ));
+                wire::Edges {
+                    top: 6.,
+                    bottom: 6.,
+                    ..GUTTER
+                },
+            ),
+            Some(Length::Fill),
+            None,
+        );
         let mut content = Vec::new();
         if !self.partial.is_empty() {
             content.push(kit::padded(
@@ -539,10 +621,14 @@ impl ExplorerView {
                                 Some(Length::Fill),
                                 None,
                             ),
-                            kit::nowrap(kit::colored(
-                                kit::mono(format!("{key}/place"), &hit.place),
-                                kit::palette().muted,
-                            )),
+                            kit::sized(
+                                kit::nowrap(kit::colored(
+                                    kit::mono(format!("{key}/place"), &hit.place),
+                                    kit::palette().muted,
+                                )),
+                                Some(Length::Fill),
+                                None,
+                            ),
                             kit::nowrap(kit::caption(format!("{key}/detail"), &hit.detail)),
                         ],
                     ),
