@@ -814,6 +814,64 @@ fn the_agent_editor_width_is_the_readers_and_its_edge_has_a_resize_cursor() {
     assert_eq!(width(&frame), 470.0);
 }
 
+/// In a narrow pane a list and its rail cannot sit side by side (the editor
+/// keeps 320, the run list 200): the rail stacks under the list with no
+/// width to drag, and the toolbar's summary takes the bar's rest and
+/// truncates instead of pushing New agent off it. A wide pane keeps the
+/// split.
+#[test]
+fn a_narrow_pane_stacks_each_rail_under_its_list() {
+    use ducktape_view_guest::testing::{find, measure};
+    use ducktape_view_guest::wire::{Axis, Length};
+
+    let axis = |frame: &Frame, key: &str| match find(frame, key) {
+        Some(Node::Linear { axis, .. }) => *axis,
+        other => panic!("{key}: {other:?}"),
+    };
+    let (frame, _) = registered("7");
+    let frame = tick_native(press(&frame, "Reviewer Bot"));
+    let narrow = tick_native(measure(&frame, "agents/viewport", 360., 700.));
+    assert_eq!(axis(&narrow, "agents/registry-panes"), Axis::Column);
+    assert!(find(&narrow, "agents/editor-resize").is_none());
+    let Some(Node::Container { width, .. }) = find(&narrow, "agents/editor") else {
+        panic!("no editor");
+    };
+    assert_eq!(*width, Some(Length::Fill));
+    let Some(Node::Text { width, .. }) = find(&narrow, "agents/summary") else {
+        panic!("no summary: {:?}", texts(&narrow));
+    };
+    assert_eq!(*width, Some(Length::Fill), "the summary truncates");
+    let wide = tick_native(measure(&narrow, "agents/viewport", 1280., 700.));
+    assert_eq!(axis(&wide, "agents/registry-panes"), Axis::Row);
+    assert!(find(&wide, "agents/editor-resize").is_some());
+
+    let (runs, _) = connect(booted(), "7", "dispatch-gone", 1);
+    let narrow = tick_native(measure(&runs, "agents/viewport", 360., 700.));
+    assert_eq!(axis(&narrow, "agents/run-panes"), Axis::Column);
+    assert!(find(&narrow, "agents/run-list-resize").is_none());
+    let wide = tick_native(measure(&narrow, "agents/viewport", 1280., 700.));
+    assert_eq!(axis(&wide, "agents/run-panes"), Axis::Row);
+}
+
+/// A Fill space in a wrapping row takes a line of its own: the open run's
+/// standing row carries none, so it adds no blank line.
+#[test]
+fn the_run_standing_row_carries_no_filler_line() {
+    use ducktape_view_guest::testing::find;
+
+    let (frame, _) = connect(booted(), "7", "dispatch-gone", 1);
+    let Some(Node::Linear { children, wrap, .. }) = find(&frame, "agents/journal-standing") else {
+        panic!("no standing row: {:?}", texts(&frame));
+    };
+    assert!(wrap.is_some());
+    assert!(
+        !children
+            .iter()
+            .any(|child| matches!(child, Node::Space { .. })),
+        "{children:?}"
+    );
+}
+
 /// THE RUN AS IT RUNS. The open run's progress is the node's own output
 /// stream for that dispatch, opened through `rpc.stream` and folded HERE:
 /// the tool it is using, the steps it took, the answer forming. A run the
