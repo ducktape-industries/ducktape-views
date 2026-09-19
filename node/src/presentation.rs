@@ -695,7 +695,10 @@ impl NodeView {
         }
         content.push(log);
         kit::sized(
-            kit::spaced(kit::column("node/activity", content), kit::spacing::SM as f32),
+            kit::spaced(
+                kit::column("node/activity", content),
+                kit::spacing::SM as f32,
+            ),
             Some(Length::Fill),
             Some(Length::Fill),
         )
