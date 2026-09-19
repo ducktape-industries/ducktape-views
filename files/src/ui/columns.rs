@@ -178,15 +178,21 @@ impl FilesView {
             chosen,
             Some(slots::message(Message::Select(entry.path.clone()))),
         );
+        let name = match entry.is_dir() {
+            true => format!("Folder {}", entry.name),
+            false => format!("File {}", entry.name),
+        };
         if let wire::Node::Button { label, height, .. } = &mut button {
             *height = Some(wire::Length::Fixed(ROW_HEIGHT));
-            *label = Some(match entry.is_dir() {
-                true => format!("Folder {}", entry.name),
-                false => format!("File {}", entry.name),
-            });
+            *label = Some(name.clone());
         }
         wire::Node::MouseArea {
             key,
+            role: Some(wire::Role::Row),
+            label: Some(name),
+            expanded: None,
+            selected: Some(chosen),
+            checked: None,
             on_press: None,
             on_release: None,
             on_double_click: Some(slots::message(Message::Open(entry.path.clone()))),

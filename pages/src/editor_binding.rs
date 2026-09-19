@@ -997,7 +997,7 @@ mod rich_tests {
     /// `document` is the snapshot it took of its own editor.
     #[test]
     fn a_new_page_pick_applies_on_a_document_that_already_links_a_page() {
-        let text = "Handbook\nEverything a new member needs.\n/\n![duck](duck://files/shared/p/duck.png)\n>> Onboarding";
+        let text = "Handbook\nEverything a new member needs.\n/\n![duck](duck://testnet-0a1b2c3d/files/shared/p/duck.png)\n>> Onboarding";
         let cursor = wire::EditorCursor {
             position: wire::EditorPosition { line: 2, column: 1 },
             selection: None,
@@ -1016,7 +1016,7 @@ mod rich_tests {
         let mut rich = crate::rich_document::presentation(text, cursor).document;
         crate::rich_document::link_page_blocks(
             &mut rich,
-            &["duck://page/pg-onboarding?net=d0cdf950".into()],
+            &["duck://testnet-0a1b2c3d/pages/pg-onboarding".into()],
         );
         let edit = wire::editor_rich::RichEdit {
             before: Some(rich.clone()),
@@ -1034,7 +1034,7 @@ mod rich_tests {
         };
         assert_eq!(
             wire::patched_editor_text(text, &patches, cursor).unwrap(),
-            "Handbook\nEverything a new member needs.\n>> \n![duck](duck://files/shared/p/duck.png)\n>> Onboarding"
+            "Handbook\nEverything a new member needs.\n>> \n![duck](duck://testnet-0a1b2c3d/files/shared/p/duck.png)\n>> Onboarding"
         );
         assert_eq!(
             cursor.position,

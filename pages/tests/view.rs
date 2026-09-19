@@ -7,11 +7,20 @@ use ducktape_view_guest::testing::{
     answer, edit, find, has_text, item, measure, press, submit, texts, type_into,
 };
 use ducktape_view_guest::wire::{self, Event, Frame, Length, Node, Request};
+use pages_view::boot_native;
 use pages_view::host::{
     PageCommentThread, PageCommentThreadRow, Session, comment_post_target,
     sidebar_width_after_delta,
 };
-use pages_view::{boot_native, tick_native};
+
+/// Every frame the view paints names and places each control it draws.
+fn tick_native(events: Vec<Event>) -> Frame {
+    let frame = pages_view::tick_native(events);
+    if let Some(root) = &frame.root {
+        assert_eq!(wire::accessibility_faults(root), Vec::new());
+    }
+    frame
+}
 
 /// The first editor in the tree, depth first.
 fn find_editor(node: &Node) -> Option<&Node> {
@@ -354,7 +363,7 @@ fn a_subpage_is_a_line_of_the_document_that_links_into_it() {
             start: 0,
             end: "Onboarding".len() as u32,
             kind: "link".into(),
-            value: "duck://page/alpha-2?net=d0cdf950".into(),
+            value: "duck://mynet-d0cdf950/pages/alpha-2".into(),
         }],
         "the whole title opens the page it names"
     );
@@ -403,12 +412,12 @@ fn illustrated_page() -> Vec<u8> {
             },
             {
                 "id": "alpha-2", "parent": "alpha", "page": "alpha", "kind": "paragraph",
-                "text": "![duck](duck://files/shared/pages/alpha/p1/duck.png)",
+                "text": "![duck](duck://mynet-d0cdf950/files/shared/pages/alpha/p1/duck.png)",
                 "checked": false, "children": []
             },
             {
                 "id": "alpha-3", "parent": "alpha", "page": "alpha", "kind": "paragraph",
-                "text": "![duck again](duck://files/shared/pages/alpha/p1/duck.png)",
+                "text": "![duck again](duck://mynet-d0cdf950/files/shared/pages/alpha/p1/duck.png)",
                 "checked": false, "children": []
             },
             {

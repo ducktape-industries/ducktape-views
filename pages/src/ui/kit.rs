@@ -14,6 +14,15 @@ fn named(mut node: Node, name: &str) -> Node {
     node
 }
 
+/// A button that opens and closes what it names, saying which it is now.
+fn disclosure(mut node: Node, open: bool) -> Node {
+    let Node::Button { expanded, .. } = &mut node else {
+        unreachable!("disclosure")
+    };
+    *expanded = Some(open);
+    node
+}
+
 fn action(
     key: impl Into<String>,
     label: impl Into<String>,

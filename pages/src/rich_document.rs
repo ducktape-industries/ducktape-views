@@ -841,7 +841,7 @@ pub fn link_page_blocks(document: &mut RichDocument, addresses: &[String]) {
         .iter_mut()
         .filter(|block| block.kind == types::PAGE);
     for (block, href) in pages.zip(addresses) {
-        if block.text.is_empty() {
+        if block.text.is_empty() || href.is_empty() {
             continue;
         }
         block.marks = vec![RichMark {
@@ -867,7 +867,10 @@ mod tests {
     fn a_page_line_takes_its_address_by_order_and_a_fresh_one_takes_none() {
         let text = "Title\n>> Saved\nprose\n>> Just typed";
         let mut document = presentation(text, wire::EditorCursor::default()).document;
-        link_page_blocks(&mut document, &["duck://page/saved".to_string()]);
+        link_page_blocks(
+            &mut document,
+            &["duck://testnet-0a1b2c3d/pages/saved".to_string()],
+        );
         let linked: Vec<(&str, usize)> = document
             .blocks
             .iter()
@@ -880,6 +883,10 @@ mod tests {
         assert_eq!(document.blocks[1].marks[0].end, "Saved".len() as u32);
         // and the buffer is untouched by the mark: it is drawn, never typed
         assert_eq!(canonical(&document).expect("round trip").0, text);
+        // a view that knows no chain has no address to give: none is worn
+        let mut unlinked = presentation(text, wire::EditorCursor::default()).document;
+        link_page_blocks(&mut unlinked, &[String::new()]);
+        assert!(unlinked.blocks[1].marks.is_empty());
     }
 
     /// The link a page line wears is DRAWN, so the caret must measure the
@@ -900,7 +907,10 @@ mod tests {
             },
         )
         .document;
-        link_page_blocks(&mut document, &["duck://page/release?net=d0cdf950".into()]);
+        link_page_blocks(
+            &mut document,
+            &["duck://testnet-0a1b2c3d/pages/release".into()],
+        );
         assert_eq!(
             document.cursor.position,
             wire::EditorPosition {
