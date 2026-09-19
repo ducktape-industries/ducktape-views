@@ -5,7 +5,7 @@
 //! still leaves as an intent.
 
 use ducktape_view_guest::testing::{
-    answer, has_text, item, press, refuse, submit, texts, type_into,
+    answer, find, has_text, item, measure, press, refuse, submit, texts, type_into,
 };
 use ducktape_view_guest::wire::{Event, Frame, Node, Request};
 use explorer_view::boot_native;
@@ -194,6 +194,59 @@ fn the_ledger_width_is_the_readers_and_its_edge_has_a_resize_cursor() {
         dy: 0.0,
     }]);
     assert_eq!(width(&frame), 400.0);
+}
+
+/// In a narrow pane the ledger (never narrower than 260) and a block's
+/// details cannot sit side by side: they stack, with no width to drag, the
+/// search takes a bar of its own, and the sync line gives way instead of
+/// pushing the controls off the bar. A wide pane keeps the split.
+#[test]
+fn a_narrow_pane_stacks_the_ledger_over_the_details() {
+    use ducktape_view_guest::wire::{Axis, Length};
+
+    let (frame, _) = connected_with_ledger();
+    let narrow = tick_native(measure(&frame, "explorer/viewport", 360., 700.));
+    let Some(Node::Linear { axis, .. }) = find(&narrow, "explorer/ledger") else {
+        panic!("no ledger: {:?}", texts(&narrow));
+    };
+    assert_eq!(*axis, Axis::Column, "stacked");
+    assert!(find(&narrow, "explorer/ledger-resize").is_none());
+    let Some(Node::Input { width, .. }) = find(&narrow, "explorer/search") else {
+        panic!("no search");
+    };
+    assert_eq!(*width, Some(Length::Fill));
+    assert!(find(&narrow, "explorer/search-bar").is_some());
+    let Some(Node::Text { width, .. }) = find(&narrow, "explorer/sync") else {
+        panic!("no sync line");
+    };
+    assert_eq!(*width, Some(Length::Fill), "the sync line truncates");
+
+    let wide = tick_native(measure(&narrow, "explorer/viewport", 1280., 700.));
+    let Some(Node::Linear { axis, .. }) = find(&wide, "explorer/ledger") else {
+        panic!("no ledger");
+    };
+    assert_eq!(*axis, Axis::Row, "side by side");
+    assert!(find(&wide, "explorer/ledger-resize").is_some());
+    assert!(find(&wide, "explorer/search-bar").is_none());
+}
+
+/// A ledger read that failed is not an empty ledger: it says the blocks
+/// were not read, and its Retry asks for them again.
+#[test]
+fn a_failed_ledger_read_says_so_and_offers_a_retry() {
+    let frame = boot();
+    let session_id = request(&frame, "explorer.props").id;
+    let frame = tick_native(vec![item(session_id, &session(true))]);
+    let feed = request(&frame, "rpc.blocks").id;
+    let frame = tick_native(vec![refuse(feed, "node unreachable")]);
+    assert!(has_text(&frame, "Blocks not read"), "{:?}", texts(&frame));
+    assert!(!has_text(&frame, "No blocks yet"));
+    let frame = tick_native(press(&frame, "Retry"));
+    assert!(
+        kinds(&frame.requests).contains(&"rpc.blocks"),
+        "{:?}",
+        frame.requests
+    );
 }
 
 /// A block re-reads the window through the live subscription, and Refresh
