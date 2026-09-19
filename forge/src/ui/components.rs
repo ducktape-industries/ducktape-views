@@ -8,26 +8,24 @@ impl ForgeView {
     pub(super) fn code_screen(&self) -> wire::Node {
         let mut tree = Vec::new();
         match (self.tree_phase.as_str(), self.tree_children.get("")) {
-            ("failed", _) => tree.push(native::wrapping(native::secondary(
-                "forge/tree-failed",
+            ("failed", _) => tree.push(super::kit::failed(
+                "forge/tree-failed".into(),
                 "Could not load the tree. Open the repository again to retry.",
-            ))),
-            (_, None) => tree.push(native::secondary(
+            )),
+            (_, None) => tree.push(native::empty_state(
                 "forge/tree-loading",
-                "Loading repository tree…",
+                "Loading the tree…",
+                "Its files and directories arrive next.",
             )),
             (_, Some(root)) => {
                 self.tree_rows("", 0, &mut tree);
                 if root.is_empty() {
-                    let empty = if !self.tree_born {
-                        "This repository has no commits yet."
+                    let (title, detail) = if !self.tree_born {
+                        ("No commits yet", "Push to this repository to fill it.")
                     } else {
-                        "This repository is empty."
+                        ("Empty repository", "Its commit holds no files.")
                     };
-                    tree.push(native::wrapping(native::secondary(
-                        "forge/tree-empty",
-                        empty,
-                    )));
+                    tree.push(native::empty_state("forge/tree-empty", title, detail));
                 }
                 if self.tree_truncated {
                     tree.push(native::caption(
@@ -131,7 +129,12 @@ impl ForgeView {
                 (true, false) => "▸",
                 (true, true) => "▾",
             };
-            let name = native::nowrap(native::text(format!("{key}/name"), &entry.name));
+            // a long name ends in an ellipsis at the pane's edge
+            let name = native::sized(
+                native::nowrap(native::text(format!("{key}/name"), &entry.name)),
+                Some(wire::Length::Fill),
+                None,
+            );
             let name = if directory {
                 native::weighted(name, wire::Weight::Medium)
             } else {
@@ -249,10 +252,14 @@ impl ForgeView {
             self.file_phase == "ready" && !self.file_binary && !self.file_picture && !markdown;
         let mut content = Vec::new();
         match self.file_phase.as_str() {
-            "loading" => content.push(native::secondary("forge/loading-file", "Loading file…")),
-            "failed" => content.push(native::tone_text(
+            "loading" => content.push(native::empty_state(
+                "forge/loading-file",
+                "Loading file…",
+                "Its contents at this commit arrive next.",
+            )),
+            "failed" => content.push(native::notice(
                 "forge/file-failed",
-                &self.file_note,
+                native::wrapping(native::text("forge/file-failed/text", &self.file_note)),
                 Tone::Danger,
             )),
             "ready" => {
@@ -703,7 +710,11 @@ impl ForgeView {
     pub(super) fn review_screen(&self) -> wire::Node {
         let mut content = Vec::new();
         if self.forge_item_reviews.is_empty() {
-            content.push(native::secondary("forge/no-reviews", "No reviews yet."));
+            content.push(native::empty_state(
+                "forge/no-reviews",
+                "No reviews yet",
+                "A review lands here once a reviewer submits one.",
+            ));
         }
         for (index, review) in self.forge_item_reviews.iter().enumerate() {
             let key = format!("forge/review/{index}");

@@ -39,6 +39,16 @@ pub(super) fn state_tone(state: &str) -> Tone {
     }
 }
 
+/// A read that failed, in the danger tone. Reads re-run on the next live
+/// hit, so the sentence names the way to force one.
+pub(super) fn failed(key: String, sentence: &str) -> wire::Node {
+    native::notice(
+        &key,
+        native::wrapping(native::text(format!("{key}/text"), sentence)),
+        Tone::Danger,
+    )
+}
+
 /// A reading's body size: one step over the 13px chrome, at 1.5 leading.
 pub(super) const READING: f32 = 14.;
 
@@ -64,13 +74,17 @@ impl ForgeView {
     }
 
     pub(super) fn loading_tracker(&self, key: String) -> wire::Node {
-        native::secondary(key, "Loading repository tracker…")
+        native::empty_state(
+            key,
+            "Loading the tracker…",
+            "Issues and pull requests arrive next.",
+        )
     }
     pub(super) fn tracker_unavailable(&self, key: String) -> wire::Node {
-        native::wrapping(native::secondary(
+        failed(
             key,
             "Could not load this repository. Return to all repos and open it again to retry.",
-        ))
+        )
     }
     pub(super) fn empty_issues(&self, key: String) -> wire::Node {
         native::empty_state(
@@ -87,13 +101,17 @@ impl ForgeView {
         )
     }
     pub(super) fn loading_item(&self, key: String) -> wire::Node {
-        native::secondary(key, "Loading tracker item…")
+        native::empty_state(
+            key,
+            "Loading this item…",
+            "Its body and discussion arrive next.",
+        )
     }
     pub(super) fn item_unavailable(&self, key: String) -> wire::Node {
-        native::wrapping(native::secondary(
+        failed(
             key,
             "Could not load this item. Go back and open it again to retry.",
-        ))
+        )
     }
 
     /// A review the chain holds is final; its `created_at` is consensus
