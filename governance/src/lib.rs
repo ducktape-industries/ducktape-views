@@ -19,7 +19,7 @@ pub mod host;
 /// allowed to wrap breaks onto a second line and is drawn under the row
 /// below it. Prose that must wrap — a notice, a proposal field's value, a
 /// refused taste — belongs in a row with no fixed height, never here.
-const ROW: f32 = 28.;
+const ROW: f32 = ducktape_view_guest::kit::height::CONTROL as f32;
 
 /// A one-line cell that takes its row's rest and truncates there.
 fn one_line(node: ducktape_view_guest::wire::Node) -> ducktape_view_guest::wire::Node {
@@ -501,8 +501,14 @@ impl GovernanceView {
         }
         let mut body = vec![
             head,
-            kit::spaced(kit::column(format!("{key}/fields"), fields), 4.),
-            kit::spaced(kit::wrapped_row(format!("{key}/about"), about), 12.),
+            kit::spaced(
+                kit::column(format!("{key}/fields"), fields),
+                kit::spacing::XXS as f32,
+            ),
+            kit::spaced(
+                kit::wrapped_row(format!("{key}/about"), about),
+                kit::spacing::LG as f32,
+            ),
         ];
         // a code ballot's view can be tried before the vote: every member,
         // on their own screen alone
@@ -515,7 +521,10 @@ impl GovernanceView {
         ));
         kit::card(
             &key,
-            kit::spaced(kit::column(format!("{key}/body"), body), 8.),
+            kit::spaced(
+                kit::column(format!("{key}/body"), body),
+                kit::spacing::SM as f32,
+            ),
         )
     }
     /// The taste line of a code ballot: where it stands and "Try this view"

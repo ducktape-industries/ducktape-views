@@ -78,7 +78,10 @@ impl InboxView {
             can_mark.then(|| slots::message(Message::MarkAllRead)),
             ButtonPreset::Secondary,
         ));
-        kit::spaced(kit::centered_row("inbox/head", cells), 8.)
+        kit::spaced(
+            kit::centered_row("inbox/head", cells),
+            kit::spacing::SM as f32,
+        )
     }
 
     fn list(&self) -> Node {
@@ -122,7 +125,10 @@ impl InboxView {
             kit::column(
                 key.clone(),
                 [
-                    kit::spaced(kit::centered_row(format!("{key}/line"), line), 8.),
+                    kit::spaced(
+                        kit::centered_row(format!("{key}/line"), line),
+                        kit::spacing::SM as f32,
+                    ),
                     kit::nowrap(kit::secondary(format!("{key}/detail"), row.detail.clone())),
                 ],
             ),

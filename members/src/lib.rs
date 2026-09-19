@@ -423,7 +423,7 @@ impl MembersView {
                     unreachable!("a tab is a button")
                 };
                 *label = Some(description.into());
-                *height = Some(wire::Length::Fixed(28.));
+                *height = Some(wire::Length::Fixed(kit::height::CONTROL as f32));
             }
             // the chips wrap: four filters and their counts do not fit one
             // line of a narrow pane
@@ -580,7 +580,10 @@ impl MembersView {
         line.push(presence_chip(format!("{key}/live"), member));
         let mut button = kit::list_row(
             &key,
-            kit::spaced(kit::centered_row(format!("{key}/details"), line), 6.),
+            kit::spaced(
+                kit::centered_row(format!("{key}/details"), line),
+                kit::spacing::XS as f32,
+            ),
             self.selected == member.key,
             Some(slots::message(Message::OpenMember(member.key.clone()))),
         );
@@ -629,9 +632,9 @@ impl MembersView {
                 ),
                 wire::Edges {
                     top: 0.,
-                    right: 8.,
+                    right: kit::spacing::SM as f32,
                     bottom: 0.,
-                    left: 12.,
+                    left: kit::spacing::LG as f32,
                 },
             ),
             Some(wire::Length::Fill),
@@ -688,7 +691,7 @@ impl MembersView {
                         kit::wrapping(kit::mono(format!("{key}/key"), &member.key)),
                     ],
                 ),
-                4.,
+                kit::spacing::XXS as f32,
             ),
         ];
         if !member.model.is_empty() {
@@ -771,7 +774,7 @@ impl MembersView {
             facts.push(kit::divider(format!("{key}/rule")));
             facts.push(kit::spaced(
                 kit::column(format!("{key}/actions"), actions),
-                8.,
+                kit::spacing::SM as f32,
             ));
         }
         kit::spaced(
@@ -781,8 +784,11 @@ impl MembersView {
                     header,
                     kit::divider(format!("{key}/header-rule")),
                     kit::padded(
-                        kit::spaced(kit::column(format!("{key}/facts"), facts), 10.),
-                        wire::Edges::all(12.),
+                        kit::spaced(
+                            kit::column(format!("{key}/facts"), facts),
+                            kit::spacing::MD as f32,
+                        ),
+                        wire::Edges::all(kit::spacing::LG as f32),
                     ),
                 ],
             ),

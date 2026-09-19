@@ -74,7 +74,7 @@ impl PaletteView {
         // a wider one: a fixed width ran past the edge of a narrow window
         let mut card = kit::card(
             "palette/card",
-            kit::spaced(kit::column("palette/body", body), 6.),
+            kit::spaced(kit::column("palette/body", body), kit::spacing::XS as f32),
         );
         if let Node::Container { max_width, .. } = &mut card {
             *max_width = Some(CARD);

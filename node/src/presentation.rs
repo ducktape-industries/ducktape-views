@@ -33,7 +33,7 @@ const LEVELS: [(&str, &str, &str); 6] = [
 /// The densities this screen is built on: a reading, a list row, a module
 /// row and a console line.
 const READING_ROW: f32 = 24.;
-const LIST_ROW: f32 = 28.;
+const LIST_ROW: f32 = kit::height::CONTROL as f32;
 const MODULE_ROW: f32 = 32.;
 
 // Every cell of a reading, a list row and a module row is ONE LINE. Those
@@ -127,7 +127,7 @@ impl NodeView {
         }
         kit::spaced(
             kit::column("node/tabs", [tabs, kit::divider("node/tabs/rule")]),
-            6.,
+            kit::spacing::XS as f32,
         )
     }
 
@@ -208,7 +208,7 @@ impl NodeView {
                 "Version",
                 mono("node/version/value", &facts.node_version),
             ),
-            kit::gap(4.),
+            kit::gap(kit::spacing::XXS as f32),
             kit::row(
                 "node/identity-actions",
                 [kit::sized(
@@ -372,7 +372,7 @@ impl NodeView {
                         "Node administration",
                         text("node/admin/value", admin),
                     ),
-                    kit::gap(4.),
+                    kit::gap(kit::spacing::XXS as f32),
                     kit::wrapping(kit::secondary("node/standing-description", description)),
                     kit::wrapping(kit::caption(
                         "node/quorum-note",
@@ -664,14 +664,14 @@ impl NodeView {
                         ),
                     ],
                 ),
-                8.,
+                kit::spacing::SM as f32,
             )
         });
         let mut log = kit::scroll(
             "node/logs",
             kit::padded(
                 kit::spaced(kit::column("node/log-lines", rows), 2.),
-                wire::Edges::all(8.),
+                wire::Edges::all(kit::spacing::SM as f32),
             ),
         );
         if let Node::Scroll {
@@ -695,7 +695,7 @@ impl NodeView {
         }
         content.push(log);
         kit::sized(
-            kit::spaced(kit::column("node/activity", content), 8.),
+            kit::spaced(kit::column("node/activity", content), kit::spacing::SM as f32),
             Some(Length::Fill),
             Some(Length::Fill),
         )
@@ -747,7 +747,7 @@ impl NodeView {
     fn section(key: &str, title_key: &str, title: &str, content: Node) -> Node {
         kit::spaced(
             kit::column(key, [kit::heading(title_key, title), content]),
-            8.,
+            kit::spacing::SM as f32,
         )
     }
 
