@@ -125,7 +125,7 @@ fn section_row(key: String, name: &str, control: Option<wire::Node>) -> wire::No
 /// one-line `Shrink` text at its whole width, so the title sits in a box sized
 /// to it that clips: the box shrinks to what its row leaves, and the title is
 /// cut to an ellipsis inside it. A short title keeps its own width.
-fn gives_way(key: String, title: wire::Node) -> wire::Node {
+pub(super) fn gives_way(key: String, title: wire::Node) -> wire::Node {
     let mut node = native::sized(
         native::container(key, native::nowrap(title)),
         Some(wire::Length::Shrink),

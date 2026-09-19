@@ -517,7 +517,7 @@ impl BoardsView {
                             y: Some(4.),
                             blur: Some(16.),
                         },
-                        radius: Some([10.; 4]),
+                        radius: Some([kit::radius::CARD as f32; 4]),
                         content: Box::new(card),
                     },
                 ),
@@ -873,14 +873,25 @@ impl BoardsView {
             list.push(kit::divider("boards/picker-rule"));
             list.push(kit::caption("boards/shared", "Shared with this network"));
         }
+        // a button never shrinks below its label, so a long title is a
+        // one-line text in it that ends in an ellipsis at the strip's edge
         list.extend(self.catalog.iter().map(|(id, title)| {
-            wide(action(
-                &format!("boards/open/{id}"),
+            let key = format!("boards/open/{id}");
+            let mut row = wide(action(
+                &key,
                 title,
                 "Open board",
                 Message::Open(id.clone()),
                 idle,
-            ))
+            ));
+            if let Node::Button { content, .. } = &mut row {
+                *content = wire::ButtonContent::Child(Box::new(kit::sized(
+                    kit::nowrap(kit::text(format!("{key}/title"), title)),
+                    Some(Length::Fill),
+                    None,
+                )));
+            }
+            row
         }));
         list
     }
@@ -3442,7 +3453,7 @@ fn swatch(color: u8, selected: bool) -> Node {
         *height = Some(Length::Fixed(16.));
         *background = Some(wire::Background::Color(Rgba(fill(color))));
         *border = Some(wire::Border {
-            radius: Some([8.; 4]),
+            radius: Some([kit::radius::PILL as f32; 4]),
             width: Some(if selected { 2. } else { 1. }),
             color: Some(Rgba(if selected {
                 kit::palette().accent

@@ -1514,3 +1514,110 @@ fn an_item_link_is_minted_only_where_the_view_can_address_it() {
     );
     assert_eq!(forge_link("duck://forge/core/7?net=0a1b2c3d").repo, "");
 }
+
+// ---------- design: states, tokens, narrow panes ----------
+
+/// The repository list before its read answers is the kit's loading state,
+/// never a bare line — and never a blank pane.
+#[test]
+fn the_repository_list_loads_as_an_empty_state() {
+    let mut drive = Drive::boot();
+    let props = request(&drive.frame, "forge.props").id;
+    drive.tick(vec![item(props, &session(""))]);
+    let Node::Text { content, .. } = node_ending(&drive.frame, "forge/list-status/title") else {
+        panic!("the loading state has a title")
+    };
+    assert_eq!(content, "Loading repositories…");
+}
+
+/// An item whose read was refused is a failed item in the danger tone —
+/// not "Loading…" forever under the refusal.
+#[test]
+fn a_refused_item_read_is_a_failed_state_not_a_loading_one() {
+    let (mut drive, _) = namespace("duck://testnet-0a1b2c3d/forge/ducks/core/7");
+    drive.answer("list_refs", &refs());
+    drive.answer("list_items", &items());
+    drive.answer("all", &accounts());
+    let get_item = drive.take("get_item");
+    drive.tick(vec![refuse(get_item, "gone")]);
+    assert!(
+        matches!(
+            node_ending(&drive.frame, "forge/item-failed"),
+            Node::Container { .. }
+        ),
+        "{:?}",
+        texts(&drive.frame)
+    );
+    assert!(
+        !has_text(&drive.frame, "Loading this item…"),
+        "{:?}",
+        texts(&drive.frame)
+    );
+}
+
+/// The repository toolbar and the tracker's head WRAP: on a pane a few
+/// hundred pixels wide the tabs and the 280px filter drop to a second line
+/// instead of running off the edge.
+#[test]
+fn the_toolbar_and_the_tracker_head_wrap_on_a_narrow_pane() {
+    let drive = open_issues_tab();
+    for key in ["forge/navigation", "forge/tracker-head"] {
+        let Node::Linear { wrap, .. } = node_ending(&drive.frame, key) else {
+            panic!("{key} is a row")
+        };
+        assert!(wrap.is_some(), "{key} does not wrap");
+    }
+}
+
+/// A tracker row's title is body text and its byline the secondary step:
+/// the type scale's sizes, not a size of its own, and both end in an
+/// ellipsis at the row's edge.
+#[test]
+fn a_tracker_row_uses_the_type_scale_and_truncates() {
+    let (mut drive, _) = namespace("duck://testnet-0a1b2c3d/forge/ducks/core");
+    drive.answer("list_refs", &refs());
+    drive.answer("list_items", &items());
+    drive.answer("all", &accounts());
+    drive.tick(press(&drive.frame, "forge/tab/pulls"));
+    fn row_texts(node: &Node, found: &mut Vec<Node>) {
+        if node.key().is_some_and(|key| {
+            key.starts_with("forge/item/") && (key.ends_with("/open") || key.ends_with("/meta"))
+        }) {
+            found.push(node.clone());
+        }
+        for child in node.children() {
+            row_texts(child, found);
+        }
+    }
+    let mut found = Vec::new();
+    row_texts(drive.frame.root.as_ref().unwrap(), &mut found);
+    assert!(!found.is_empty(), "{:?}", texts(&drive.frame));
+    for node in found {
+        let Node::Text {
+            key,
+            size,
+            width,
+            options,
+            ..
+        } = node
+        else {
+            panic!("a row's title and byline are text")
+        };
+        let expected = if key.ends_with("/meta") {
+            Some(ducktape_view_guest::kit::type_scale::SECONDARY as f32)
+        } else {
+            None
+        };
+        assert_eq!(size, expected, "{key}");
+        assert_eq!(
+            width,
+            Some(ducktape_view_guest::wire::Length::Fill),
+            "{key}"
+        );
+        assert_eq!(
+            options.wrapping,
+            Some(ducktape_view_guest::wire::Wrapping::None),
+            "{key}"
+        );
+    }
+}

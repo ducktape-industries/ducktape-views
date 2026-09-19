@@ -82,6 +82,16 @@ fn picker(
     }
 }
 
+/// A read's phase as the screen draws it: a read the node refused never
+/// answers, so "loading" beside a refusal is "failed" — the state that
+/// offers the read again.
+fn settled<'a>(phase: &'a str, refusal: &str) -> &'a str {
+    match (phase, refusal.is_empty()) {
+        ("loading", false) => "failed",
+        _ => phase,
+    }
+}
+
 /// The page inset a reading wears; a split screen runs to the edges instead.
 const INSET: f32 = 20.;
 
@@ -127,19 +137,30 @@ impl ForgeView {
                 &self.about,
             )));
         }
-        if self.repos.is_empty() {
-            let label = match self.list_phase.as_str() {
-                "loading" => "Loading repositories…",
-                "failed" => "Could not load repositories. Reconnect to retry.",
-                "ready" => {
-                    "No repositories yet — push a git repository to this network to create one."
-                }
-                _ => "",
-            };
-            content.push(native::wrapping(native::secondary(
-                "forge/list-status",
-                label,
-            )));
+        // a refused list read is the danger strip above, alone: a loading
+        // state under it would promise an answer that is not coming
+        let refused = self.list_phase != "ready" && !self.host_error.is_empty();
+        if self.repos.is_empty() && !refused {
+            content.push(match self.list_phase.as_str() {
+                "failed" => native::notice(
+                    "forge/list-status",
+                    native::wrapping(native::text(
+                        "forge/list-status/text",
+                        "Could not load repositories. Reconnect to retry.",
+                    )),
+                    Tone::Danger,
+                ),
+                "ready" => native::empty_state(
+                    "forge/list-status",
+                    "No repositories yet",
+                    "Push a git repository to this network to create one.",
+                ),
+                _ => native::empty_state(
+                    "forge/list-status",
+                    "Loading repositories…",
+                    "Every repository on this network is listed here.",
+                ),
+            });
             if self.list_phase == "ready" {
                 content.push(self.push_box());
             }
@@ -157,10 +178,7 @@ impl ForgeView {
                             None,
                         ),
                         native::nowrap(native::colored(
-                            native::text_size(
-                                native::mono(format!("forge/head/{}", repo.name), &repo.head),
-                                12.,
-                            ),
+                            native::mono(format!("forge/head/{}", repo.name), &repo.head),
                             p.muted,
                         )),
                     ],
@@ -284,20 +302,23 @@ impl ForgeView {
                 Message::ForgePickBranch,
             ));
         }
-        header.push(native::spacer());
+        // a growing gap, not a Fill one: a Fill space in a WRAPPING row
+        // takes a line of its own. On a narrow pane the tabs wrap under the
+        // pickers instead of running off the edge.
+        header.push(native::space(Some(wire::Length::FillPortion(1)), None));
         header.push(self.tab_row());
-        native::sized(
-            native::padded(
-                native::spaced(native::centered_row("forge/navigation", header), 6.),
-                wire::Edges {
-                    top: 0.,
-                    right: 12.,
-                    bottom: 0.,
-                    left: 12.,
-                },
-            ),
-            Some(wire::Length::Fill),
-            Some(wire::Length::Fixed(40.)),
+        let mut navigation = native::spaced(native::wrapped_row("forge/navigation", header), 6.);
+        if let wire::Node::Linear { align, .. } = &mut navigation {
+            *align = Some(wire::AlignX::Center);
+        }
+        native::padded(
+            navigation,
+            wire::Edges {
+                top: 6.,
+                right: 12.,
+                bottom: 6.,
+                left: 12.,
+            },
         )
     }
 
@@ -350,8 +371,9 @@ impl ForgeView {
                     Some(slots::message(Message::SelectTrackerSide(side.to_owned()))),
                 )
             });
+        // wraps: the filter drops under the switch on a narrow pane
         native::spaced(
-            native::centered_row(
+            native::wrapped_row(
                 "forge/tracker-head",
                 [
                     native::sized(
@@ -382,7 +404,7 @@ impl ForgeView {
     fn tracker_screen(&self, tab: &str) -> wire::Node {
         let items = host::filter_forge_items(&self.items, tab, &self.item_side, &self.item_filter);
         let mut content = vec![self.tracker_head(tab)];
-        match self.repo_phase.as_str() {
+        match settled(&self.repo_phase, &self.host_error) {
             "loading" => content.push(self.loading_tracker("forge/tracker-loading".into())),
             "failed" => content.push(self.tracker_unavailable("forge/tracker-failed".into())),
             "ready" => {
@@ -404,12 +426,9 @@ impl ForgeView {
                                         format!("{key}/title-line"),
                                         [
                                             native::sized(
-                                                native::nowrap(native::text_size(
-                                                    native::strong(
-                                                        format!("{key}/open"),
-                                                        &item.title,
-                                                    ),
-                                                    14.,
+                                                native::nowrap(native::strong(
+                                                    format!("{key}/open"),
+                                                    &item.title,
                                                 )),
                                                 Some(wire::Length::Fill),
                                                 None,
@@ -423,12 +442,13 @@ impl ForgeView {
                                     ),
                                     8.,
                                 ),
-                                native::text_size(
-                                    native::secondary(
+                                native::sized(
+                                    native::nowrap(native::secondary(
                                         format!("{key}/meta"),
                                         format!("#{} · {}", item.number, item.author_name),
-                                    ),
-                                    12.,
+                                    )),
+                                    Some(wire::Length::Fill),
+                                    None,
                                 ),
                             ],
                         ),
@@ -502,7 +522,7 @@ impl ForgeView {
                 Some(Message::ForgeCloseItem),
             )],
         )];
-        match self.item_phase.as_str() {
+        match settled(&self.item_phase, &self.host_error) {
             "loading" => content.push(self.loading_item("forge/item-loading".into())),
             "failed" => content.push(self.item_unavailable("forge/item-failed".into())),
             "ready" => {
@@ -588,9 +608,10 @@ impl ForgeView {
                     discussion.push(self.note(format!("forge/linked/{}", note.seq), note));
                 }
                 if self.discussion.is_empty() && !self.discussion_clipped {
-                    discussion.push(native::secondary(
+                    discussion.push(native::empty_state(
                         "forge/no-discussion",
-                        "No discussion yet.",
+                        "No discussion yet",
+                        "Write the first note below.",
                     ));
                 }
                 if self.discussion_clipped {
@@ -670,8 +691,10 @@ impl ForgeView {
                             native::column(
                                 format!("{key}/body-column"),
                                 [
+                                    // wraps: a long name pushes the time
+                                    // under it, not off the pane
                                     native::spaced(
-                                        native::centered_row(
+                                        native::wrapped_row(
                                             format!("{key}/head"),
                                             [
                                                 native::nowrap(native::strong(

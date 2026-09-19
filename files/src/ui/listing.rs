@@ -98,9 +98,10 @@ impl FilesView {
             Listing::Pending => native::sized(
                 native::container(
                     format!("{key}/pending-box"),
-                    kit::inset(
-                        native::caption(format!("{key}/pending"), "Loading…"),
-                        wire::Edges::all(12.),
+                    native::empty_state(
+                        format!("{key}/pending"),
+                        "Loading…",
+                        "This folder's entries arrive next.",
                     ),
                 ),
                 Some(wire::Length::Fill),

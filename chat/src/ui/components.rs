@@ -73,7 +73,8 @@ impl ChatView {
                 native::text(format!("{key}/hash"), "#"),
                 p.muted,
             )),
-            native::nowrap(name),
+            // a long name is cut, never the marks and the unread dot after it
+            super::chat::gives_way(format!("{key}/name-box"), name),
         ];
         if channel.huddle_count > 0 {
             children.push(native::nowrap(native::colored(
@@ -204,13 +205,7 @@ impl ChatView {
     }
 
     pub(super) fn loading_messages(&self, key: String) -> wire::Node {
-        native::padded(
-            native::column(
-                key.clone(),
-                [native::caption(format!("{key}/text"), "Loading messages…")],
-            ),
-            wire::Edges::all(16.),
-        )
+        native::empty_state(key, "Loading messages…", "The newest arrive first.")
     }
 
     pub(super) fn search_result(

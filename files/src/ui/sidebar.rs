@@ -58,11 +58,14 @@ impl FilesView {
         ));
         if !self.history_error.is_empty() {
             rows.push(kit::inset(
-                native::wrapping(native::tone_text(
-                    format!("{key}/history-error"),
-                    self.history_error.clone(),
+                native::notice(
+                    format!("{key}/history-error-box"),
+                    native::wrapping(native::text(
+                        format!("{key}/history-error"),
+                        self.history_error.clone(),
+                    )),
                     Tone::Danger,
-                )),
+                ),
                 wire::Edges::all(10.),
             ));
         }

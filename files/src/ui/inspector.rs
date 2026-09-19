@@ -201,9 +201,10 @@ impl FilesView {
         if !preview.is_read() {
             // the head snapshot arrives with the page: until then nothing has
             // been read, and a blank code box would read as an empty file
-            return vec![native::secondary(
+            return vec![native::empty_state(
                 format!("{key}/reading"),
                 "Reading the file…",
+                "Its text at the head snapshot arrives next.",
             )];
         }
         if preview.binary {

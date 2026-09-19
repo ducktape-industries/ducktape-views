@@ -5931,3 +5931,41 @@ fn the_chord_chains_out_of_a_sticky_and_out_of_nothing_else() {
          why this one could not be saved"
     );
 }
+
+/// A board's title in the switcher is a one-line text that ends in an
+/// ellipsis, not a label the strip's button cannot shrink below.
+#[test]
+fn a_long_board_title_truncates_in_the_switcher() {
+    let mut view = view();
+    let long = "A board whose name is far longer than the switcher strip is wide";
+    view.catalog.insert("other".into(), long.into());
+    view.on_board_picker();
+    let tree = view.view();
+    let Some(wire::Node::Button { content, label, .. }) = node_at(&tree, "boards/open/other")
+    else {
+        panic!("the board is listed")
+    };
+    assert_eq!(label.as_deref(), Some(long));
+    let wire::ButtonContent::Child(child) = content else {
+        panic!("the title is a text in the button")
+    };
+    let wire::Node::Text { width, options, .. } = child.as_ref() else {
+        panic!("the title is a text in the button")
+    };
+    assert_eq!(*width, Some(wire::Length::Fill));
+    assert_eq!(options.wrapping, Some(wire::Wrapping::None));
+}
+/// The board menu floats as a card: its corners are the design's card radius.
+#[test]
+fn the_board_menu_wears_the_card_radius() {
+    let mut view = view();
+    view.menu = Some([40., 30.]);
+    let tree = view.view();
+    let Some(wire::Node::Float { radius, .. }) = node_at(&tree, "boards/menu-card") else {
+        panic!("the menu floats")
+    };
+    assert_eq!(
+        *radius,
+        Some([ducktape_view_guest::kit::radius::CARD as f32; 4])
+    );
+}

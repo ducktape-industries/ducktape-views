@@ -28,7 +28,10 @@ fn reaction_pill(
     // an emoji glyph stands taller than its point size: the host's button
     // clips its content to the line box, so the line box says how tall
     let mut parts = vec![native::nowrap(native::text_options(
-        native::text_size(native::text(format!("{key}/emoji"), emoji), 13.),
+        native::text_size(
+            native::text(format!("{key}/emoji"), emoji),
+            native::type_scale::BODY as f32,
+        ),
         wire::TextOptions {
             line_height: Some(wire::LineHeight::Absolute(PILL_HEIGHT)),
             ..Default::default()
