@@ -151,7 +151,7 @@ impl PagesView {
             background: None,
             border: None,
             tint: Some(wash),
-            radius: 4.,
+            radius: kit::radius::CONTROL as f32,
             open: menu_open,
             children: vec![
                 line,
@@ -326,7 +326,7 @@ impl PagesView {
                 y: Some(4.),
                 blur: Some(16.),
             },
-            radius: Some([8.; 4]),
+            radius: Some([kit::radius::CARD as f32; 4]),
             content: Box::new(card),
         };
         Some(kit::sized(
@@ -624,7 +624,7 @@ impl PagesView {
             *border = Some(wire::Border {
                 color: Some(kit::rgba(kit::palette().border)),
                 width: Some(1.),
-                radius: Some([6.; 4]),
+                radius: Some([kit::radius::CARD as f32; 4]),
             });
             *padding = Some(wire::Edges::all(2.));
         }

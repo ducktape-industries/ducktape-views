@@ -138,6 +138,10 @@ fn page_menu_backdrop() -> Node {
     }
 }
 
+/// Below this document-pane width the toolbar stacks its controls under the
+/// title: the controls alone are ~470px, and the title keeps ~170px beside.
+const TOOLBAR_STACK_WIDTH: f64 = 640.;
+
 impl PagesView {
     fn sidebar(&self) -> Node {
         if !self.connected {
@@ -184,15 +188,10 @@ impl PagesView {
         ];
         let mut list = self.page_tree_rows();
         if list.is_empty() && !self.loading {
-            list.push(kit::padded(
-                kit::column(
-                    "pages/sidebar/empty-box",
-                    [kit::wrapping(kit::secondary(
-                        "pages/sidebar/empty",
-                        "No pages yet. Create one to start writing.",
-                    ))],
-                ),
-                wire::Edges::all(8.),
+            list.push(empty_state(
+                "pages/sidebar/empty",
+                "No pages yet",
+                "Create one with + to start writing.",
             ));
         }
         rows.push(kit::scroll(
@@ -236,7 +235,12 @@ impl PagesView {
             ));
             crumb.push(kit::nowrap(kit::caption(format!("{key}/crumb"), "/")));
         }
-        crumb.push(kit::nowrap(kit::strong("pages/toolbar/title", title)));
+        // the title takes what the crumb leaves and ends in an ellipsis there
+        crumb.push(kit::sized(
+            kit::nowrap(kit::strong("pages/toolbar/title", title)),
+            Some(Length::Fill),
+            None,
+        ));
         let status = match self.autosave.as_str() {
             "saving" => ("Saving…", Tone::Neutral),
             "error" => ("Not saved", Tone::Danger),
@@ -300,32 +304,51 @@ impl PagesView {
                 ),
             );
         }
-        kit::spaced(
-            kit::column(
-                "pages/toolbar-bar",
-                [
-                    header_bar(
+        let heading = kit::sized(
+            kit::spaced(kit::centered_row("pages/toolbar/heading", crumb), 6.),
+            Some(Length::Fill),
+            None,
+        );
+        // A narrow pane cannot hold the title beside ~470px of controls: the
+        // controls move under the title and wrap there.
+        let bar = if self.pages_pane_width < TOOLBAR_STACK_WIDTH {
+            kit::padded(
+                kit::spaced(
+                    kit::column(
                         "pages/toolbar",
-                        16.,
                         [
-                            kit::sized(
-                                kit::spaced(kit::centered_row("pages/toolbar/heading", crumb), 6.),
-                                Some(Length::Fill),
-                                None,
-                            ),
-                            kit::sized(
-                                kit::spaced(
-                                    kit::centered_row("pages/toolbar/controls", controls),
-                                    6.,
-                                ),
-                                Some(Length::Shrink),
-                                None,
+                            heading,
+                            kit::aligned(
+                                kit::spaced(kit::wrapped_row("pages/toolbar/controls", controls), 6.),
+                                wire::AlignX::Center,
                             ),
                         ],
                     ),
-                    kit::divider("pages/toolbar/rule"),
+                    6.,
+                ),
+                wire::Edges {
+                    top: 6.,
+                    right: 8.,
+                    bottom: 6.,
+                    left: 16.,
+                },
+            )
+        } else {
+            header_bar(
+                "pages/toolbar",
+                16.,
+                [
+                    heading,
+                    kit::sized(
+                        kit::spaced(kit::centered_row("pages/toolbar/controls", controls), 6.),
+                        Some(Length::Shrink),
+                        None,
+                    ),
                 ],
-            ),
+            )
+        };
+        kit::spaced(
+            kit::column("pages/toolbar-bar", [bar, kit::divider("pages/toolbar/rule")]),
             0.,
         )
     }
