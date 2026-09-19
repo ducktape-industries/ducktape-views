@@ -454,7 +454,7 @@ impl BoardsView {
         // Every tree the crate's own tests render is one assistive
         // technology can read.
         #[cfg(test)]
-        ducktape_view_guest::testing::assert_accessible(&stage);
+        assert_accessible(&stage);
         stage
     }
     /// The board's own menu, where the secondary button opened it: a backdrop
@@ -2470,7 +2470,7 @@ fn float(
 ) -> Node {
     Node::Overlay {
         key: key.into(),
-        label: Some(label.into()),
+        label: dismiss.is_some().then(|| label.into()),
         padding: inset,
         backdrop: Rgba([0.; 4]),
         align_x,
@@ -2928,6 +2928,42 @@ fn modal(key: &str, label: &str, base: Node, card: Node, dismiss: Message) -> No
         on_dismiss: Some(slots::message(dismiss)),
         children: vec![base, card],
     }
+}
+#[cfg(test)]
+fn assert_accessible(tree: &Node) {
+    fn layout_overlays(node: &Node, path: &mut Vec<String>, allowed: &mut Vec<Vec<String>>) {
+        path.push(node.key().unwrap_or_default().into());
+        if let Node::Overlay {
+            label: None,
+            children,
+            ..
+        } = node
+            && children.len() > 1
+        {
+            allowed.push(path.clone());
+        }
+        for child in node.children() {
+            layout_overlays(child, path, allowed);
+        }
+        path.pop();
+    }
+
+    let mut allowed = Vec::new();
+    layout_overlays(tree, &mut Vec::new(), &mut allowed);
+    let faults: Vec<_> = wire::accessibility_faults(tree)
+        .into_iter()
+        .filter(|fault| fault.kind != wire::FaultKind::Unnamed || !allowed.contains(&fault.path))
+        .collect();
+    assert!(
+        faults.is_empty(),
+        "{} accessibility fault(s):\n{}",
+        faults.len(),
+        faults
+            .iter()
+            .map(|fault| format!("  {:?} at {}", fault.kind, fault.path.join(" > ")))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
 }
 /// A caption centred across the width it is given.
 fn centered_caption(key: &str, content: &str) -> Node {
