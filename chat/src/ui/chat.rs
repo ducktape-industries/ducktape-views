@@ -47,6 +47,23 @@ fn primary(key: String, label: &str, message: Message, disabled: bool) -> wire::
         wire::ButtonPreset::Primary,
     )
 }
+/// A channel-creation control as a signing key with no account meets it:
+/// dead, and saying the step out of that where a reader hears its name. The
+/// same predicate that refuses every other write in the room (`may_write`),
+/// said on the button instead of in a sentence.
+fn account_gated(mut button: wire::Node, allowed: bool) -> wire::Node {
+    if let wire::Node::Button {
+        on_press,
+        description,
+        ..
+    } = &mut button
+        && !allowed
+    {
+        *on_press = None;
+        *description = Some("Create an account to create a channel".into());
+    }
+    button
+}
 fn field(
     key: String,
     label: &str,
@@ -225,12 +242,16 @@ impl ChatView {
         let mut rooms = vec![section_row(
             format!("{key}/channels-header"),
             "Channels",
-            Some(glyph(
-                format!("{key}/new-channel"),
-                mark,
-                name,
-                Message::ToggleChannelCreate,
-                self.loading || self.busy,
+            Some(account_gated(
+                glyph(
+                    format!("{key}/new-channel"),
+                    mark,
+                    name,
+                    Message::ToggleChannelCreate,
+                    self.loading || self.busy,
+                ),
+                // closing an open form is a read: only the door is gated
+                self.channel_create_open || self.may_write(),
             )),
         )];
         let (voice_rooms, text_rooms): (Vec<_>, Vec<_>) =
@@ -336,13 +357,17 @@ impl ChatView {
                 &key,
                 "No channels yet",
                 "This network has no channel to read. The first one you create is there for everyone on it.",
-                primary(
-                    format!("{key}/create"),
-                    "Create a channel",
-                    // the same door the sidebar's New channel opens: this only
-                    // opens the form, so it is never a dead button
-                    Message::ToggleChannelCreate,
-                    false,
+                // the same door the sidebar's New channel opens; with no
+                // account behind the key it opens on a form the host would
+                // refuse, so the button says the step instead
+                account_gated(
+                    primary(
+                        format!("{key}/create"),
+                        "Create a channel",
+                        Message::ToggleChannelCreate,
+                        false,
+                    ),
+                    self.may_write(),
                 ),
             )
         };
@@ -1910,11 +1935,14 @@ impl super::ChatView {
                     Message::ToggleChannelCreate,
                     busy,
                 ),
-                primary(
-                    format!("{key}/create"),
-                    "Create channel",
-                    Message::CreateChannel,
-                    busy || !self.connected || self.session_busy,
+                account_gated(
+                    primary(
+                        format!("{key}/create"),
+                        "Create channel",
+                        Message::CreateChannel,
+                        busy || !self.connected || self.session_busy,
+                    ),
+                    self.may_write(),
                 ),
             ],
         ));

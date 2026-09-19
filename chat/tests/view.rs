@@ -7,7 +7,7 @@
 use chat_view::boot_native;
 use chat_view::host::{Channel, Session};
 use ducktape_view_guest::testing::{answer, has_text, item, press, refuse, texts, type_into};
-use ducktape_view_guest::wire::{Frame, Node, Request, SurfaceValue};
+use ducktape_view_guest::wire::{ButtonContent, Frame, Node, Request, SurfaceValue};
 
 /// A native tick of this screen walks a deep tree; libtest's 2 MiB thread is
 /// at the edge of it in a debug build, so every test runs on its own roomier
@@ -1698,10 +1698,16 @@ fn a_lost_creation_reply_is_reconciled_before_retrying_the_write() {
 /// and the sidebar read comes back empty. Not `seated_view`, which hands the
 /// view three channels.
 fn empty_network() -> Frame {
+    empty_network_as(session(true))
+}
+
+/// The same, with the reader spelled out — the network is empty for a key
+/// that holds no account too, and the way on is not the same for her.
+fn empty_network_as(seated: Session) -> Frame {
     boot_native();
     let frame = nameable(chat_view::tick_native(Vec::new()));
     let props = request(&frame, "chat.props").id;
-    let mut empty = session(true);
+    let mut empty = seated;
     empty.active_channel = String::new();
     let frame = nameable(chat_view::tick_native(vec![item(props, &encoded(&empty))]));
     let sidebar = view_asking(&frame, "channels").id;
@@ -1741,7 +1747,18 @@ fn a_network_with_no_channel_says_so_and_offers_the_way_to_make_one() {
 /// button that should be dead has to be read off the tree instead of pressed.
 fn labelled<'a>(frame: &'a Frame, label: &str) -> &'a Node {
     fn walk<'a>(node: &'a Node, label: &str) -> Option<&'a Node> {
-        if matches!(node, Node::Button { label: Some(name), .. } if name == label) {
+        // the name a reader hears is the accessible one where a control has
+        // it, and the text on the face where it does not
+        let named = match node {
+            Node::Button {
+                label: Some(name), ..
+            } => name == label,
+            Node::Button { content, .. } => {
+                matches!(content, ButtonContent::Label(name) if name == label)
+            }
+            _ => false,
+        };
+        if named {
             return Some(node);
         }
         node.children().iter().find_map(|node| walk(node, label))
@@ -1806,5 +1823,71 @@ fn a_key_with_no_account_reads_the_room_and_every_write_says_what_to_do() {
         let op: serde_json::Value =
             serde_json::from_slice(&request(&frame, "op.submit").payload).expect("an op decodes");
         assert_eq!(op["payload"]["add_reaction"]["emoji"], "👍");
+    });
+}
+
+/// A control by that name as the gate leaves it: whether it presses, and the
+/// reason it names when it does not.
+fn gate<'a>(frame: &'a Frame, name: &str) -> (bool, Option<&'a str>) {
+    let Node::Button {
+        on_press,
+        description,
+        ..
+    } = labelled(frame, name)
+    else {
+        panic!("`{name}` is not a button")
+    };
+    (on_press.is_some(), description.as_deref())
+}
+
+/// CREATING A CHANNEL IS A WRITE, AND IT IS GATED WHERE THE OTHER WRITES ARE.
+/// The stranger's default path — "New channel", or "Create a channel" in an
+/// empty network — opened a form whose submit was live and whose write the
+/// host then refused. The same predicate holds the door and the submit now,
+/// and each says the step out of it.
+#[test]
+fn a_key_with_no_account_is_not_offered_a_channel_it_cannot_create() {
+    on_a_deep_stack(|| {
+        let reason = Some("Create an account to create a channel");
+        let mut keyed = session(true);
+        keyed.me = "user:cc".into();
+        keyed.me_key = "cc".into();
+        let (frame, _, props) = connected_room_with(&keyed, roots());
+        assert_eq!(
+            gate(&frame, "New channel"),
+            (false, reason),
+            "the sidebar still opens a form the host would refuse"
+        );
+
+        // an account of her own, on the next block, and the door opens on a
+        // form whose submit is live — nothing re-reads the room to find out
+        keyed.me = "acct:1".into();
+        keyed.block_height += 1;
+        let frame = tick_native(vec![item(props, &encoded(&keyed))]);
+        assert_eq!(
+            gate(&frame, "New channel"),
+            (true, None),
+            "the account is made and the sidebar still refuses"
+        );
+        let frame = tick_native(press(&frame, "New channel"));
+        assert_eq!(
+            gate(&frame, "Create channel"),
+            (true, None),
+            "the form an account opened cannot be submitted"
+        );
+
+        // the other door is the empty network's, and it is the same gate: the
+        // plate still says what the first channel is for, and the button on it
+        // says the step this key has to take first
+        let mut stranger = session(true);
+        stranger.me = "user:cc".into();
+        stranger.me_key = "cc".into();
+        let frame = empty_network_as(stranger);
+        assert!(has_text(&frame, "No channels yet"), "{:?}", texts(&frame));
+        assert_eq!(
+            gate(&frame, "Create a channel"),
+            (false, reason),
+            "the empty network still offers a form the host would refuse"
+        );
     });
 }
