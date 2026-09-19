@@ -47,7 +47,11 @@ impl InboxView {
                 Tone::Danger,
             ));
         }
-        body.push(self.list());
+        // a failed read with nothing on screen is the notice alone: an empty
+        // state under it would say "Nothing new" about a queue never read
+        if self.error.is_empty() || !self.rows.is_empty() {
+            body.push(self.list());
+        }
         kit::page("inbox/content", body)
     }
 
@@ -79,7 +83,11 @@ impl InboxView {
 
     fn list(&self) -> Node {
         if self.reading {
-            return kit::secondary("inbox/reading", "Reading your notifications…");
+            return kit::empty_state(
+                "inbox/reading",
+                "Reading your notifications…",
+                "The newest arrive first.",
+            );
         }
         if self.rows.is_empty() {
             return kit::empty_state(
