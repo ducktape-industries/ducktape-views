@@ -196,10 +196,9 @@ impl FilesView {
         self.chain = next.chain;
         self.account = next.account;
         self.dark = next.dark;
-        // A duck:// LINK LANDS ON THE FILE. The shell resolved the address and
-        // moved the tab; the path itself is a session fact, and the SERIAL —
-        // not the path — says a push happened, so the same file twice opens
-        // twice.
+        // A duck:// LINK LANDS ON THE FILE. The shell moved the tab; the
+        // address itself is a session fact, and the SERIAL — not the address
+        // — says a push happened, so the same file twice opens twice.
         let routed = next.route_serial != self.route_serial && !next.route.is_empty();
         self.route_serial = next.route_serial;
         match routed {
@@ -212,7 +211,14 @@ impl FilesView {
     /// is what the browser lists, the file itself is what the inspector
     /// reads. The same address twice is the same two subscription keys, so
     /// the generation is what makes the second push read again.
-    fn on_route_to(&mut self, target: String) -> Task<Message> {
+    fn on_route_to(&mut self, address: String) -> Task<Message> {
+        let target = match ducktape_view_files::address_path(&address) {
+            Ok(path) => path,
+            Err(refused) => {
+                self.notice = refused.sentence;
+                return Task::none();
+            }
+        };
         self.generation += 1;
         self.nav.go(&crate::host::fs_parent(&target));
         self.land();

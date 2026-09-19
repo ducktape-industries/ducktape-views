@@ -157,6 +157,7 @@ impl FilesView {
                     wire::Node::Editor {
                         key: format!("{key}/fs-editor"),
                         placeholder: "File contents…".into(),
+                        label: Some(format!("Contents of {}", self.selected)),
                         document,
                         on_document,
                         editable: !self.loading(),

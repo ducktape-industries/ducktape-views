@@ -75,7 +75,7 @@ pub struct FilesView {
     pub(crate) account: String,
     /// moves when the session comes up and after every write: every read restarts
     pub(crate) generation: i64,
-    /// the last `duck://files/...` push this view has landed on
+    /// the last `duck://<chain>/files/<path…>` push this view has landed on
     pub(crate) route_serial: i64,
     // ---- where the reader stands ----
     pub(crate) nav: Navigation,
@@ -458,6 +458,13 @@ fn gated<M: 'static>(
 mod tests {
     use super::*;
 
+    /// The tree the view paints, every control in it named and placed.
+    fn view(app: &FilesView) -> wire::Node {
+        let root = app.view();
+        assert_eq!(wire::accessibility_faults(&root), Vec::new());
+        root
+    }
+
     #[test]
     fn resizing_and_toggling_rails_preserve_the_filename_column() {
         let (mut app, _) = FilesView::boot();
@@ -593,7 +600,7 @@ mod tests {
             .stack_size(4 * 1024 * 1024)
             .spawn(|| {
                 let (app, _) = FilesView::boot();
-                let _ = app.view();
+                let _ = view(&app);
             })
             .unwrap()
             .join()

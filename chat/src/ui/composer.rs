@@ -275,9 +275,10 @@ impl ChatView {
             });
             let route = route.clone();
             let upload_token = file.token.clone();
+            let chain = self.network_chain_id.clone();
             let (task, handle) = Task::future(async move {
                 let token = file.token.clone();
-                let result = host::upload(file).await.map_err(host::said);
+                let result = host::upload(file, chain).await.map_err(host::said);
                 Message::Composer(Box::new(ComposerMessage::Uploaded(route, token, result)))
             })
             .abortable();

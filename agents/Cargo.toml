@@ -10,6 +10,9 @@ crate-type = ["cdylib", "rlib"]
 # Integration tests drive the view natively through the wire.
 
 [dependencies]
+duck-address = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "duck-address" }
+pages-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "pages-wire" }
+refusal-class = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "refusal-class" }
 futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true

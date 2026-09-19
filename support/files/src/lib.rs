@@ -1,6 +1,8 @@
 //! Files commit policy shared by deployed views. Device grants remain host-owned.
 use base64::Engine as _;
+use duck_address::{Address, ChainId, Refused};
 use ducktape_view_guest::host;
+use files_wire::FileAddress;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -19,7 +21,26 @@ async fn submit_bytes(target: &str, bytes: Vec<u8>) -> Result<(), host::Refusal>
     .map(|_| ())
 }
 
-pub async fn upload(file: SelectedFile, path: String) -> Result<String, host::Refusal> {
+/// The duckfs path a `duck://<chain>/files/<path…>` address names.
+pub fn address_path(address: &str) -> Result<String, Refused> {
+    let file = FileAddress::try_from(&Address::parse(address)?)?;
+    Ok(format!("/{}", file.path.join("/")))
+}
+
+/// The address of the duckfs `path` on `chain`, the view's `<label>#<salt>`:
+/// what a member anywhere opens it by, or why it has none.
+pub fn file_address(chain: &str, path: &str) -> Result<String, Refused> {
+    let chain: ChainId = chain.parse()?;
+    let path = path.strip_prefix('/').unwrap_or(path);
+    let file = FileAddress {
+        path: path.split('/').map(str::to_owned).collect(),
+    };
+    Ok(file.address(chain)?.to_string())
+}
+
+/// Commit the picked `file` at the duckfs `path`; its address is the
+/// caller's to mint with [`file_address`], on the chain the caller is on.
+pub async fn upload(file: SelectedFile, path: String) -> Result<(), host::Refusal> {
     let result = upload_inner(&file, path).await;
     if result.is_ok() {
         release(&file.token).await;
@@ -31,7 +52,7 @@ pub async fn release(token: &str) {
     let _ = host::request("fs.release", token.as_bytes()).await;
 }
 
-async fn upload_inner(file: &SelectedFile, path: String) -> Result<String, host::Refusal> {
+async fn upload_inner(file: &SelectedFile, path: String) -> Result<(), host::Refusal> {
     const MAX_UPLOAD: u64 = 64 << 20;
     if file.bytes > MAX_UPLOAD {
         return Err(host::Refusal::new(
@@ -98,6 +119,34 @@ async fn upload_inner(file: &SelectedFile, path: String) -> Result<String, host:
             content,
         }],
     };
-    submit_bytes("files", duckfs_core::encode_msg(&commit)).await?;
-    Ok(format!("duck://files{path}"))
+    submit_bytes("files", duckfs_core::encode_msg(&commit)).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_path_and_its_address_are_one_another() {
+        let address = file_address("testnet#0a1b2c3d", "/shared/보고서 Final.pdf").unwrap();
+        assert_eq!(
+            address,
+            "duck://testnet-0a1b2c3d/files/shared/%EB%B3%B4%EA%B3%A0%EC%84%9C%20Final.pdf"
+        );
+        assert_eq!(address_path(&address).unwrap(), "/shared/보고서 Final.pdf");
+    }
+
+    #[test]
+    fn no_chain_or_a_path_duckfs_would_not_hold_has_no_address() {
+        assert!(file_address("", "/shared/a.md").is_err());
+        // `é` decomposed: duckfs holds names NFC only
+        let refused = file_address("testnet#0a1b2c3d", "/shared/e\u{301}.md").unwrap_err();
+        assert!(refused.sentence.contains("NFC"), "{}", refused.sentence);
+        for old in [
+            "duck://files/shared/a.md",
+            "duck://testnet-0a1b2c3d/pages/a",
+        ] {
+            assert!(address_path(old).is_err(), "{old}");
+        }
+    }
 }

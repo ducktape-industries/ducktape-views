@@ -17,6 +17,9 @@
 
 use std::collections::BTreeMap;
 
+use duck_address::chat::MessageAddress;
+use duck_address::runs::RunAddress;
+use duck_address::{Address, ChainId, Refused};
 use ducktape_view_guest::host;
 use futures::{Stream, StreamExt, stream};
 use serde::{Deserialize, Serialize};
@@ -844,24 +847,36 @@ pub fn copy(text: &str, label: &str) -> bool {
     true
 }
 
-/// `duck://channel/<id>?net=…` — the room's address on this chain.
+/// A room's address on this chain, or "" when there is none to give.
 pub fn duck_channel_link(channel: &str, chain_id: &str) -> String {
-    format!("duck://channel/{channel}{}", net_query(chain_id))
+    minted(chain_id, |chain| {
+        MessageAddress {
+            channel: channel.to_owned(),
+            seq: None,
+        }
+        .address(chain)
+    })
 }
 
-/// `duck://run/<dispatch_id>?net=…` — the run's address on this chain.
+/// A run by its dispatch id, or "" when there is no address to give.
 pub fn duck_run_link(dispatch_id: &str, chain_id: &str) -> String {
-    format!("duck://run/{dispatch_id}{}", net_query(chain_id))
+    minted(chain_id, |chain| {
+        RunAddress {
+            digest: dispatch_id.to_owned(),
+        }
+        .address(chain)
+    })
 }
 
-/// The `?net=` a produced `duck://` link carries: the chain id's hash half
-/// (the part after its `#`), or nothing when the chain is unknown.
-fn net_query(chain_id: &str) -> String {
-    let digest = chain_id.rsplit_once('#').map(|(_, hex)| hex).unwrap_or("");
-    match digest.is_empty() {
-        true => String::new(),
-        false => format!("?net={digest}"),
-    }
+/// `address` on `chain` (`<label>#<salt>`) as a `duck://` link, or "" when
+/// there is none to give: no chain known, or a tail its module refuses.
+fn minted(chain: &str, address: impl FnOnce(ChainId) -> Result<Address, Refused>) -> String {
+    chain
+        .parse()
+        .ok()
+        .and_then(|chain| address(chain).ok())
+        .map(|address| address.to_string())
+        .unwrap_or_default()
 }
 
 // ---------- the layout ----------

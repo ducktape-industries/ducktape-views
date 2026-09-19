@@ -6,8 +6,19 @@
 
 use ducktape_view_guest::testing::{answer, has_text, item, press, refuse, texts};
 use ducktape_view_guest::wire::{Event, Frame, Node, Request};
+use members_view::boot_native;
 use members_view::host::{Copy, Session};
-use members_view::{boot_native, tick_native};
+
+/// The view's own tick, refusing a frame assistive technology cannot read:
+/// every tree these tests render is checked.
+fn tick_native(events: Vec<ducktape_view_guest::wire::Event>) -> ducktape_view_guest::wire::Frame {
+    let frame = members_view::tick_native(events);
+    frame
+        .root
+        .iter()
+        .for_each(ducktape_view_guest::testing::assert_accessible);
+    frame
+}
 
 fn node_ending(frame: &Frame, suffix: &str) -> Node {
     fn find(node: &Node, suffix: &str) -> Option<Node> {
@@ -505,4 +516,13 @@ fn a_member_this_node_has_no_link_to_is_not_called_offline() {
     for word in ["offline", "Offline"] {
         assert!(!tree.contains(word), "{word:?} is still drawn: {tree}");
     }
+}
+
+/// `tick_native` asserts every frame it returns; this walks the roster and
+/// a record, seated and not, the states that hold the view's controls.
+#[test]
+fn accessibility_the_roster_and_a_record_name_their_controls() {
+    opened(true, THIS_NODE);
+    opened(true, "Reviewer Bot");
+    opened(false, RESIDENT);
 }

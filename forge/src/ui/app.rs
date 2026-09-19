@@ -271,7 +271,7 @@ impl ForgeView {
     pub(crate) const PREFERRED_WINDOW_SIZE: &'static str = "none";
     /// This state's layout, digested — `snapshot_schema` holds it here.
     pub(crate) const SNAPSHOT_SCHEMA: &'static str =
-        "acda532bbeaa620c5e0bbae32da192bf8166f845a74fa9cae5c76152f105ffed";
+        "21bae224bfbbc2da7eb60f27df7937109f71cbd575d398396466fee2a3bf5671";
     pub(crate) fn snapshot(&self) -> Result<Vec<u8>, String> {
         self.validate_snapshot()?;
         wire::Snapshot {

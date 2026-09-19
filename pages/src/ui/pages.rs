@@ -66,6 +66,11 @@ impl PagesView {
         // answers, so a row's menu opens at the pointer.
         let screen = Node::MouseArea {
             key: format!("{PAGE_KEY}/press-area"),
+            role: None,
+            label: None,
+            expanded: None,
+            selected: None,
+            checked: None,
             on_press: None,
             on_release: None,
             on_double_click: None,
@@ -112,6 +117,11 @@ impl PagesView {
 fn page_menu_backdrop() -> Node {
     Node::MouseArea {
         key: format!("{PAGE_KEY}/menu-backdrop"),
+        role: Some(wire::Role::Button),
+        label: Some("Close the menu".into()),
+        expanded: None,
+        selected: None,
+        checked: None,
         on_press: Some(slots::message(Message::ClosePageMenu)),
         on_release: None,
         on_double_click: None,
@@ -247,6 +257,7 @@ impl PagesView {
         if let Node::Button { checked, .. } = &mut comments {
             *checked = Some(self.block_comments_open);
         }
+        let comments = disclosure(comments, self.block_comments_open);
         let mut controls = vec![
             kit::nowrap(kit::text_size(
                 kit::tone_text("pages/toolbar/save-status", status.0, status.1),
@@ -519,6 +530,7 @@ impl PagesView {
         }
         overlay(
             "pages/search",
+            "Search pages",
             panel,
             Message::ClearPageSearch,
             wire::AlignX::Center,
@@ -570,6 +582,7 @@ impl PagesView {
             on_document,
             editable,
             placeholder: "Write with Markdown…".into(),
+            label: Some(format!("{} document", crate::host::titled(&self.active_page_title))),
             width: None,
             height: None,
             min_height: None,
@@ -699,15 +712,18 @@ impl PagesView {
         if !resolved.is_empty() {
             threads.push(leading(
                 "pages/comments/resolved/lead",
-                named(
-                    action(
-                        "pages/comments/resolved",
-                        crate::host::resolved_label(&resolved),
-                        Message::ToggleResolvedComments,
-                        true,
-                        ButtonPreset::Text,
+                disclosure(
+                    named(
+                        action(
+                            "pages/comments/resolved",
+                            crate::host::resolved_label(&resolved),
+                            Message::ToggleResolvedComments,
+                            true,
+                            ButtonPreset::Text,
+                        ),
+                        "Resolved threads",
                     ),
-                    "Resolved threads",
+                    self.resolved_open,
                 ),
             ));
             if self.resolved_open {

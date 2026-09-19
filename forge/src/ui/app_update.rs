@@ -75,7 +75,7 @@ impl super::ForgeView {
         self.dark = next.dark;
         self.org = next.org.to_owned();
         self.about = next.about.to_owned();
-        self.network_chain_id = next.network_chain_id.to_owned();
+        self.network_chain_id = crate::host::own_chain(&next);
         self.connected_rpc = next.connected_rpc.to_owned();
         let routed = next.link_tick != self.link_tick;
         self.link_tick = next.link_tick;
@@ -783,7 +783,8 @@ impl super::ForgeView {
         ::ducktape_view_guest::Task::none()
     }
     fn on_open_message_link(&mut self, url: String) -> ducktape_view_guest::Task<Message> {
-        self.sent = crate::host::open_link(::std::convert::AsRef::as_ref(&(url)));
+        let url = crate::host::pressed_link(url, &self.network_chain_id);
+        self.sent = crate::host::open_link(&url);
         ::ducktape_view_guest::Task::none()
     }
     fn on_copy_to_clipboard(

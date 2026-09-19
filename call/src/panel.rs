@@ -502,7 +502,7 @@ impl Panel {
                 button("huddle/leave", "Leave huddle", Action::Leave, Style::Danger),
             ],
         );
-        kit::sized(
+        let tree = kit::sized(
             kit::column(
                 "huddle",
                 [
@@ -517,7 +517,12 @@ impl Panel {
             ),
             Some(Length::Fill),
             Some(Length::Fill),
-        )
+        );
+        // Every tree the crate's own tests render is one assistive
+        // technology can read.
+        #[cfg(test)]
+        ducktape_view_guest::testing::assert_accessible(&tree);
+        tree
     }
 }
 
@@ -541,7 +546,7 @@ impl Panel {
                 Style::Secondary,
             )
         }));
-        kit::sized(
+        let tree = kit::sized(
             kit::column(
                 "huddle",
                 [
@@ -564,7 +569,10 @@ impl Panel {
             ),
             Some(Length::Fill),
             Some(Length::Fill),
-        )
+        );
+        #[cfg(test)]
+        ducktape_view_guest::testing::assert_accessible(&tree);
+        tree
     }
 }
 
@@ -642,6 +650,36 @@ mod tests {
         assert!(text.iter().any(|text| text == "you · muted"));
         assert_eq!(resources, ["image:stage", "image:tile"]);
         assert_eq!(invites, ["huddle/invite/bb"]);
+    }
+
+    /// `view` asserts every tree it renders: the huddle with its roster, an
+    /// invite in flight and an error, then the share picker over it.
+    #[test]
+    fn accessibility_the_huddle_and_the_share_picker_name_their_controls() {
+        let room = Room {
+            title: "Engineering".into(),
+            members: ["Alice", "Bob"]
+                .map(|name| Member {
+                    key: name.to_lowercase(),
+                    label: name.into(),
+                })
+                .into(),
+            roster: vec![Person {
+                key: "alice".into(),
+                node: "node-a".into(),
+                label: "Alice".into(),
+                is_you: true,
+                ..Default::default()
+            }],
+        };
+        let mut panel: Panel = serde_json::from_value(serde_json::json!({
+            "title":"Engineering", "muted":true, "video_live":true,
+            "stage":"image:stage", "tiles":["image:tile"],
+        }))
+        .unwrap();
+        panel.view(&room, &["bob".to_string()].into(), "The call dropped");
+        panel.share_targets = vec!["Entire desktop".into(), "Neovim".into()];
+        panel.view(&room, &Default::default(), "");
     }
 
     /// Offered targets take over the window: what gets shared is the one thing

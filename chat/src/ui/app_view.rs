@@ -8,6 +8,11 @@ impl super::ChatView {
         // control under it answers, so a menu opens at the pointer.
         let screen = wire::Node::MouseArea {
             key: format!("{node_scope}/press-area"),
+            role: None,
+            label: None,
+            expanded: None,
+            selected: None,
+            checked: None,
             on_press: None,
             on_release: None,
             on_double_click: None,
@@ -33,6 +38,11 @@ impl super::ChatView {
             let close = self.close_menu();
             layers.push(wire::Node::MouseArea {
                 key: format!("{node_scope}/menu-backdrop"),
+                role: Some(wire::Role::Button),
+                label: Some("Close menu".into()),
+                expanded: None,
+                selected: None,
+                checked: None,
                 on_press: Some(slots::message(close.clone())),
                 on_release: None,
                 on_double_click: None,
@@ -71,6 +81,7 @@ impl super::ChatView {
             None => stack,
             Some(card) => wire::Node::Overlay {
                 key: format!("{node_scope}/preview-overlay"),
+                label: Some("Attachment preview".into()),
                 padding: 30.,
                 backdrop: wire::Rgba([0., 0., 0., 0.55]),
                 align_x: wire::AlignX::Center,
@@ -83,6 +94,7 @@ impl super::ChatView {
             None => overlay,
             Some(card) => wire::Node::Overlay {
                 key: format!("{node_scope}/create-overlay"),
+                label: Some("Create channel".into()),
                 padding: 24.,
                 backdrop: wire::Rgba([0., 0., 0., 0.55]),
                 align_x: wire::AlignX::Center,

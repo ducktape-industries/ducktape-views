@@ -5,8 +5,17 @@
 
 use ducktape_view_guest::testing::{answer, find, has_text, item, measure, press, refuse, texts};
 use ducktape_view_guest::wire::{Frame, Length, Node, Request};
+use home_view::boot_native;
 use home_view::host::Session;
-use home_view::{boot_native, tick_native};
+
+/// Every frame a test renders is one assistive technology can name.
+fn tick_native(events: Vec<ducktape_view_guest::wire::Event>) -> ducktape_view_guest::wire::Frame {
+    let frame = home_view::tick_native(events);
+    if let Some(root) = &frame.root {
+        assert_eq!(ducktape_view_guest::wire::accessibility_faults(root), []);
+    }
+    frame
+}
 
 fn boot() -> Frame {
     boot_native();
@@ -413,7 +422,7 @@ fn a_room_and_a_run_open_through_the_link_plane() {
     assert_eq!(intent.kind, "host.open_link");
     assert_eq!(
         payload(intent),
-        serde_json::json!({ "link": "duck://channel/general?net=a1b2c3d4" })
+        serde_json::json!({ "link": "duck://dev-a1b2c3d4/chat/general" })
     );
 
     let frame = tick_native(press(&frame, "Open run abababab"));
@@ -423,7 +432,7 @@ fn a_room_and_a_run_open_through_the_link_plane() {
     assert_eq!(intent.kind, "host.open_link");
     assert_eq!(
         payload(intent),
-        serde_json::json!({ "link": format!("duck://run/{}?net=a1b2c3d4", "ab".repeat(32)) })
+        serde_json::json!({ "link": format!("duck://dev-a1b2c3d4/runs/{}", "ab".repeat(32)) })
     );
 }
 

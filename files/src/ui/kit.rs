@@ -39,6 +39,28 @@ pub(super) fn quiet(
     button
 }
 
+/// A toggle that opens and closes a pane: its on state is the pane open.
+pub(super) fn disclosure(mut button: wire::Node) -> wire::Node {
+    if let wire::Node::Button {
+        checked, expanded, ..
+    } = &mut button
+    {
+        *expanded = *checked;
+    }
+    button
+}
+
+/// One of a set of views to choose between: its on state is the chosen one.
+pub(super) fn choice(mut button: wire::Node) -> wire::Node {
+    if let wire::Node::Button {
+        checked, selected, ..
+    } = &mut button
+    {
+        *selected = *checked;
+    }
+    button
+}
+
 /// Navigation matches the surrounding 26px controls with a 16px stroke icon.
 pub(super) fn navigation(
     key: String,
@@ -224,12 +246,14 @@ pub(super) fn error_plate(key: String, reason: &str, retry: Message) -> wire::No
 /// is the cancel.
 pub(super) fn modal(
     key: String,
+    label: &str,
     base: wire::Node,
     card: wire::Node,
     dismiss: Message,
 ) -> wire::Node {
     wire::Node::Overlay {
         key,
+        label: Some(label.into()),
         padding: 30.,
         backdrop: wire::Rgba([0., 0., 0., 0.45]),
         align_x: wire::AlignX::Center,

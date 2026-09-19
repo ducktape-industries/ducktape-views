@@ -357,10 +357,10 @@ impl BoardsView {
         };
         stage = float(
             "boards/menu-float",
+            "Board menu",
             stage,
             self.menu_island(&board, picker_open, menu_room),
-            AlignX::Left,
-            AlignY::Top,
+            (AlignX::Left, AlignY::Top),
             ISLAND,
             dismiss,
         );
@@ -374,39 +374,39 @@ impl BoardsView {
             };
             stage = float(
                 "boards/tools-float",
+                "Tools",
                 stage,
                 self.tool_island(),
-                AlignX::Center,
-                tools_y,
+                (AlignX::Center, tools_y),
                 tools_inset,
                 None,
             );
             if let Some(inspector) = self.inspector_island(board) {
                 stage = float(
                     "boards/properties-float",
+                    "Properties",
                     stage,
                     inspector,
-                    AlignX::Right,
-                    AlignY::Top,
+                    (AlignX::Right, AlignY::Top),
                     ISLAND,
                     None,
                 );
             }
             stage = float(
                 "boards/camera-float",
+                "Zoom and view",
                 stage,
                 self.camera_island(),
-                AlignX::Left,
-                AlignY::Bottom,
+                (AlignX::Left, AlignY::Bottom),
                 ISLAND,
                 None,
             );
             stage = float(
                 "boards/help-float",
+                "Shortcuts",
                 stage,
                 self.help_island(),
-                AlignX::Right,
-                AlignY::Bottom,
+                (AlignX::Right, AlignY::Bottom),
                 ISLAND,
                 None,
             );
@@ -414,10 +414,10 @@ impl BoardsView {
                 let strip_y = if compact { AlignY::Top } else { AlignY::Bottom };
                 stage = float(
                     "boards/typing-float",
+                    "Text entry",
                     stage,
                     self.typing_strip(inline),
-                    AlignX::Center,
-                    strip_y,
+                    (AlignX::Center, strip_y),
                     ISLAND,
                     None,
                 );
@@ -427,10 +427,10 @@ impl BoardsView {
             let card = kit::sized(notice, Some(Length::Fixed(480.)), None);
             stage = float(
                 "boards/notice-float",
+                "Notice",
                 stage,
                 card,
-                AlignX::Center,
-                AlignY::Top,
+                (AlignX::Center, AlignY::Top),
                 PAST_ISLANDS,
                 None,
             );
@@ -443,8 +443,18 @@ impl BoardsView {
             // key you cannot see is worse than a description you can guess.
             let sheet = (w - 2. * 24.).min(700.);
             let card = kit::sized(self.help_card(), Some(Length::Fixed(sheet)), None);
-            stage = modal("boards/help-modal", stage, card, Message::Help);
+            stage = modal(
+                "boards/help-modal",
+                "Keyboard shortcuts",
+                stage,
+                card,
+                Message::Help,
+            );
         }
+        // Every tree the crate's own tests render is one assistive
+        // technology can read.
+        #[cfg(test)]
+        ducktape_view_guest::testing::assert_accessible(&stage);
         stage
     }
     /// The board's own menu, where the secondary button opened it: a backdrop
@@ -466,6 +476,11 @@ impl BoardsView {
         vec![
             Node::MouseArea {
                 key: "boards/menu-backdrop".into(),
+                role: Some(wire::Role::Button),
+                label: Some("Close menu".into()),
+                expanded: None,
+                selected: None,
+                checked: None,
                 on_press: Some(slots::message(Message::CloseMenu)),
                 on_release: None,
                 on_double_click: None,
@@ -564,7 +579,14 @@ impl BoardsView {
         );
         // Inside the button only the name gives way; the ▾ is a word of its
         // own after it, so the ellipsis cannot take it.
-        if let Node::Button { content, width, .. } = &mut switcher {
+        if let Node::Button {
+            content,
+            width,
+            expanded,
+            ..
+        } = &mut switcher
+        {
+            *expanded = Some(open);
             let name = wide(kit::nowrap(kit::text("boards/switcher/name", title)));
             let caret = kit::nowrap(kit::text("boards/switcher/caret", "▾"));
             let label = kit::spaced(kit::row("boards/switcher/label", [name, caret]), 6.);
@@ -634,7 +656,7 @@ impl BoardsView {
     /// Bottom-left: the camera, then history, then snapping.
     fn camera_island(&self) -> Node {
         let controls = [
-            action("boards/zoom-out", "−", "Zoom out", Message::Zoom(0.8), true),
+            glyph("boards/zoom-out", "−", "Zoom out", Message::Zoom(0.8)),
             kit::sized(
                 action(
                     "boards/zoom",
@@ -646,7 +668,7 @@ impl BoardsView {
                 Some(Length::Fixed(ZOOM_READOUT)),
                 None,
             ),
-            action("boards/zoom-in", "+", "Zoom in", Message::Zoom(1.25), true),
+            glyph("boards/zoom-in", "+", "Zoom in", Message::Zoom(1.25)),
             action("boards/fit", "Fit", "Fit board · F", Message::Fit, true),
             rule("boards/camera-rule-a"),
             icon_button(
@@ -1402,6 +1424,14 @@ impl BoardsView {
         };
         let mouse = Node::MouseArea {
             key: "boards/canvas".into(),
+            // The drawing surface: a press starts whatever the tool in hand
+            // draws. The wire has no canvas role; a button is what it is to
+            // the keyboard and the reader.
+            role: Some(wire::Role::Button),
+            label: Some("Board canvas".into()),
+            expanded: None,
+            selected: None,
+            checked: None,
             on_press: Some(slots::message(Message::Begin)),
             on_press_at: Some(slots::handler(Box::new(|(x, y)| {
                 Some(Message::Position(x, y))
@@ -2405,15 +2435,16 @@ fn pin(key: &str, x: f32, y: f32, width: f32, content: Node) -> Node {
 /// the card on a press anywhere else.
 fn float(
     key: &str,
+    label: &str,
     base: Node,
     card: Node,
-    align_x: AlignX,
-    align_y: AlignY,
+    (align_x, align_y): (AlignX, AlignY),
     inset: f32,
     dismiss: Option<Message>,
 ) -> Node {
     Node::Overlay {
         key: key.into(),
+        label: Some(label.into()),
         padding: inset,
         backdrop: Rgba([0.; 4]),
         align_x,
@@ -2857,9 +2888,10 @@ fn island(key: &str, content: Node) -> Node {
     kit::padded(kit::card(key, content), wire::Edges::all(4.))
 }
 /// A card over a shaded stage that a press anywhere else closes.
-fn modal(key: &str, base: Node, card: Node, dismiss: Message) -> Node {
+fn modal(key: &str, label: &str, base: Node, card: Node, dismiss: Message) -> Node {
     Node::Overlay {
         key: key.into(),
+        label: Some(label.into()),
         padding: 24.,
         backdrop: Rgba([0., 0., 0., 0.18]),
         align_x: AlignX::Center,
@@ -2917,6 +2949,14 @@ fn button(
 /// A quiet action: the bar's and the inspector's default control.
 fn action(key: &str, label: &str, hint: &str, message: Message, enabled: bool) -> Node {
     button(key, label, hint, message, enabled, ButtonPreset::Subtle)
+}
+/// A quiet action whose face is a glyph: it is named by what it does.
+fn glyph(key: &str, face: &str, name: &str, message: Message) -> Node {
+    let mut node = action(key, face, name, message, true);
+    if let Node::Button { label, .. } = &mut node {
+        *label = Some(name.into());
+    }
+    node
 }
 /// A quiet action that reads as on or off.
 fn checked(key: &str, label: &str, hint: &str, message: Message, on: bool) -> Node {
@@ -3106,6 +3146,7 @@ fn tool_button_message(
     if let Node::Button {
         label: accessible,
         checked,
+        selected: chosen,
         width,
         height,
         padding,
@@ -3114,6 +3155,9 @@ fn tool_button_message(
     } = &mut node
     {
         *accessible = Some(label.into());
+        // One tool of many is in hand. The host paints a button's selection
+        // from `checked`, so it says so too.
+        *chosen = Some(selected);
         *checked = Some(selected);
         *width = Some(Length::Fixed(TOOL));
         *height = Some(Length::Fixed(TOOL));
@@ -3590,6 +3634,14 @@ impl BoardsView {
             // card still says it, where the box is the card's own and nothing
             // can crop it.
             placeholder: String::new(),
+            label: Some(
+                match shape.kind {
+                    Kind::Note => "Note text",
+                    Kind::Text => "Text",
+                    _ => "Shape label",
+                }
+                .into(),
+            ),
             width: Some((size[0] - 2. * letters.inset).max(40.)),
             // The editor fills the card. It cannot be asked to lay out to its
             // own content instead — a shrunk editor collapses to its first

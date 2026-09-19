@@ -8,8 +8,19 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use ducktape_view_guest::testing::{answer, find, has_text, item, press, submit, texts, type_into};
 use ducktape_view_guest::wire::{ButtonContent, Frame, Node, Request, Wrapping};
+use settings_view::boot_native;
 use settings_view::host::{Endpoint, KeyAdd, Name, Session, Tab, TasteRow, Unlock};
-use settings_view::{boot_native, tick_native};
+
+/// The view's own tick, refusing a frame assistive technology cannot read:
+/// every tree these tests render is checked.
+fn tick_native(events: Vec<ducktape_view_guest::wire::Event>) -> ducktape_view_guest::wire::Frame {
+    let frame = settings_view::tick_native(events);
+    frame
+        .root
+        .iter()
+        .for_each(ducktape_view_guest::testing::assert_accessible);
+    frame
+}
 
 const SEAT: &str = "8c4fa211";
 
@@ -1150,4 +1161,12 @@ fn the_appearance_choice_offers_system_and_checks_the_current_mode() {
             ("dark".to_owned(), Some(false)),
         ]
     );
+}
+
+/// `tick_native` asserts every frame it returns; this draws all four panes
+/// connected, the states that hold the view's controls.
+#[test]
+fn accessibility_every_settings_pane_names_its_controls() {
+    let (frame, _, _) = connected(&facts(), 2);
+    every_pane(frame);
 }

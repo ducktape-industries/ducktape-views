@@ -69,12 +69,18 @@ impl FilesView {
         match self.modal() {
             Modal::Deleting => kit::modal(
                 format!("{key}/delete-dialog"),
+                "Delete",
                 content,
                 self.confirm_delete(format!("{key}/confirm-delete")),
                 Message::DisarmDelete,
             ),
             Modal::Naming => kit::modal(
                 format!("{key}/name-dialog"),
+                match &self.name_prompt {
+                    NamePrompt::NewFolder => "New folder",
+                    NamePrompt::NewFile => "New file",
+                    _ => "Rename",
+                },
                 content,
                 self.name_dialog(format!("{key}/name-prompt")),
                 Message::Prompt(NamePrompt::Closed),
@@ -151,13 +157,13 @@ impl FilesView {
         let busy = self.loading();
         let can_write = !busy && self.refusal().is_empty();
         let mut children = vec![
-            kit::quiet(
+            kit::disclosure(kit::quiet(
                 format!("{key}/sidebar-toggle"),
                 "☰",
                 "Toggle sidebar",
                 (self.viewport_width >= app_update::SIDEBAR_MIN).then_some(Message::ToggleSidebar),
                 self.sidebar_open,
-            ),
+            )),
             native::sized(
                 native::spaced(
                     native::centered_row(
@@ -200,20 +206,20 @@ impl FilesView {
                     native::centered_row(
                         format!("{key}/view-modes"),
                         [
-                            kit::quiet(
+                            kit::choice(kit::quiet(
                                 format!("{key}/list-mode"),
                                 "List",
                                 "List view",
                                 Some(Message::SetViewMode(ViewMode::List)),
                                 self.view_mode == ViewMode::List,
-                            ),
-                            kit::quiet(
+                            )),
+                            kit::choice(kit::quiet(
                                 format!("{key}/columns-mode"),
                                 "Columns",
                                 "Column view",
                                 Some(Message::SetViewMode(ViewMode::Columns)),
                                 self.view_mode == ViewMode::Columns,
-                            ),
+                            )),
                         ],
                     ),
                     0.,
@@ -257,13 +263,13 @@ impl FilesView {
             *width = Some(wire::Length::Fixed(180.));
         }
         children.push(filter);
-        children.push(kit::quiet(
+        children.push(kit::disclosure(kit::quiet(
             format!("{key}/inspector-toggle"),
             "Info",
             "Toggle inspector",
             (self.viewport_width >= app_update::INSPECTOR_MIN).then_some(Message::ToggleInspector),
             self.inspector_open,
-        ));
+        )));
         native::padded(
             native::aligned(
                 native::spaced(native::wrapped_row(key, children), 6.),

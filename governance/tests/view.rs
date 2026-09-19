@@ -5,8 +5,19 @@
 
 use ducktape_view_guest::testing::{answer, has_text, item, press, refuse, texts};
 use ducktape_view_guest::wire::{Frame, Length, Node, Request, Wrapping};
+use governance_view::boot_native;
 use governance_view::host::{Session, TasteRow};
-use governance_view::{boot_native, tick_native};
+
+/// The view's own tick, refusing a frame assistive technology cannot read:
+/// every tree these tests render is checked.
+fn tick_native(events: Vec<ducktape_view_guest::wire::Event>) -> ducktape_view_guest::wire::Frame {
+    let frame = governance_view::tick_native(events);
+    frame
+        .root
+        .iter()
+        .for_each(ducktape_view_guest::testing::assert_accessible);
+    frame
+}
 
 fn boot() -> Frame {
     boot_native();
@@ -553,4 +564,11 @@ fn a_code_ballots_view_can_be_tried_and_left_from_its_card() {
     let frame = tick_native(vec![item(session_id, &session(true))]);
     assert!(!has_text(&frame, "On the ballot"), "{:?}", texts(&frame));
     assert!(!has_text(&frame, "Try this view"), "{:?}", texts(&frame));
+}
+
+/// `tick_native` asserts every frame it returns; this reads the register
+/// from boot, the state that holds the view's controls.
+#[test]
+fn accessibility_the_register_names_its_controls() {
+    connected_with_register();
 }

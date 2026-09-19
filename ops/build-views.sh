@@ -3,6 +3,14 @@
 # encoded flags preserve paths containing spaces and replace ambient Rust flags.
 set -euo pipefail
 repo=$(pwd -P)
+# The accessibility gate: no component is built while a view draws a tree
+# assistive technology cannot read. Every view's tests assert that
+# `view_wire::accessibility_faults` is empty over EVERY tree they render, in
+# the helper each frame passes through, so the gate is the view tests
+# themselves, unfiltered: a name filter would skip a view that forgot the
+# name. A native test run, before the rust flags below and never for the wasm
+# target, so it does not move a component's bytes.
+"${CARGO:-cargo}" test --locked --manifest-path "$repo/Cargo.toml" --workspace
 cargo_home=$(cd "${CARGO_HOME:-$HOME/.cargo}" && pwd -P)
 # A toolchain installed without rustup (the agent guest's /opt/rust) has no
 # rustup home; its sysroot is the prefix rust's own paths live under.

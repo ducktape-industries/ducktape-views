@@ -75,8 +75,8 @@ pub struct FsDiffEntry {
 /// The session facts the kernel pushes, one item per change. `chain` is the
 /// network an unsaved draft belongs to: a draft parks when it moves.
 /// `account` is the reader's account number, which names her home under
-/// `/home`. `route` is where a `duck://files/...` link sent the reader — the
-/// shell resolves the address and moves the tab, so the path arrives here
+/// `/home`. `route` is the `duck://<chain>/files/<path…>` address a link sent
+/// the reader to — the shell moves the tab, so the address arrives here
 /// rather than being navigated to — and `route_serial` counts those pushes,
 /// because the same path twice has to land twice and the path alone would not
 /// have changed.

@@ -26,7 +26,7 @@ impl PaletteView {
         if !self.open {
             return kit::column("palette/closed", Vec::new());
         }
-        let scrim = kit::button_child(
+        let mut scrim = kit::button_child(
             "palette/scrim",
             kit::sized(
                 kit::column("palette/scrim-fill", Vec::new()),
@@ -36,6 +36,9 @@ impl PaletteView {
             Some(slots::message(Message::Dismiss)),
             wire::ButtonPreset::Subtle,
         );
+        if let Node::Button { label, .. } = &mut scrim {
+            *label = Some("Close the palette".into());
+        }
         let card = kit::aligned(
             kit::column(
                 "palette/drop",
@@ -132,17 +135,21 @@ impl PaletteView {
             kit::column(
                 key.clone(),
                 [
-                    kit::nowrap(kit::strong(format!("{key}/name"), name)),
+                    kit::nowrap(kit::strong(format!("{key}/name"), name.clone())),
                     kit::nowrap(kit::secondary(format!("{key}/detail"), detail)),
                 ],
             ),
             2.,
         );
-        kit::list_row(
+        let mut press = kit::list_row(
             format!("{key}/press"),
             entry,
             false,
             Some(slots::message(Message::Open(link))),
-        )
+        );
+        if let Node::Button { label, .. } = &mut press {
+            *label = Some(name);
+        }
+        press
     }
 }

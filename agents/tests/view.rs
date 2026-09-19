@@ -4,13 +4,22 @@
 //! `rpc.live` hit, and a pause or a save leaves as `op.submit`. Only the
 //! navigation intents still leave as notifications.
 
+use agents_view::boot_native;
 use agents_view::host::Session;
-use agents_view::{boot_native, tick_native};
 use ducktape_view_guest::testing::{
     answer, has_text, item, pick, press, refuse, texts, toggle, type_into,
 };
 use ducktape_view_guest::wire::{Event, Frame, Node, Request};
 use serde_json::{Value, json};
+
+/// Every frame a test renders is one assistive technology can name.
+fn tick_native(events: Vec<ducktape_view_guest::wire::Event>) -> ducktape_view_guest::wire::Frame {
+    let frame = agents_view::tick_native(events);
+    if let Some(root) = &frame.root {
+        assert_eq!(ducktape_view_guest::wire::accessibility_faults(root), []);
+    }
+    frame
+}
 
 /// Inputs are found by placeholder and pick lists by key.
 const AGENT_ID_HINT: &str = "a-dns-label, e.g. chiefduck";
@@ -676,7 +685,7 @@ fn the_open_run_draws_its_places_as_chips() {
     let opened = tick_native(press(&frame, "Open in chat"));
     assert_eq!(
         opened_link(&opened),
-        "duck://channel/general?net=a1b2c3d4#9"
+        "duck://duck-1-a1b2c3d4/chat/general/9"
     );
     let frame = tick_native(press(&opened, "Hide message"));
     assert!(
@@ -697,7 +706,7 @@ fn the_open_run_draws_its_places_as_chips() {
     // the chain's digest, never its whole id
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&intent.payload).expect("decodes")["link"],
-        "duck://page/p-9?net=a1b2c3d4"
+        "duck://duck-1-a1b2c3d4/pages/p-9"
     );
 }
 

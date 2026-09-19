@@ -114,7 +114,7 @@ impl ForgeView {
             for next in [
                 span(
                     part.mention.clone(),
-                    Some(part.mention_link.clone()),
+                    Some(part.mention_account.clone()),
                     wire::Weight::Medium,
                     false,
                 ),

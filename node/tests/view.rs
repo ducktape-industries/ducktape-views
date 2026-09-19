@@ -7,8 +7,19 @@
 
 use ducktape_view_guest::testing::{answer, has_text, item, press, refuse, texts, type_into};
 use ducktape_view_guest::wire::{Event, Frame, Length, Node, Request, Wrapping};
+use node_view::boot_native;
 use node_view::host::{Copy, Session};
-use node_view::{boot_native, tick_native};
+
+/// The view's own tick, refusing a frame assistive technology cannot read:
+/// every tree these tests render is checked.
+fn tick_native(events: Vec<ducktape_view_guest::wire::Event>) -> ducktape_view_guest::wire::Frame {
+    let frame = node_view::tick_native(events);
+    frame
+        .root
+        .iter()
+        .for_each(ducktape_view_guest::testing::assert_accessible);
+    frame
+}
 use serde_json::{Value, json};
 
 // ---------- what the node answers ----------
@@ -840,4 +851,15 @@ fn a_seat_without_administration_is_told_the_retune_is_closed() {
         panic!("no retune button in {:?}", texts(&frame));
     };
     assert!(on_press.is_none(), "the retune is closed to this seat");
+}
+
+/// `tick_native` asserts every frame it returns; this walks every tab,
+/// seated and not, the states that hold the view's controls.
+#[test]
+fn accessibility_every_node_tab_names_its_controls() {
+    connected_as(false);
+    let (frame, _) = connected();
+    let (frame, _) = settle(tick_native(press(&frame, "Node permissions")));
+    let (frame, _) = settle(tick_native(press(&frame, "Node modules")));
+    settle(tick_native(press(&frame, "Node activity")));
 }
