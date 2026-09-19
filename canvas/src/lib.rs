@@ -5,10 +5,11 @@ mod interaction;
 mod markdown;
 mod presentation;
 use boards_wire::{
-    Align, Board, Change, Dash, Fill, Heads, Kind, Operation, Shape, TextSize, Weight,
+    Align, Board, Change, Dash, Fill, Heads, Kind, Operation, Shape, TARGET_GONE, TextSize, Weight,
 };
 use ducktape_view_guest::{Editor, wire};
 use ducktape_view_guest::{Subscription, Task};
+use refusal_class::{NOT_FOUND, STALE};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -712,14 +713,22 @@ impl BoardsView {
                 self.pump()
             }
             Err(refusal) => {
-                // Two of the module's tokens are about words that are still on
+                // Two of the module's classes are about words that are still on
                 // this writer's screen, and the view already has a banner for
-                // each. `stale_text` carries the card's current text verbatim,
-                // which is what the writer would have written over.
+                // each. `STALE` carries the card's current text verbatim, which
+                // is what the writer would have written over; `TARGET_GONE` is
+                // the card no longer being there to take them.
                 //
-                // `board_gone` is the third the view can act on: the board this
+                // `NOT_FOUND` is the third the view can act on: the board this
                 // edit names is not there to take it, now or on any retry, and
                 // neither is the view's own reason for still being on it.
+                //
+                // Branching on `STALE` and `NOT_FOUND`, and quoting a `STALE`
+                // sentence as the other writer's words, rests on the refusal
+                // classes' "who may mint what": a class about the module's own
+                // state is minted by the module addressed and by no host hop in
+                // front of it, so on a boards submit only the boards guest says
+                // either.
                 //
                 // Every other token leaves the edit standing in the queue for
                 // Retry and shows the sentence, which is what a refusal did
@@ -728,11 +737,9 @@ impl BoardsView {
                 // arrives here as. A refusal nobody has read is not a refusal to
                 // guess about: "Not saved" and the module's own words.
                 match refusal.reason.as_str() {
-                    "stale_text" => {
-                        self.take_the_words_back(epoch, id, Some(refusal.sentence), reading)
-                    }
-                    "text_target_gone" => self.take_the_words_back(epoch, id, None, reading),
-                    "board_gone" => self.leave_the_board_that_is_gone(epoch, id, reading),
+                    STALE => self.take_the_words_back(epoch, id, Some(refusal.sentence), reading),
+                    TARGET_GONE => self.take_the_words_back(epoch, id, None, reading),
+                    NOT_FOUND => self.leave_the_board_that_is_gone(epoch, id, reading),
                     _ => {
                         self.delivery = Delivery::Failed(refusal.sentence);
                         Task::none()
