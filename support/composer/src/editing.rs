@@ -200,17 +200,15 @@ impl Draft {
             // back, so cut answers nothing and delete does the work here.
             "cut" | "backspace" | "delete" if range.is_empty() => match tag {
                 "backspace" => wire::EditorDecision::DefaultEditorAction,
-                "delete" => match state
-                    .text
-                    .get(range.start..)
-                    .and_then(|ahead| ahead.chars().next())
-                {
-                    // the char ahead of the caret, whole; a delete INTO a
+                "delete" => match state.text.get(range.start..).and_then(|ahead| {
+                    unicode_segmentation::UnicodeSegmentation::graphemes(ahead, true).next()
+                }) {
+                    // the grapheme ahead of the caret, whole; a delete INTO a
                     // mention never gets here — `expanded` swallowed the
                     // token and left a range to remove
                     Some(ahead) => apply(
                         state,
-                        range.start..range.start + ahead.len_utf8(),
+                        range.start..range.start + ahead.len(),
                         String::new(),
                         range.start,
                     ),

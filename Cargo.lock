@@ -1090,6 +1090,7 @@ dependencies = [
  "ducktape-view-guest",
  "serde",
  "serde_json",
+ "unicode-segmentation",
 ]
 
 [[package]]

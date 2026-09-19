@@ -914,6 +914,8 @@ mod tests {
         assert_eq!(removed(&caret("hello", 2)).as_deref(), Some("helo"));
         // a character is not a byte
         assert_eq!(removed(&caret("héllo", 1)).as_deref(), Some("hllo"));
+        // and what a person sees as one character goes as one
+        assert_eq!(removed(&caret("a👨‍👩‍👧b", 1)).as_deref(), Some("ab"));
         // at the end there is nothing ahead to remove
         assert_eq!(removed(&caret("hello", 5)), None);
         // the mention goes whole, the same as a selection over it would
