@@ -314,11 +314,13 @@ impl Panel {
             let strip = tiles
                 .into_iter()
                 .map(|tile| kit::sized(tile, Some(Length::Fixed(128.)), Some(Length::Fixed(96.))));
-            return kit::sized(
-                kit::row("huddle/tiles", strip),
-                Some(Length::Fill),
-                Some(Length::Fixed(96.)),
-            );
+            // the strip scrolls sideways: a row of fixed tiles wider than a
+            // narrow panel ran past its edge
+            let mut strip = kit::scroll("huddle/tiles/scroll", kit::row("huddle/tiles", strip));
+            if let wire::Node::Scroll { direction, .. } = &mut strip {
+                *direction = wire::ScrollDirection::Horizontal;
+            }
+            return kit::sized(strip, Some(Length::Fill), Some(Length::Fixed(96.)));
         }
         let (_, columns) = grid_shape(tiles.len());
         let rows = tiles
@@ -425,8 +427,18 @@ impl Panel {
         } else {
             Length::Fill
         };
+        let roster = match room.roster.is_empty() {
+            // a roster not read yet, or one the error below says failed, is
+            // not a blank pane
+            true => kit::empty_state(
+                "huddle/roster-empty",
+                "Nobody here yet",
+                "Who is in the huddle appears as the room is read.",
+            ),
+            false => kit::column("huddle/roster", rows),
+        };
         body.push(kit::sized(
-            kit::scroll("huddle/roster-scroll", kit::column("huddle/roster", rows)),
+            kit::scroll("huddle/roster-scroll", roster),
             Some(Length::Fill),
             Some(height),
         ));
@@ -451,9 +463,10 @@ impl Panel {
             body.push(kit::wrapped_row("huddle/invites", invites));
         }
         if !error.is_empty() {
-            body.push(kit::colored(
-                kit::text("huddle/error", error),
-                kit::palette().danger,
+            body.push(kit::notice(
+                "huddle/error",
+                kit::wrapping(kit::text("huddle/error/text", error)),
+                kit::Tone::Danger,
             ));
         }
         let controls = kit::wrapped_row(
@@ -753,6 +766,43 @@ mod tests {
         });
         assert!(rows.iter().any(|key| key == "huddle/screen"));
         assert!(!rows.iter().any(|key| key.starts_with("huddle/share/")));
+    }
+
+    /// An unread roster is the kit's empty state, an error the danger
+    /// notice, and the tiles under a stage scroll sideways instead of
+    /// running past a narrow panel.
+    #[test]
+    fn states_are_the_kits_and_the_tile_strip_scrolls() {
+        let room = Room::default();
+        let panel: Panel = serde_json::from_value(serde_json::json!({
+            "video_live": true, "stage": "image:stage",
+            "tiles": ["image:a", "image:b", "image:c", "image:d"],
+        }))
+        .unwrap();
+        let tree = panel.view(&room, &Default::default(), "the room did not answer");
+        let mut found = Vec::new();
+        let mut strip = None;
+        let mut tree = tree;
+        tree.for_each_mut(&mut |node| match node {
+            wire::Node::Container {
+                key, background, ..
+            } if key == "huddle/error" => found.push((key.clone(), background.is_some())),
+            wire::Node::Text { key, .. } if key == "huddle/roster-empty/title" => {
+                found.push((key.clone(), true))
+            }
+            wire::Node::Scroll { key, direction, .. } if key == "huddle/tiles/scroll" => {
+                strip = Some(*direction)
+            }
+            _ => {}
+        });
+        assert_eq!(
+            found,
+            [
+                ("huddle/roster-empty/title".to_owned(), true),
+                ("huddle/error".to_owned(), true),
+            ]
+        );
+        assert_eq!(strip, Some(wire::ScrollDirection::Horizontal));
     }
 
     /// While sharing, the huddle names WHAT is on the wire. The sharer's own
