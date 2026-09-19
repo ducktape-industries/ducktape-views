@@ -26,7 +26,8 @@ impl ChatView {
         };
         let mut children = vec![
             native::avatar(format!("{key}/avatar"), peer.initials.clone(), tone),
-            native::nowrap(name),
+            // a long name is cut, never the badge and the unread dot after it
+            super::chat::gives_way(format!("{key}/name-box"), name),
         ];
         if peer.is_agent {
             children.push(native::badge(format!("{key}/agent"), "Agent", Tone::Agent));
