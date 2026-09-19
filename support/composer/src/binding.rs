@@ -295,12 +295,12 @@ pub fn editor<M: 'static>(
 
 /// Where the draft's text starts, from the field's left edge: the native
 /// field pads its own text this far, and every row under it lines up there.
-const TEXT_INSET: f32 = 10.;
+const TEXT_INSET: f32 = kit::spacing::MD as f32;
 /// A row of controls stops short of that line, because a square control
 /// centres its sign and so carries the rest of the distance inside its own
 /// box. Aligning the BOXES would push every sign a glyph's width to the
 /// right of the draft's first letter.
-const CONTROL_INSET: f32 = 4.;
+const CONTROL_INSET: f32 = kit::spacing::XXS as f32;
 /// A mark button is a square holding one sign, and tall enough that the
 /// host's button does not clip the sign to its line box.
 const MARK: f32 = 24.;
@@ -375,7 +375,7 @@ fn chip(key: &str, name: &str, note: &str, tone: kit::Tone, remove: Option<u32>)
                 format!("{key}/row"),
                 [body, mark(format!("{key}/remove"), "×", "Remove", remove)],
             ),
-            4.,
+            kit::spacing::XXS as f32,
         ),
     );
     let wire::Node::Container {
@@ -395,10 +395,10 @@ fn chip(key: &str, name: &str, note: &str, tone: kit::Tone, remove: Option<u32>)
     });
     *background = Some(wire::Background::Color(kit::rgba(p.surface)));
     *padding = Some(wire::Edges {
-        top: 4.,
-        right: 4.,
-        bottom: 4.,
-        left: 8.,
+        top: kit::spacing::XXS as f32,
+        right: kit::spacing::XXS as f32,
+        bottom: kit::spacing::XXS as f32,
+        left: kit::spacing::SM as f32,
     });
     *width = Some(wire::Length::Shrink);
     chip
@@ -516,11 +516,11 @@ pub fn view<M: Clone + 'static>(
                         wire::ButtonPreset::Subtle,
                     ));
                 }
-                kit::spaced(kit::centered_row(format!("{at}/held"), carried), 4.)
+                kit::spaced(kit::centered_row(format!("{at}/held"), carried), kit::spacing::XXS as f32)
             })
             .collect();
         rows.push(inset(
-            kit::spaced(kit::wrapped_row(format!("{key}/attachments"), chips), 6.),
+            kit::spaced(kit::wrapped_row(format!("{key}/attachments"), chips), kit::spacing::XS as f32),
             TEXT_INSET,
         ));
     }
@@ -557,7 +557,7 @@ pub fn view<M: Clone + 'static>(
                             ),
                         ],
                     ),
-                    8.,
+                    kit::spacing::SM as f32,
                 ),
                 kit::Tone::Danger,
             ),
@@ -601,7 +601,7 @@ pub fn view<M: Clone + 'static>(
     ));
     plate(
         key,
-        kit::spaced(kit::column(format!("{key}/rows"), rows), 6.),
+        kit::spaced(kit::column(format!("{key}/rows"), rows), kit::spacing::XS as f32),
     )
 }
 
