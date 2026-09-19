@@ -10,9 +10,9 @@ use crate::{ExplorerView, Message, host};
 /// a list row. Nothing sits on the window edge, and nothing is indented twice.
 const GUTTER: wire::Edges = wire::Edges {
     top: 0.,
-    right: 12.,
+    right: kit::spacing::LG as f32,
     bottom: 0.,
-    left: 12.,
+    left: kit::spacing::LG as f32,
 };
 
 /// Below this pane width the ledger (never narrower than 260) and a block's
@@ -86,7 +86,7 @@ impl ExplorerView {
                         Tone::Danger,
                     )],
                 ),
-                wire::Edges::all(12.),
+                wire::Edges::all(kit::spacing::LG as f32),
             ));
         }
         let panel = match (self.connected, self.searching, self.sent_query.is_empty()) {
@@ -189,7 +189,7 @@ impl ExplorerView {
                     Some(slots::message(Message::SelectExplorerBlock(block.height))),
                 ),
                 Some(Length::Fill),
-                Some(Length::Fixed(28.)),
+                Some(Length::Fixed(kit::height::CONTROL as f32)),
             );
             let Node::Button { label, .. } = &mut button else {
                 unreachable!()
@@ -211,33 +211,16 @@ impl ExplorerView {
                 ),
                 // a read that failed is not an empty ledger: it says so, and
                 // offers the read again
-                (false, false) => kit::column(
+                (false, false) => kit::empty_state_action(
                     "explorer/unread-ledger",
-                    [
-                        kit::empty_state(
-                            "explorer/unread-ledger/state",
-                            "Blocks not read",
-                            "The node did not answer; the notice above says why.",
-                        ),
-                        kit::padded(
-                            kit::row(
-                                "explorer/unread-ledger/actions",
-                                [kit::button(
-                                    "explorer/retry",
-                                    "Retry",
-                                    self.connected.then(|| slots::message(Message::Refresh)),
-                                    ButtonPreset::Secondary,
-                                )],
-                            ),
-                            // under the empty state's words, which inset by 24
-                            wire::Edges {
-                                top: 0.,
-                                right: 24.,
-                                bottom: 24.,
-                                left: 24.,
-                            },
-                        ),
-                    ],
+                    "Blocks not read",
+                    "The node did not answer; the notice above says why.",
+                    kit::button(
+                        "explorer/retry",
+                        "Retry",
+                        self.connected.then(|| slots::message(Message::Refresh)),
+                        ButtonPreset::Secondary,
+                    ),
                 ),
                 (false, true) => kit::empty_state(
                     "explorer/empty-ledger",
@@ -372,7 +355,7 @@ impl ExplorerView {
                     Self::trace(&key, &op.trace),
                 ));
             }
-            content.push(kit::spaced(kit::column(format!("{key}/body"), lines), 4.));
+            content.push(kit::spaced(kit::column(format!("{key}/body"), lines), kit::spacing::XXS as f32));
         }
         Self::filling(kit::spaced(
             kit::column(
@@ -383,8 +366,8 @@ impl ExplorerView {
                     kit::scroll(
                         "explorer/details",
                         kit::padded(
-                            kit::spaced(kit::column("explorer/detail-content", content), 8.),
-                            wire::Edges::all(12.),
+                            kit::spaced(kit::column("explorer/detail-content", content), kit::spacing::SM as f32),
+                            wire::Edges::all(kit::spacing::LG as f32),
                         ),
                     ),
                 ],
@@ -419,7 +402,7 @@ impl ExplorerView {
                 ],
             ),
             Some(Length::Fill),
-            Some(Length::Fixed(28.)),
+            Some(Length::Fixed(kit::height::CONTROL as f32)),
         )
     }
 
@@ -467,7 +450,7 @@ impl ExplorerView {
         });
         kit::card(
             format!("{key}/payload/box"),
-            kit::spaced(kit::column(format!("{key}/payload/fields"), rows), 4.),
+            kit::spaced(kit::column(format!("{key}/payload/fields"), rows), kit::spacing::XXS as f32),
         )
     }
 
@@ -484,7 +467,7 @@ impl ExplorerView {
         });
         kit::card(
             format!("{key}/trace/box"),
-            kit::spaced(kit::column(format!("{key}/trace/hops"), rows), 4.),
+            kit::spaced(kit::column(format!("{key}/trace/hops"), rows), kit::spacing::XXS as f32),
         )
     }
 
@@ -566,8 +549,8 @@ impl ExplorerView {
                     ],
                 ),
                 wire::Edges {
-                    top: 6.,
-                    bottom: 6.,
+                    top: kit::spacing::XS as f32,
+                    bottom: kit::spacing::XS as f32,
                     ..GUTTER
                 },
             ),
@@ -585,7 +568,7 @@ impl ExplorerView {
                         Tone::Warning,
                     )],
                 ),
-                wire::Edges::all(12.),
+                wire::Edges::all(kit::spacing::LG as f32),
             ));
         }
         let matches_kind = |hit: &&host::ExplorerHit| self.kind == "all" || hit.kind == self.kind;
@@ -643,7 +626,7 @@ impl ExplorerView {
                 wire::Edges {
                     top: 0.,
                     right: GUTTER.right,
-                    bottom: 6.,
+                    bottom: kit::spacing::XS as f32,
                     left: GUTTER.left,
                 },
             ));
