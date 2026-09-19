@@ -499,7 +499,7 @@ impl ChatView {
         }
         // a room that refuses posts shows why where the composer would be;
         // a disabled composer under the reason would only repeat it
-        if !self.post_refusal.is_empty() {
+        if !self.write_refusal().is_empty() {
             children.push(native::padded(
                 self.composer_gate(format!("{key}/refusal")),
                 wire::Edges {
@@ -531,7 +531,7 @@ impl ChatView {
                     !self.loading
                         && self.connected
                         && !self.active_channel.is_empty()
-                        && self.post_refusal.is_empty(),
+                        && self.write_refusal().is_empty(),
                 ),
             ),
             COMPOSER_MARGIN,
@@ -743,7 +743,7 @@ impl ChatView {
                     "👍",
                     "React with 👍",
                     Message::AddReactionAt(message.seq, "👍".into()),
-                    self.active_channel_archived,
+                    self.active_channel_archived || !self.may_write(),
                 ));
                 controls.extend([
                     glyph(
@@ -751,7 +751,7 @@ impl ChatView {
                         "😀",
                         "Manage reactions",
                         reaction,
-                        self.active_channel_archived,
+                        self.active_channel_archived || !self.may_write(),
                     ),
                     glyph(
                         format!("{scope}/more"),
@@ -1127,7 +1127,7 @@ impl ChatView {
                         thread: Some(self.active_thread_seq as u64),
                     },
                     "Reply in thread",
-                    !self.thread_loading && self.connected && self.post_refusal.is_empty(),
+                    !self.thread_loading && self.connected && self.write_refusal().is_empty(),
                 ),
             ),
             COMPOSER_MARGIN,
@@ -1434,7 +1434,7 @@ impl ChatView {
                         "😀",
                         "Add reaction",
                         reaction,
-                        self.active_channel_archived,
+                        self.active_channel_archived || !self.may_write(),
                     ),
                     menu_item(
                         format!("{key}/{prefix}copy-link"),
@@ -1448,14 +1448,14 @@ impl ChatView {
                         "✎",
                         "Edit message",
                         edit,
-                        self.active_channel_archived,
+                        self.active_channel_archived || !self.may_write(),
                     ),
                     menu_item(
                         format!("{key}/{prefix}delete"),
                         "🗑",
                         "Delete message",
                         delete,
-                        self.active_channel_archived,
+                        self.active_channel_archived || !self.may_write(),
                     ),
                 ]);
                 children.push(native::spaced(
@@ -1470,7 +1470,7 @@ impl ChatView {
                         format!("{key}/{prefix}reaction/{emoji}"),
                         &emoji,
                         Message::AddReactionAt(seq, emoji.clone()),
-                        self.active_channel_archived,
+                        self.active_channel_archived || !self.may_write(),
                     ));
                 }
                 // the host cuts cells from the grid's measured width, so the

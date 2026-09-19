@@ -2694,6 +2694,14 @@ pub fn post_gate(archived: bool, members_only: bool, members: &[ChatMember], me:
     String::new()
 }
 
+/// Whether the reader's handle holds an account on this network. Every write
+/// in chat is authored by an account, so a signing key that holds none
+/// (`user:<hex>`) may read the room and nothing more — the handle the session
+/// renders is the whole of what that takes to know.
+pub fn holds_account(me: &str) -> bool {
+    me.starts_with("acct:")
+}
+
 /// THE BANNER A REFUSED REACTION LEAVES BEHIND — and, on a live channel, the
 /// banner already on screen, returned untouched. Opening the picker is a READ:
 /// it must not wipe a failed send the reader has not seen yet.

@@ -25,7 +25,7 @@ impl ChatView {
     pub(crate) fn composer_drops(&self) -> ducktape_view_guest::Subscription<Message> {
         use futures::StreamExt;
         let accepts_files =
-            self.connected && !self.active_channel.is_empty() && self.post_refusal.is_empty();
+            self.connected && !self.active_channel.is_empty() && self.write_refusal().is_empty();
         if !accepts_files {
             return ducktape_view_guest::Subscription::none();
         }
