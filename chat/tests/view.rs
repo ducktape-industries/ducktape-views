@@ -21,8 +21,16 @@ fn on_a_deep_stack(test: fn()) {
         .expect("the test thread finishes");
 }
 
+/// Every frame a test renders is one assistive technology can name.
+fn nameable(frame: Frame) -> Frame {
+    if let Some(root) = &frame.root {
+        assert_eq!(ducktape_view_guest::wire::accessibility_faults(root), []);
+    }
+    frame
+}
+
 fn tick_native(input: Vec<ducktape_view_guest::wire::Event>) -> Frame {
-    let mut frame = chat_view::tick_native(input);
+    let mut frame = nameable(chat_view::tick_native(input));
     let sidebar = frame
         .requests
         .iter()
@@ -54,7 +62,7 @@ fn tick_native(input: Vec<ducktape_view_guest::wire::Event>) -> Frame {
             &serde_json::json!({"channels":{"channels":rows,"has_more":false,"next_after":null}}),
         )
         .unwrap();
-        let mut next = chat_view::tick_native(vec![answer(request.id, &bytes)]);
+        let mut next = nameable(chat_view::tick_native(vec![answer(request.id, &bytes)]));
         next.requests
             .extend(frame.requests.drain(..).filter(|old| old.id != request.id));
         return next;
@@ -67,7 +75,7 @@ fn session(connected: bool) -> Session {
         connected,
         endpoint: "http://127.0.0.1:1".into(),
         network_name: "testnet".into(),
-        network_chain_id: "testnet#abcd".into(),
+        network_chain_id: "testnet#0a1b2c3d".into(),
         status: "Live".into(),
         block_height: 84_912,
         me: "acct:7".into(),
@@ -1353,16 +1361,19 @@ fn a_landing_short_of_the_rooms_head_offers_the_jump() {
 fn visible_room_navigation_requests_a_fresh_sidebar_without_a_live_event() {
     on_a_deep_stack(|| {
         boot_native();
-        let boot = chat_view::tick_native(Vec::new());
+        let boot = nameable(chat_view::tick_native(Vec::new()));
         let props_id = request(&boot, "chat.props").id;
         let visible_id = request(&boot, "host.visible").id;
-        let _ = chat_view::tick_native(vec![
+        nameable(chat_view::tick_native(vec![
             item(props_id, &encoded(&session(true))),
             item(visible_id, b"true"),
-        ]);
+        ]));
         let mut next = session(true);
         next.active_channel = "channel-b".into();
-        let frame = chat_view::tick_native(vec![item(props_id, &encoded(&next))]);
+        let frame = nameable(chat_view::tick_native(vec![item(
+            props_id,
+            &encoded(&next),
+        )]));
         assert!(
             frame
                 .requests
@@ -1418,7 +1429,7 @@ fn a_dm_click_creates_the_room_through_common_requests_before_navigation() {
         let navigate = request(&frame, "host.open_link");
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&navigate.payload).unwrap(),
-            serde_json::json!({"link":format!("duck://channel/{channel}")})
+            serde_json::json!({"link":format!("duck://testnet-0a1b2c3d/chat/{channel}")})
         );
     });
 }
@@ -1569,7 +1580,7 @@ fn creating_a_text_channel_uses_common_requests_and_waits_before_navigation() {
         let navigate = request(&frame, "host.open_link");
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&navigate.payload).unwrap(),
-            serde_json::json!({"link":"duck://channel/channel-new"})
+            serde_json::json!({"link":"duck://testnet-0a1b2c3d/chat/channel-new"})
         );
         assert!(!has_text(&frame, "Create a channel"));
     });

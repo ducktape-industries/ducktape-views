@@ -191,10 +191,15 @@ fn snapshots_runs_and_proposals_fold_their_rows() {
 }
 
 #[test]
-fn links_carry_the_chain_digest_and_never_the_whole_id() {
+fn links_carry_the_chain_in_their_authority_and_none_without_one() {
     assert_eq!(
         duck_channel_link("general", "dev#a1b2c3d4"),
-        "duck://channel/general?net=a1b2c3d4"
+        "duck://dev-a1b2c3d4/chat/general"
     );
-    assert_eq!(duck_run_link("abc", ""), "duck://run/abc");
+    let digest = "ab".repeat(32);
+    assert_eq!(
+        duck_run_link(&digest, "dev#a1b2c3d4"),
+        format!("duck://dev-a1b2c3d4/runs/{digest}")
+    );
+    assert_eq!(duck_run_link(&digest, ""), "");
 }

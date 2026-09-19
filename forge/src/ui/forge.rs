@@ -56,6 +56,7 @@ fn item_column(content: Vec<wire::Node>) -> wire::Node {
 
 fn picker(
     key: &str,
+    label: &str,
     options: Vec<String>,
     selected: &str,
     placeholder: Option<String>,
@@ -68,6 +69,7 @@ fn picker(
     let choices = options.clone();
     wire::Node::PickList {
         key: key.into(),
+        label: Some(label.into()),
         options,
         selected,
         placeholder,
@@ -265,6 +267,7 @@ impl ForgeView {
             native::caption("forge/crumb", "/"),
             picker(
                 "ForgeView/forge/repo-pick",
+                "Repository",
                 host::repo_names(&self.repos),
                 &self.open_repo,
                 None,
@@ -274,6 +277,7 @@ impl ForgeView {
         if !self.branches.is_empty() {
             header.push(picker(
                 "ForgeView/forge/branch-pick",
+                "Branch",
                 host::branch_names(&self.branches),
                 &host::forge_tree_branch(&self.branches, &self.tree_pick, &self.tree_rev),
                 Some(host::commit_label(&self.tree_rev)),
@@ -529,14 +533,14 @@ impl ForgeView {
                 meta.push(subtle(
                     "forge/copy-item",
                     "Copy link",
-                    Some(Message::CopyToClipboard(
-                        host::duck_forge_item_link(
-                            &self.open_repo,
-                            self.forge_item_number,
-                            &self.network_chain_id,
-                        ),
-                        "Link copied".into(),
-                    )),
+                    // no address to give (no chain, no owner) is a
+                    // control drawn disabled
+                    host::duck_forge_item_link(
+                        &self.open_repo,
+                        self.forge_item_number,
+                        &self.network_chain_id,
+                    )
+                    .map(|link| Message::CopyToClipboard(link, "Link copied".into())),
                 ));
                 content.push(native::spaced(
                     native::column(

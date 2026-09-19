@@ -17,8 +17,12 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 
+use chat_wire::MessageAddress;
+use duck_address::{Address, ChainId, Refused};
 use ducktape_view_guest::host;
+use files_wire::FileAddress;
 use futures::{FutureExt, Stream, StreamExt, stream};
+use runs_wire::RunAddress;
 use serde::{Deserialize, Serialize};
 
 /// One page of roots, replies or hits — chat's own index page size.
@@ -116,7 +120,7 @@ pub struct ChatBlock {
 
 /// Where a send puts a message's files; a paragraph that is one link into
 /// it reads as a file card, not a line of text.
-pub const ATTACHMENTS_PREFIX: &str = "duck://files/shared/attachments/";
+pub const ATTACHMENTS_DIR: &str = "/shared/attachments/";
 
 /// The host picture slot this view draws into.
 pub const PICTURE_SURFACE: &str = "chat";
@@ -145,11 +149,13 @@ pub fn is_picture(name: &str) -> bool {
     )
 }
 
-/// The duckfs path behind an attachment link: the scheme and host dropped,
-/// the query too.
+/// The absolute duckfs path a `duck://<chain>/files/…` link names, or ""
+/// when the link names no file.
 pub fn attachment_file_path(link: &str) -> String {
-    let path = link.strip_prefix("duck://files").unwrap_or(link);
-    path.split('?').next().unwrap_or_default().to_owned()
+    Address::parse(link)
+        .and_then(|address| FileAddress::try_from(&address))
+        .map(|file| format!("/{}", file.path.join("/")))
+        .unwrap_or_default()
 }
 
 /// Every picture attachment across the timeline and the thread, once each,
@@ -515,6 +521,9 @@ pub struct Session {
     pub endpoint: String,
     pub network_name: String,
     pub network_chain_id: String,
+    /// this view's own network, `<label>#<salt>`, what its links carry
+    #[serde(default)]
+    pub chain: String,
     pub status: String,
     pub block_height: i64,
     /// the reader's own rendered handle (`acct:7` / `user:<hex>`) and signing
@@ -2142,7 +2151,8 @@ fn attachment_block(kind: &str, spans: &[ChatSpan]) -> Option<ChatBlock> {
     let [only] = spans else {
         return None;
     };
-    let is_file = kind == "paragraph" && only.link.starts_with(ATTACHMENTS_PREFIX);
+    let is_file =
+        kind == "paragraph" && attachment_file_path(&only.link).starts_with(ATTACHMENTS_DIR);
     if !is_file {
         return None;
     }
@@ -2850,24 +2860,46 @@ pub fn height_label_short(height: i64) -> String {
     height_label(height)
 }
 
-fn net_query(chain_id: &str) -> String {
-    let digest = chain_id.rsplit_once('#').map(|(_, hex)| hex).unwrap_or("");
-    match digest.is_empty() {
-        true => String::new(),
-        false => format!("?net={digest}"),
+/// This view's own network: the `chain` prop, else the `network_chain_id`
+/// an app that predates it pushes.
+pub fn own_chain(session: &Session) -> String {
+    match session.chain.is_empty() {
+        true => session.network_chain_id.clone(),
+        false => session.chain.clone(),
     }
 }
 
+/// `address` on `chain` (`<label>#<salt>`) as a `duck://` link, or "" when
+/// there is none to give: no chain known, or a tail its module refuses.
+fn minted(chain: &str, address: impl FnOnce(ChainId) -> Result<Address, Refused>) -> String {
+    chain
+        .parse()
+        .ok()
+        .and_then(|chain| address(chain).ok())
+        .map(|address| address.to_string())
+        .unwrap_or_default()
+}
+
 pub fn duck_run_link(dispatch_id: String, chain_id: String) -> String {
-    format!("duck://run/{dispatch_id}{}", net_query(&chain_id))
+    minted(&chain_id, |chain| {
+        RunAddress {
+            digest: dispatch_id,
+        }
+        .address(chain)
+    })
 }
 
 pub fn duck_channel_link(channel: String, chain_id: String) -> String {
-    format!("duck://channel/{channel}{}", net_query(&chain_id))
+    minted(&chain_id, |chain| {
+        MessageAddress { channel, seq: None }.address(chain)
+    })
 }
 
 pub fn duck_channel_message_link(channel: String, seq: i64, chain_id: String) -> String {
-    format!("duck://channel/{channel}{}#{seq}", net_query(&chain_id))
+    let seq = u64::try_from(seq).ok();
+    minted(&chain_id, |chain| {
+        MessageAddress { channel, seq }.address(chain)
+    })
 }
 
 pub fn mmss(seconds: i64) -> String {
@@ -2982,17 +3014,17 @@ mod tests {
     #[test]
     fn a_lone_link_into_the_attachments_root_is_a_file_card() {
         let names = Names::default();
-        let file = serde_json::json!({"paragraph": [{"text": "deck.pdf", "marks": [{"link": "duck://files/shared/attachments/message-1-2/deck.pdf"}]}]});
+        let file = serde_json::json!({"paragraph": [{"text": "deck.pdf", "marks": [{"link": "duck://testnet-0a1b2c3d/files/shared/attachments/message-1-2/deck.pdf"}]}]});
         let block = block_view(&file, &names);
         assert_eq!(block.kind, "attachment");
         assert_eq!(block.text, "deck.pdf");
         assert_eq!(
             block.link,
-            "duck://files/shared/attachments/message-1-2/deck.pdf"
+            "duck://testnet-0a1b2c3d/files/shared/attachments/message-1-2/deck.pdf"
         );
         let web = serde_json::json!({"paragraph": [{"text": "site", "marks": [{"link": "https://example.com"}]}]});
         assert_eq!(block_view(&web, &names).kind, "paragraph");
-        let worded = serde_json::json!({"paragraph": [{"text": "see ", "marks": []}, {"text": "deck.pdf", "marks": [{"link": "duck://files/shared/attachments/message-1-2/deck.pdf"}]}]});
+        let worded = serde_json::json!({"paragraph": [{"text": "see ", "marks": []}, {"text": "deck.pdf", "marks": [{"link": "duck://testnet-0a1b2c3d/files/shared/attachments/message-1-2/deck.pdf"}]}]});
         assert_eq!(block_view(&worded, &names).kind, "paragraph");
     }
 
@@ -3037,13 +3069,13 @@ mod tests {
     fn picture_attachments_are_found_once_and_fit_the_box() {
         assert!(is_picture("Cover.PNG") && is_picture("a.jpeg") && !is_picture("deck.pdf"));
         assert_eq!(
-            attachment_file_path("duck://files/shared/attachments/a-1/x.png?net=abcd1234"),
+            attachment_file_path("duck://testnet-0a1b2c3d/files/shared/attachments/a-1/x.png"),
             "/shared/attachments/a-1/x.png"
         );
         let block = |name: &str| ChatBlock {
             kind: "attachment".into(),
             text: name.into(),
-            link: format!("duck://files/shared/attachments/a-1/{name}"),
+            link: format!("duck://testnet-0a1b2c3d/files/shared/attachments/a-1/{name}"),
             ..ChatBlock::default()
         };
         let message = |blocks: Vec<ChatBlock>| ChatMessage {
@@ -3057,8 +3089,8 @@ mod tests {
         assert_eq!(
             links,
             vec![
-                "duck://files/shared/attachments/a-1/x.png".to_owned(),
-                "duck://files/shared/attachments/a-1/y.gif".to_owned()
+                "duck://testnet-0a1b2c3d/files/shared/attachments/a-1/x.png".to_owned(),
+                "duck://testnet-0a1b2c3d/files/shared/attachments/a-1/y.gif".to_owned()
             ]
         );
         assert_eq!(picture_box(1200, 600), (360., 180.));

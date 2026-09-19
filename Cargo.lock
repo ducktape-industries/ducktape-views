@@ -50,8 +50,13 @@ name = "agents-view"
 version = "0.1.0"
 dependencies = [
  "agent-wire",
+ "chat-wire",
+ "duck-address",
  "ducktape-view-guest",
+ "forge-wire",
  "futures",
+ "pages-wire",
+ "refusal-class",
  "runs-wire",
  "serde",
  "serde_json",
@@ -368,9 +373,13 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "chat-message",
+ "chat-wire",
+ "duck-address",
  "ducktape-view-composer",
  "ducktape-view-guest",
+ "files-wire",
  "futures",
+ "runs-wire",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -1362,12 +1371,25 @@ name = "forge-view"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "duck-address",
  "ducktape-view-composer",
  "ducktape-view-guest",
+ "forge-wire",
  "futures",
  "serde",
  "serde_json",
  "view-wire",
+]
+
+[[package]]
+name = "forge-wire"
+version = "0.1.0"
+source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#2af877933fc0164a12e3c9f26aa4b886201aec6c"
+dependencies = [
+ "chat-wire",
+ "duck-address",
+ "sdk",
+ "serde",
 ]
 
 [[package]]
@@ -1646,8 +1668,11 @@ dependencies = [
 name = "home-view"
 version = "0.1.0"
 dependencies = [
+ "chat-wire",
+ "duck-address",
  "ducktape-view-guest",
  "futures",
+ "runs-wire",
  "serde",
  "serde_json",
  "view-wire",
@@ -1685,8 +1710,13 @@ dependencies = [
 name = "inbox-view"
 version = "0.1.0"
 dependencies = [
+ "chat-wire",
+ "duck-address",
  "ducktape-view-guest",
+ "forge-wire",
  "futures",
+ "pages-wire",
+ "runs-wire",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -2096,8 +2126,11 @@ dependencies = [
 name = "palette-view"
 version = "0.1.0"
 dependencies = [
+ "chat-wire",
+ "duck-address",
  "ducktape-view-guest",
  "futures",
+ "pages-wire",
  "serde",
  "serde_json",
  "view-wire",

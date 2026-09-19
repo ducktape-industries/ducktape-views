@@ -1200,6 +1200,7 @@ impl AgentsView {
             let choices = options.clone();
             Node::PickList {
                 key: "AgentsView/root/editor/agent-capability".into(),
+                label: Some("Executor".into()),
                 selected: options
                     .iter()
                     .position(|value| value == &capability)

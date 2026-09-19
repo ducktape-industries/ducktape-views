@@ -1,7 +1,16 @@
-use chat_view::{boot_native, tick_native};
+use chat_view::boot_native;
 use ducktape_view_guest::testing::{answer, item, refuse};
 use ducktape_view_guest::wire::{Frame, Request};
 use serde_json::{Value, json};
+
+/// Every frame a test renders is one assistive technology can name.
+fn tick_native(events: Vec<ducktape_view_guest::wire::Event>) -> ducktape_view_guest::wire::Frame {
+    let frame = chat_view::tick_native(events);
+    if let Some(root) = &frame.root {
+        assert_eq!(ducktape_view_guest::wire::accessibility_faults(root), []);
+    }
+    frame
+}
 
 fn request<'a>(frame: &'a Frame, kind: &str) -> &'a Request {
     frame

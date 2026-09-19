@@ -235,7 +235,7 @@ impl super::ChatView {
             (next.active_channel != self.active_channel) || (next.land_seq != self.land_seq);
         self.copy_chord_serial = next.copy_chord_serial;
         let changed_reader = self.endpoint != next.endpoint
-            || self.network_chain_id != next.network_chain_id
+            || self.network_chain_id != crate::host::own_chain(&next)
             || self.me_key != next.me_key;
         let requested_dm =
             next.connected && !next.dm_peer.is_empty() && next.dm_serial != self.dm_request_serial;
@@ -277,7 +277,7 @@ impl super::ChatView {
         self.dark = next.dark;
         self.endpoint = next.endpoint.to_owned();
         self.network_name = next.network_name.to_owned();
-        self.network_chain_id = next.network_chain_id.to_owned();
+        self.network_chain_id = crate::host::own_chain(&next);
         self.status = next.status.to_owned();
         self.block_height = next.block_height;
         self.me = next.me.to_owned();
@@ -870,8 +870,10 @@ impl super::ChatView {
             return ducktape_view_guest::Task::none();
         }
         if !self.channel_create_voice {
-            self.sent =
-                crate::host::send_open_link(&format!("duck://channel/{}", self.channel_create_id));
+            self.sent = crate::host::send_open_link(&crate::host::duck_channel_link(
+                self.channel_create_id.clone(),
+                self.network_chain_id.clone(),
+            ));
         }
         self.channel_create_open = false;
         self.channel_draft.clear();
@@ -929,7 +931,10 @@ impl super::ChatView {
         self.loading = self.session_loading || self.room_channel != self.active_channel;
         match result {
             Ok(channel) => {
-                self.sent = crate::host::send_open_link(&format!("duck://channel/{channel}"));
+                self.sent = crate::host::send_open_link(&crate::host::duck_channel_link(
+                    channel,
+                    self.network_chain_id.clone(),
+                ));
             }
             Err(error) => {
                 self.host_error =

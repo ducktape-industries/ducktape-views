@@ -5,8 +5,17 @@
 
 use ducktape_view_guest::testing::{answer, has_text, item, press, texts};
 use ducktape_view_guest::wire::{Frame, Request};
+use inbox_view::boot_native;
 use inbox_view::host::Session;
-use inbox_view::{boot_native, tick_native};
+
+/// Every frame a test renders is one assistive technology can name.
+fn tick_native(events: Vec<ducktape_view_guest::wire::Event>) -> ducktape_view_guest::wire::Frame {
+    let frame = inbox_view::tick_native(events);
+    if let Some(root) = &frame.root {
+        assert_eq!(ducktape_view_guest::wire::accessibility_faults(root), []);
+    }
+    frame
+}
 
 fn request<'a>(frame: &'a Frame, kind: &str) -> &'a Request {
     frame
@@ -94,7 +103,7 @@ fn the_wording_the_unread_rule_and_the_door_are_this_view_s() {
     let frame = tick_native(door);
     assert_eq!(
         payload(request(&frame, "host.open_link"))["link"],
-        "duck://channel/general?net=a1b2c3d4#42"
+        "duck://dev-a1b2c3d4/chat/general/42"
     );
 }
 
