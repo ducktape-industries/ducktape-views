@@ -1445,7 +1445,7 @@ mod tests {
     }
 
     /// The "…" menu is a dropdown floated where the pointer pressed: one
-    /// item a row, full-width, no close row (the backdrop closes it), and
+    /// item a row, full-width, no close row (the modal closes it), and
     /// nothing of it in the stream's flow. The timeline's menu adds Reply;
     /// the thread's has no thread to open. One menu floats at a time.
     #[test]
@@ -1456,6 +1456,40 @@ mod tests {
         state.active_thread_seq = 1;
         state.press_x = 900.0;
         state.press_y = 300.0;
+        let assert_menu_modal = |state: &ChatView, open: bool, expected: (f32, f32)| {
+            let mut tree = state.view();
+            let mut overlays = 0;
+            let mut backdrops = 0;
+            tree.for_each_mut(&mut |node| match node {
+                wire::Node::Overlay {
+                    key,
+                    label,
+                    backdrop,
+                    on_dismiss,
+                    children,
+                    ..
+                } if key.ends_with("/menu-overlay") => {
+                    assert!(open, "a closed menu exposed its dialog");
+                    assert_eq!(label.as_deref(), Some("Message menu"));
+                    assert_eq!(*backdrop, wire::Rgba([0.; 4]));
+                    assert!(on_dismiss.is_some());
+                    assert_eq!(children.len(), 2);
+                    assert_eq!(children[0].key(), Some("ChatView/chat/press-area"));
+                    let wire::Node::Float { key, x, y, .. } = &children[1] else {
+                        panic!("the message menu dialog does not carry its Float")
+                    };
+                    assert_eq!(key, "ChatView/chat/floating-menu");
+                    assert_eq!((*x, *y), expected);
+                    overlays += 1;
+                }
+                wire::Node::MouseArea { key, .. } if key.ends_with("/menu-backdrop") => {
+                    backdrops += 1;
+                }
+                _ => {}
+            });
+            assert_eq!(backdrops, 0, "the old actionable backdrop remains");
+            assert_eq!(overlays, usize::from(open));
+        };
         let menu_of = |state: &ChatView, focus: &str| -> Vec<String> {
             let mut tree = state.view();
             let mut floats = 0;
@@ -1495,6 +1529,7 @@ mod tests {
             items
         };
         let _ = state.update(Message::OpenMessageActions(1, "body".into(), 0));
+        assert_menu_modal(&state, true, (900., 304.));
         assert_eq!(
             menu_of(&state, "message-action-focus"),
             [
@@ -1514,7 +1549,9 @@ mod tests {
             }
         });
         let _ = state.update(Message::ClearMessageSelection);
+        assert_menu_modal(&state, false, (0., 0.));
         let _ = state.update(Message::OpenThreadMessageActions(1, "body".into(), 0));
+        assert_menu_modal(&state, true, (10., 14.));
         assert_eq!(
             menu_of(&state, "thread-action-focus"),
             [

@@ -328,9 +328,6 @@ impl BoardsView {
             }
             layers.extend(self.empty_prompt(board, w, h));
         }
-        // Last of the stage's layers, so the menu stands over everything drawn
-        // on the board and its backdrop stands over everything but the menu.
-        layers.extend(self.menu_layers());
         let mut stage = Node::Stack {
             key: "boards/stage".into(),
             width: Some(Length::Fill),
@@ -342,6 +339,7 @@ impl BoardsView {
             under: 0,
             children: layers,
         };
+        stage = self.menu_layers(stage);
         // Every island sits on an overlay, never a pin: the host stops a
         // press on an overlay's surface, where a pinned card lets it fall
         // through to the canvas underneath and the gesture it starts
@@ -457,74 +455,48 @@ impl BoardsView {
         assert_accessible(&stage);
         stage
     }
-    /// The board's own menu, where the secondary button opened it: a backdrop
-    /// that shuts it on any press, then the card floated at the cursor.
-    ///
-    /// A `Node::Float` and not the `float` overlay every island uses: the
-    /// overlay's wrapper paints its surface at the card's UN-translated
-    /// origin, which a floated card leaves behind as a grey rectangle in the
-    /// corner. The chat view learned this the same way. A `Float` carries its
-    /// own surface and stops a press inside it, which is the half of the
-    /// overlay that a menu actually needs.
-    fn menu_layers(&self) -> Vec<Node> {
+    /// The board's own menu, where the secondary button opened it: a modal
+    /// overlay whose translated card floats at the cursor.
+    fn menu_layers(&self, base: Node) -> Node {
         let Some(press) = self.menu else {
-            return Vec::new();
+            return base;
         };
         let items = self.menu_items();
         let (card, height) = self.board_menu(&items);
         let at = menu_origin(press, [MENU_WIDTH, height], self.viewport);
-        vec![
-            Node::MouseArea {
-                key: "boards/menu-backdrop".into(),
-                role: Some(wire::Role::Button),
-                label: Some("Close menu".into()),
-                expanded: None,
-                selected: None,
-                checked: None,
-                on_press: Some(slots::message(Message::CloseMenu)),
-                on_release: None,
-                on_double_click: None,
-                // The second button shuts it too, rather than opening a second
-                // menu over the first — which is what a press outside a menu
-                // means everywhere else.
-                on_right_press: Some(slots::message(Message::CloseMenu)),
-                on_right_release: None,
-                on_middle_press: None,
-                on_middle_release: None,
-                on_enter: None,
-                on_exit: None,
-                on_move: None,
-                on_press_at: None,
-                on_scroll: None,
-                content: Box::new(kit::space(Some(Length::Fill), Some(Length::Fill))),
-            },
-            // The box around the float, not the card inside it: a float takes
-            // the width of the box it is laid out in, and the box a stage
-            // layer hands it is the whole stage — which paints its surface
-            // from the cursor to the right edge. Sizing the card within it
-            // does not help; the sheet is the float's own.
-            kit::sized(
-                kit::container(
-                    "boards/menu-box",
-                    Node::Float {
-                        key: "boards/menu-card".into(),
-                        x: at[0],
-                        y: at[1],
-                        scale: 1.,
-                        shadow: wire::Shadow {
-                            color: Some(Rgba([0., 0., 0., self.menu_shade()])),
-                            x: Some(0.),
-                            y: Some(4.),
-                            blur: Some(16.),
+        Node::Overlay {
+            key: "boards/menu-overlay".into(),
+            label: Some("Board menu".into()),
+            padding: 0.,
+            backdrop: Rgba([0.; 4]),
+            align_x: AlignX::Left,
+            align_y: AlignY::Top,
+            on_dismiss: Some(slots::message(Message::CloseMenu)),
+            children: vec![
+                base,
+                kit::sized(
+                    kit::container(
+                        "boards/menu-box",
+                        Node::Float {
+                            key: "boards/menu-card".into(),
+                            x: at[0],
+                            y: at[1],
+                            scale: 1.,
+                            shadow: wire::Shadow {
+                                color: Some(Rgba([0., 0., 0., self.menu_shade()])),
+                                x: Some(0.),
+                                y: Some(4.),
+                                blur: Some(16.),
+                            },
+                            radius: Some([kit::radius::CARD as f32; 4]),
+                            content: Box::new(card),
                         },
-                        radius: Some([kit::radius::CARD as f32; 4]),
-                        content: Box::new(card),
-                    },
+                    ),
+                    Some(Length::Fixed(MENU_WIDTH)),
+                    Some(Length::Fixed(height)),
                 ),
-                Some(Length::Fixed(MENU_WIDTH)),
-                Some(Length::Fixed(height)),
-            ),
-        ]
+            ],
+        }
     }
     /// A dropped shadow lifts the card off the board; deeper on a dark one,
     /// where a soft grey under a card reads as part of the card.
