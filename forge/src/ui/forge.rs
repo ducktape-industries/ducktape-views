@@ -34,7 +34,7 @@ pub(super) fn primary(key: impl Into<String>, label: &str, message: Option<Messa
 pub(super) fn section(key: &str, title: wire::Node, children: Vec<wire::Node>) -> wire::Node {
     let mut items = vec![title];
     items.extend(children);
-    native::spaced(native::column(key, items), 10.)
+    native::spaced(native::column(key, items), native::spacing::MD as f32)
 }
 
 /// One item screen's column: inset, held to a reading width, and scrolled
@@ -130,7 +130,10 @@ impl ForgeView {
             "forge/repo-count",
             host::plural(self.repos.len() as i64, "repository", "repositories"),
         )));
-        content.push(native::spaced(native::centered_row("forge/head", head), 8.));
+        content.push(native::spaced(
+            native::centered_row("forge/head", head),
+            native::spacing::SM as f32,
+        ));
         if !self.about.is_empty() {
             content.push(native::wrapping(native::secondary(
                 "forge/about",
@@ -188,10 +191,10 @@ impl ForgeView {
             );
             if let wire::Node::Button { label, padding, .. } = &mut row {
                 *padding = Some(wire::Edges {
-                    top: 10.,
-                    right: 10.,
-                    bottom: 10.,
-                    left: 10.,
+                    top: native::spacing::MD as f32,
+                    right: native::spacing::MD as f32,
+                    bottom: native::spacing::MD as f32,
+                    left: native::spacing::MD as f32,
                 });
                 *label = Some(repo.name.clone());
             }
@@ -203,7 +206,10 @@ impl ForgeView {
         native::scroll(
             "forge/repositories",
             native::padded(
-                native::spaced(native::column("forge/list", content), 12.),
+                native::spaced(
+                    native::column("forge/list", content),
+                    native::spacing::LG as f32,
+                ),
                 wire::Edges::all(INSET),
             ),
         )
@@ -231,10 +237,10 @@ impl ForgeView {
                 radius: Some([native::radius::CONTROL as f32; 4]),
             });
             *padding = Some(wire::Edges {
-                top: 6.,
-                right: 6.,
-                bottom: 6.,
-                left: 10.,
+                top: native::spacing::XS as f32,
+                right: native::spacing::XS as f32,
+                bottom: native::spacing::XS as f32,
+                left: native::spacing::MD as f32,
             });
         }
         node
@@ -248,7 +254,7 @@ impl ForgeView {
             content.push(native::padded(
                 native::row("forge/error-row", [self.unavailable("forge/error".into())]),
                 wire::Edges {
-                    top: 12.,
+                    top: native::spacing::LG as f32,
                     right: INSET,
                     bottom: 0.,
                     left: INSET,
@@ -307,17 +313,20 @@ impl ForgeView {
         // pickers instead of running off the edge.
         header.push(native::space(Some(wire::Length::FillPortion(1)), None));
         header.push(self.tab_row());
-        let mut navigation = native::spaced(native::wrapped_row("forge/navigation", header), 6.);
+        let mut navigation = native::spaced(
+            native::wrapped_row("forge/navigation", header),
+            native::spacing::XS as f32,
+        );
         if let wire::Node::Linear { align, .. } = &mut navigation {
             *align = Some(wire::AlignX::Center);
         }
         native::padded(
             navigation,
             wire::Edges {
-                top: 6.,
-                right: 12.,
-                bottom: 6.,
-                left: 12.,
+                top: native::spacing::XS as f32,
+                right: native::spacing::LG as f32,
+                bottom: native::spacing::XS as f32,
+                left: native::spacing::LG as f32,
             },
         )
     }
@@ -396,7 +405,7 @@ impl ForgeView {
                     ),
                 ],
             ),
-            8.,
+            native::spacing::SM as f32,
         )
     }
 
@@ -440,7 +449,7 @@ impl ForgeView {
                                             ),
                                         ],
                                     ),
-                                    8.,
+                                    native::spacing::SM as f32,
                                 ),
                                 native::sized(
                                     native::nowrap(native::secondary(
@@ -452,7 +461,7 @@ impl ForgeView {
                                 ),
                             ],
                         ),
-                        4.,
+                        native::spacing::XXS as f32,
                     );
                     let mut row = native::list_row(
                         &key,
@@ -462,10 +471,10 @@ impl ForgeView {
                     );
                     if let wire::Node::Button { label, padding, .. } = &mut row {
                         *padding = Some(wire::Edges {
-                            top: 10.,
-                            right: 10.,
-                            bottom: 10.,
-                            left: 10.,
+                            top: native::spacing::MD as f32,
+                            right: native::spacing::MD as f32,
+                            bottom: native::spacing::MD as f32,
+                            left: native::spacing::MD as f32,
                         });
                         *label = Some(item.title.clone());
                     }
@@ -479,10 +488,10 @@ impl ForgeView {
             native::padded(
                 native::spaced(native::column("forge/tracker-content", content), 1.),
                 wire::Edges {
-                    top: 8.,
-                    right: 12.,
-                    bottom: 12.,
-                    left: 12.,
+                    top: native::spacing::SM as f32,
+                    right: native::spacing::LG as f32,
+                    bottom: native::spacing::LG as f32,
+                    left: native::spacing::LG as f32,
                 },
             ),
         )
@@ -575,10 +584,13 @@ impl ForgeView {
                                 "forge/item-title",
                                 &self.forge_item_title,
                             )),
-                            native::spaced(native::wrapped_row("forge/item-meta", meta), 8.),
+                            native::spaced(
+                                native::wrapped_row("forge/item-meta", meta),
+                                native::spacing::SM as f32,
+                            ),
                         ],
                     ),
-                    6.,
+                    native::spacing::XS as f32,
                 ));
                 let reviewable = self.forge_item_kind == "pr";
                 if reviewable {
@@ -707,7 +719,7 @@ impl ForgeView {
                                                 )),
                                             ],
                                         ),
-                                        8.,
+                                        native::spacing::SM as f32,
                                     ),
                                     self.rich_body(
                                         format!("{key}/body"),
@@ -716,14 +728,14 @@ impl ForgeView {
                                     ),
                                 ],
                             ),
-                            4.,
+                            native::spacing::XXS as f32,
                         ),
                         Some(wire::Length::Fill),
                         None,
                     ),
                 ],
             ),
-            8.,
+            native::spacing::SM as f32,
         )
     }
 }

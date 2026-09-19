@@ -13,10 +13,10 @@ impl FilesView {
         let mut rows = vec![kit::inset(
             native::label(format!("{key}/places-label"), "Places"),
             wire::Edges {
-                top: 10.,
-                right: 10.,
+                top: native::spacing::MD as f32,
+                right: native::spacing::MD as f32,
                 bottom: 2.,
-                left: 10.,
+                left: native::spacing::MD as f32,
             },
         )];
         rows.push(self.place(format!("{key}/place/shared"), "Shared", "/shared"));
@@ -33,10 +33,10 @@ impl FilesView {
             rows.push(kit::inset(
                 native::label(format!("{key}/homes-label"), "Members"),
                 wire::Edges {
-                    top: 12.,
-                    right: 10.,
+                    top: native::spacing::LG as f32,
+                    right: native::spacing::MD as f32,
                     bottom: 2.,
-                    left: 10.,
+                    left: native::spacing::MD as f32,
                 },
             ));
             for entry in others {
@@ -50,10 +50,10 @@ impl FilesView {
         rows.push(kit::inset(
             native::label(format!("{key}/recents-label"), "Recents"),
             wire::Edges {
-                top: 12.,
-                right: 10.,
+                top: native::spacing::LG as f32,
+                right: native::spacing::MD as f32,
                 bottom: 2.,
-                left: 10.,
+                left: native::spacing::MD as f32,
             },
         ));
         if !self.history_error.is_empty() {
@@ -66,7 +66,7 @@ impl FilesView {
                     )),
                     Tone::Danger,
                 ),
-                wire::Edges::all(10.),
+                wire::Edges::all(native::spacing::MD as f32),
             ));
         }
         let quiet = self.history.is_empty() && self.history_error.is_empty();
@@ -74,10 +74,10 @@ impl FilesView {
             rows.push(kit::inset(
                 native::caption(format!("{key}/no-recents"), "No snapshots yet."),
                 wire::Edges {
-                    top: 4.,
-                    right: 10.,
-                    bottom: 4.,
-                    left: 10.,
+                    top: native::spacing::XXS as f32,
+                    right: native::spacing::MD as f32,
+                    bottom: native::spacing::XXS as f32,
+                    left: native::spacing::MD as f32,
                 },
             ));
         }
@@ -92,9 +92,9 @@ impl FilesView {
                     native::spaced(native::column(format!("{key}/rows"), rows), 2.),
                     wire::Edges {
                         top: 0.,
-                        right: 4.,
-                        bottom: 8.,
-                        left: 4.,
+                        right: native::spacing::XXS as f32,
+                        bottom: native::spacing::SM as f32,
+                        left: native::spacing::XXS as f32,
                     },
                 ),
             ),
@@ -119,7 +119,7 @@ impl FilesView {
                     native::nowrap(native::text(format!("{key}/name"), name)),
                 ],
             ),
-            6.,
+            native::spacing::XS as f32,
         );
         let mut row = native::list_row(
             key,
@@ -129,10 +129,10 @@ impl FilesView {
         );
         if let wire::Node::Button { label, padding, .. } = &mut row {
             *padding = Some(wire::Edges {
-                top: 8.,
-                right: 8.,
-                bottom: 8.,
-                left: 8.,
+                top: native::spacing::SM as f32,
+                right: native::spacing::SM as f32,
+                bottom: native::spacing::SM as f32,
+                left: native::spacing::SM as f32,
             });
             *label = Some(format!("Go to {path}"));
         }
@@ -161,7 +161,7 @@ impl FilesView {
                     )),
                 ],
             ),
-            4.,
+            native::spacing::XXS as f32,
         );
         let mut row = native::list_row(
             key,
@@ -171,10 +171,10 @@ impl FilesView {
         );
         if let wire::Node::Button { label, padding, .. } = &mut row {
             *padding = Some(wire::Edges {
-                top: 8.,
-                right: 8.,
-                bottom: 8.,
-                left: 8.,
+                top: native::spacing::SM as f32,
+                right: native::spacing::SM as f32,
+                bottom: native::spacing::SM as f32,
+                left: native::spacing::SM as f32,
             });
             *label = Some(format!("Compare snapshot {}", snapshot.short_id));
         }

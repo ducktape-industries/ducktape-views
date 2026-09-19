@@ -256,7 +256,7 @@ pub(super) struct Lettering {
     pub(super) legible: bool,
 }
 /// The inset every island keeps from the stage's edge.
-pub(super) const ISLAND: f32 = 12.;
+pub(super) const ISLAND: f32 = kit::spacing::LG as f32;
 /// The width of the board's own menu. Fixed, because a menu whose width came
 /// from its longest row would change shape as rows come and go — and the rows
 /// come and go with what is under the cursor, so the same press in two places
@@ -441,7 +441,7 @@ impl BoardsView {
             // on — on a narrow window the sheet gives up a few characters of
             // the longest labels rather than hanging off the edge, because a
             // key you cannot see is worse than a description you can guess.
-            let sheet = (w - 2. * 24.).min(700.);
+            let sheet = (w - 2. * kit::spacing::XL as f32).min(700.);
             let card = kit::sized(self.help_card(), Some(Length::Fixed(sheet)), None);
             stage = modal(
                 "boards/help-modal",
@@ -539,10 +539,10 @@ impl BoardsView {
     /// a menu pressed near the bottom of the stage opens upward, and it cannot
     /// wait for a frame to find out how tall it is.
     fn board_menu(&self, items: &[MenuItem]) -> (Node, f32) {
-        const ROW: f32 = 28.;
+        const ROW: f32 = kit::height::CONTROL as f32;
         const GAP: f32 = 2.;
         const RULE: f32 = 1.;
-        const PADDING: f32 = 8.;
+        const PADDING: f32 = kit::spacing::SM as f32;
         let mut rows = Vec::new();
         let mut height = 2. * PADDING;
         for item in items {
@@ -589,7 +589,10 @@ impl BoardsView {
             *expanded = Some(open);
             let name = wide(kit::nowrap(kit::text("boards/switcher/name", title)));
             let caret = kit::nowrap(kit::text("boards/switcher/caret", "▾"));
-            let label = kit::spaced(kit::row("boards/switcher/label", [name, caret]), 6.);
+            let label = kit::spaced(
+                kit::row("boards/switcher/label", [name, caret]),
+                kit::spacing::XS as f32,
+            );
             *content = wire::ButtonContent::Child(Box::new(wide(label)));
             *width = Some(Length::Fill);
         }
@@ -604,7 +607,7 @@ impl BoardsView {
                     kit::nowrap(kit::caption("boards/sync", self.status())),
                 ],
             )),
-            6.,
+            kit::spacing::XS as f32,
         );
         let mut menu = match open {
             false => island("boards/menu", head),
@@ -614,7 +617,10 @@ impl BoardsView {
                 kit::sized(
                     island(
                         "boards/menu",
-                        kit::spaced(kit::column("boards/menu-body", rows), 6.),
+                        kit::spaced(
+                            kit::column("boards/menu-body", rows),
+                            kit::spacing::XS as f32,
+                        ),
                     ),
                     Some(Length::Fixed(room.min(260.))),
                     None,
@@ -801,7 +807,7 @@ impl BoardsView {
                         ),
                     ],
                 ),
-                8.,
+                kit::spacing::SM as f32,
             ),
         );
         kit::sized(strip, Some(Length::Fixed(280.)), None)
@@ -952,13 +958,13 @@ impl BoardsView {
                                     ),
                                 ],
                             ),
-                            8.,
+                            kit::spacing::SM as f32,
                         ),
                         wire::Edges {
                             top: 0.,
-                            right: 24.,
-                            bottom: 24.,
-                            left: 24.,
+                            right: kit::spacing::XL as f32,
+                            bottom: kit::spacing::XL as f32,
+                            left: kit::spacing::XL as f32,
                         },
                     ),
                 ],
@@ -1007,7 +1013,10 @@ impl BoardsView {
         }
         kit::card(
             "boards/next-color",
-            kit::spaced(kit::column("boards/next-color-body", pen), 6.),
+            kit::spaced(
+                kit::column("boards/next-color-body", pen),
+                kit::spacing::XS as f32,
+            ),
         )
     }
     fn swatches(&self) -> Node {
@@ -1016,7 +1025,7 @@ impl BoardsView {
                 "boards/colors",
                 (0..5).map(|color| swatch(color, self.pen.color == color)),
             ),
-            4.,
+            kit::spacing::XXS as f32,
         )
     }
     fn inspector(
@@ -1097,7 +1106,7 @@ impl BoardsView {
                     tile("copy", "Duplicate", "⌘ / Ctrl D", Message::Duplicate),
                 ],
             ),
-            4.,
+            kit::spacing::XXS as f32,
         ));
         if count > 1 {
             properties.push(kit::divider("boards/arrange-rule"));
@@ -1110,7 +1119,7 @@ impl BoardsView {
                             tile(name, label, "Arrange the selection", Message::Arrange(*how))
                         }),
                     ),
-                    4.,
+                    kit::spacing::XXS as f32,
                 ));
             }
             properties.push(kit::divider("boards/arrange-rule-b"));
@@ -1125,7 +1134,10 @@ impl BoardsView {
         )));
         kit::card(
             "boards/properties",
-            kit::spaced(kit::column("boards/properties-body", properties), 6.),
+            kit::spaced(
+                kit::column("boards/properties-body", properties),
+                kit::spacing::XS as f32,
+            ),
         )
     }
     fn notice(&self) -> Option<Node> {
@@ -1156,7 +1168,7 @@ impl BoardsView {
                         self.session.connected,
                     )],
                 ),
-                8.,
+                kit::spacing::SM as f32,
             ));
         }
         if matches!(self.delivery, Delivery::Failed(_)) {
@@ -1180,12 +1192,15 @@ impl BoardsView {
                         ),
                     ],
                 ),
-                8.,
+                kit::spacing::SM as f32,
             ));
         }
         Some(kit::notice(
             "boards/notice",
-            kit::spaced(kit::column("boards/notice-body", children), 8.),
+            kit::spaced(
+                kit::column("boards/notice-body", children),
+                kit::spacing::SM as f32,
+            ),
             kit::Tone::Danger,
         ))
     }
@@ -1255,7 +1270,7 @@ impl BoardsView {
                             .enumerate()
                             .map(|(i, entry)| row(from + i, *entry)),
                     ),
-                    6.,
+                    kit::spacing::XS as f32,
                 ),
                 Some(Length::Fill),
                 None,
@@ -1269,7 +1284,7 @@ impl BoardsView {
                     column("boards/help-right", split, &shortcuts[split..]),
                 ],
             ),
-            24.,
+            kit::spacing::XL as f32,
         );
         kit::card(
             "boards/help-panel",
@@ -1290,7 +1305,7 @@ impl BoardsView {
                         )),
                     ],
                 ),
-                6.,
+                kit::spacing::XS as f32,
             ),
         )
     }
@@ -2807,7 +2822,7 @@ fn plate(id: &str, words: Node, letters: &Lettering, wash: [f32; 4], room: [f32;
 /// the edge of the board is exactly where you are when you right-click the last
 /// shape in a row.
 pub(super) fn menu_origin(press: [f32; 2], size: [f32; 2], viewport: [f32; 2]) -> [f32; 2] {
-    const GUTTER: f32 = 8.;
+    const GUTTER: f32 = kit::spacing::SM as f32;
     let fits_right = press[0] + size[0] + GUTTER <= viewport[0];
     let fits_below = press[1] + size[1] + GUTTER <= viewport[1];
     let x = match fits_right {
@@ -2815,8 +2830,8 @@ pub(super) fn menu_origin(press: [f32; 2], size: [f32; 2], viewport: [f32; 2]) -
         false => press[0] - size[0],
     };
     let y = match fits_below {
-        true => press[1] + 4.,
-        false => press[1] - size[1] - 4.,
+        true => press[1] + kit::spacing::XXS as f32,
+        false => press[1] - size[1] - kit::spacing::XXS as f32,
     };
     [x.max(GUTTER), y.max(GUTTER)]
 }
@@ -2848,12 +2863,12 @@ fn menu_button(item: MenuItem) -> Node {
         *accessible = Some(label.into());
         *description = Some(hint.into());
         *width = Some(Length::Fill);
-        *height = Some(Length::Fixed(28.));
+        *height = Some(Length::Fixed(kit::height::CONTROL as f32));
         *padding = Some(wire::Edges {
             top: 0.,
-            right: 8.,
+            right: kit::spacing::SM as f32,
             bottom: 0.,
-            left: 8.,
+            left: kit::spacing::SM as f32,
         });
     }
     node
@@ -2896,14 +2911,17 @@ fn menu_key(item: MenuItem) -> &'static str {
     }
 }
 fn island(key: &str, content: Node) -> Node {
-    kit::padded(kit::card(key, content), wire::Edges::all(4.))
+    kit::padded(
+        kit::card(key, content),
+        wire::Edges::all(kit::spacing::XXS as f32),
+    )
 }
 /// A card over a shaded stage that a press anywhere else closes.
 fn modal(key: &str, label: &str, base: Node, card: Node, dismiss: Message) -> Node {
     Node::Overlay {
         key: key.into(),
         label: Some(label.into()),
-        padding: 24.,
+        padding: kit::spacing::XL as f32,
         backdrop: Rgba([0., 0., 0., 0.18]),
         align_x: AlignX::Center,
         align_y: AlignY::Center,
@@ -2947,12 +2965,12 @@ fn button(
     } = &mut node
     {
         *description = Some(hint.into());
-        *height = Some(Length::Fixed(28.));
+        *height = Some(Length::Fixed(kit::height::CONTROL as f32));
         *padding = Some(wire::Edges {
             top: 0.,
-            right: 8.,
+            right: kit::spacing::SM as f32,
             bottom: 0.,
-            left: 8.,
+            left: kit::spacing::SM as f32,
         });
     }
     node
@@ -3122,8 +3140,8 @@ fn tool_button_message(
         // the glyph sits a little up and left of centre, clear of its key
         *padding = Some(wire::Edges {
             top: 0.,
-            right: 6.,
-            bottom: 6.,
+            right: kit::spacing::XS as f32,
+            bottom: kit::spacing::XS as f32,
             left: 0.,
         });
     }
@@ -3178,8 +3196,8 @@ fn tool_button_message(
     Node::Tooltip {
         key: format!("boards/tool-tip/{name}"),
         position: wire::TooltipPosition::Bottom,
-        gap: 6.,
-        padding: 6.,
+        gap: kit::spacing::XS as f32,
+        padding: kit::spacing::XS as f32,
         delay_ms: 350,
         snap: false,
         style: Default::default(),
@@ -3235,7 +3253,7 @@ fn icon_button(
         *checked = Some(on);
         *width = Some(Length::Fixed(28.));
         *height = Some(Length::Fixed(28.));
-        *padding = Some(wire::Edges::all(6.));
+        *padding = Some(wire::Edges::all(kit::spacing::XS as f32));
         *description = Some(hint.into());
     }
     node
@@ -3262,7 +3280,7 @@ fn text_size_row(current: TextSize) -> Node {
                 )
             }),
         ),
-        4.,
+        kit::spacing::XXS as f32,
     )
 }
 /// Whether the shape's body is painted, the one it is set to checked.
@@ -3286,7 +3304,7 @@ fn fill_row(current: Fill) -> Node {
                 )
             }),
         ),
-        4.,
+        kit::spacing::XXS as f32,
     )
 }
 /// Whether the shape's outline is unbroken, the one it is set to checked.
@@ -3310,7 +3328,7 @@ fn dash_row(current: Dash) -> Node {
                 )
             }),
         ),
-        4.,
+        kit::spacing::XXS as f32,
     )
 }
 /// How heavy the shape's line is, the one it is set to checked. Four steps in
@@ -3338,7 +3356,7 @@ fn weight_row(current: Weight) -> Node {
                 )
             }),
         ),
-        4.,
+        kit::spacing::XXS as f32,
     )
 }
 /// Which ends of the arrow carry a head, the one it is set to checked. Three
@@ -3366,7 +3384,7 @@ fn heads_row(current: Heads) -> Node {
                 )
             }),
         ),
-        4.,
+        kit::spacing::XXS as f32,
     )
 }
 /// Where this card's words sit across it, the one it is set to checked.
@@ -3391,7 +3409,7 @@ fn align_row(current: Align) -> Node {
                 )
             }),
         ),
-        4.,
+        kit::spacing::XXS as f32,
     )
 }
 /// A 28px control labelled with a letter rather than a glyph, checked when

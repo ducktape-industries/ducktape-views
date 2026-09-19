@@ -40,12 +40,12 @@ pub(super) fn sidebar_row(mut button: wire::Node, name: String) -> wire::Node {
     } = &mut button
     {
         *label = Some(name);
-        *height = Some(wire::Length::Fixed(28.));
+        *height = Some(wire::Length::Fixed(native::height::CONTROL as f32));
         *padding = Some(wire::Edges {
             top: 0.,
-            right: 8.,
+            right: native::spacing::SM as f32,
             bottom: 0.,
-            left: 8.,
+            left: native::spacing::SM as f32,
         });
     }
     button
@@ -109,7 +109,10 @@ impl ChatView {
         } else {
             Some(slots::message(choose(channel.id)))
         };
-        let content = native::spaced(native::centered_row(format!("{key}/row"), children), 6.);
+        let content = native::spaced(
+            native::centered_row(format!("{key}/row"), children),
+            native::spacing::XS as f32,
+        );
         let row = sidebar_row(
             native::list_row(key.clone(), content, selected, action),
             channel.name,
@@ -142,7 +145,10 @@ impl ChatView {
         }
         let can_join = !(self.busy || channel.archived);
         let action = can_join.then(|| slots::message(Message::JoinVoice(channel.id)));
-        let content = native::spaced(native::centered_row(format!("{key}/row"), children), 6.);
+        let content = native::spaced(
+            native::centered_row(format!("{key}/row"), children),
+            native::spacing::XS as f32,
+        );
         let row = sidebar_row(
             native::list_row(key.clone(), content, joined, action),
             channel.name,
@@ -193,10 +199,10 @@ impl ChatView {
             spacing, padding, ..
         } = &mut row
         {
-            *spacing = Some(8.);
+            *spacing = Some(native::spacing::SM as f32);
             *padding = Some(wire::Edges {
                 top: 2.,
-                right: 8.,
+                right: native::spacing::SM as f32,
                 bottom: 2.,
                 left: 28.,
             });
@@ -237,7 +243,7 @@ impl ChatView {
                                 native::nowrap(native::caption(format!("{key}/meta"), hit.meta)),
                             ],
                         ),
-                        6.,
+                        native::spacing::XS as f32,
                     ),
                     native::wrapping(native::secondary(format!("{key}/text"), hit.text.clone())),
                 ],
@@ -249,10 +255,10 @@ impl ChatView {
             *label = Some(hit.text);
             // two lines a hit: more air than a one-line room row
             *padding = Some(wire::Edges {
-                top: 6.,
-                right: 8.,
-                bottom: 6.,
-                left: 8.,
+                top: native::spacing::XS as f32,
+                right: native::spacing::SM as f32,
+                bottom: native::spacing::XS as f32,
+                left: native::spacing::SM as f32,
             });
         }
         button

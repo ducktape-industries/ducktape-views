@@ -2663,10 +2663,7 @@ pub(super) fn quoted(text: &str) -> Option<String> {
     if text.trim().is_empty() {
         return None;
     }
-    let mut shown: String = text.chars().take(ROOM).collect();
-    if text.chars().nth(ROOM).is_some() {
-        shown.push('…');
-    }
+    let shown = ducktape_view_guest::kit::ellipsize(text, ROOM);
     Some(format!("“{shown}”"))
 }
 /// What a card says now, for the writer about to replace it.

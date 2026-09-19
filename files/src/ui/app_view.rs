@@ -135,12 +135,15 @@ impl FilesView {
         let notices = self.notices(&key);
         if !notices.is_empty() {
             children.push(native::padded(
-                native::spaced(native::column(format!("{key}/notices"), notices), 8.),
+                native::spaced(
+                    native::column(format!("{key}/notices"), notices),
+                    native::spacing::SM as f32,
+                ),
                 wire::Edges {
-                    top: 8.,
-                    right: 10.,
+                    top: native::spacing::SM as f32,
+                    right: native::spacing::MD as f32,
                     bottom: 0.,
-                    left: 10.,
+                    left: native::spacing::MD as f32,
                 },
             ));
         }
@@ -200,7 +203,7 @@ impl FilesView {
                 "Refresh",
                 Some(Message::Refresh),
             ),
-            native::gap(6.),
+            native::gap(native::spacing::XS as f32),
             native::sized(
                 native::spaced(
                     native::centered_row(
@@ -227,7 +230,7 @@ impl FilesView {
                 Some(wire::Length::Shrink),
                 None,
             ),
-            native::gap(6.),
+            native::gap(native::spacing::XS as f32),
             kit::action(
                 format!("{key}/new-folder"),
                 "New folder",
@@ -272,14 +275,17 @@ impl FilesView {
         )));
         native::padded(
             native::aligned(
-                native::spaced(native::wrapped_row(key, children), 6.),
+                native::spaced(
+                    native::wrapped_row(key, children),
+                    native::spacing::XS as f32,
+                ),
                 wire::AlignX::Center,
             ),
             wire::Edges {
-                top: 6.,
-                bottom: 6.,
-                left: 8.,
-                right: 8.,
+                top: native::spacing::XS as f32,
+                bottom: native::spacing::XS as f32,
+                left: native::spacing::SM as f32,
+                right: native::spacing::SM as f32,
             },
         )
     }
@@ -312,9 +318,9 @@ impl FilesView {
                 native::spaced(native::centered_row(key, children), 2.),
                 wire::Edges {
                     top: 0.,
-                    right: 10.,
-                    bottom: 4.,
-                    left: 10.,
+                    right: native::spacing::MD as f32,
+                    bottom: native::spacing::XXS as f32,
+                    left: native::spacing::MD as f32,
                 },
             ),
             Some(wire::Length::Fill),
@@ -370,7 +376,7 @@ impl FilesView {
                             ),
                         ],
                     ),
-                    12.,
+                    native::spacing::LG as f32,
                 ),
                 Tone::Warning,
             ));
@@ -423,12 +429,15 @@ impl FilesView {
         )));
         let mut bar = native::sized(
             native::padded(
-                native::spaced(native::centered_row(key, children), 8.),
+                native::spaced(
+                    native::centered_row(key, children),
+                    native::spacing::SM as f32,
+                ),
                 wire::Edges {
                     top: 0.,
-                    right: 10.,
+                    right: native::spacing::MD as f32,
                     bottom: 0.,
-                    left: 10.,
+                    left: native::spacing::MD as f32,
                 },
             ),
             Some(wire::Length::Fill),
