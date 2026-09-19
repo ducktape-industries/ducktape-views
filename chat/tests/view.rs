@@ -1693,3 +1693,46 @@ fn a_lost_creation_reply_is_reconciled_before_retrying_the_write() {
         assert!(!has_text(&frame, "Create a channel"));
     });
 }
+
+/// Boots on a network that has no channel at all: the session names no room
+/// and the sidebar read comes back empty. Not `seated_view`, which hands the
+/// view three channels.
+fn empty_network() -> Frame {
+    boot_native();
+    let frame = nameable(chat_view::tick_native(Vec::new()));
+    let props = request(&frame, "chat.props").id;
+    let mut empty = session(true);
+    empty.active_channel = String::new();
+    let frame = nameable(chat_view::tick_native(vec![item(props, &encoded(&empty))]));
+    let sidebar = view_asking(&frame, "channels").id;
+    let none = serde_json::to_vec(
+        &serde_json::json!({"channels": {"channels": [], "has_more": false, "next_after": null}}),
+    )
+    .expect("the empty sidebar encodes");
+    nameable(chat_view::tick_native(vec![answer(sidebar, &none)]))
+}
+
+/// A network with no channel says so and offers the one way on. What it must
+/// not do is what it did: draw a nameless `#` room, tell the reader this is the
+/// very beginning of nothing, and hang a composer of dead buttons under it.
+#[test]
+fn a_network_with_no_channel_says_so_and_offers_the_way_to_make_one() {
+    on_a_deep_stack(|| {
+        let frame = empty_network();
+        assert!(has_text(&frame, "No channels yet"), "{:?}", texts(&frame));
+        for lie in ["This is the very beginning of #", "#", "Send"] {
+            assert!(
+                !has_text(&frame, lie),
+                "`{lie}` with no channel behind it: {:?}",
+                texts(&frame)
+            );
+        }
+        // the action opens the very form the sidebar's New channel opens
+        let frame = nameable(chat_view::tick_native(press(&frame, "Create a channel")));
+        assert!(
+            has_text(&frame, "Voice room: Off"),
+            "the create form did not open: {:?}",
+            texts(&frame)
+        );
+    });
+}
