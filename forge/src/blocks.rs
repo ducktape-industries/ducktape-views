@@ -265,7 +265,7 @@ impl Names {
         };
         self.of_handle(&handle)
             .map(str::to_owned)
-            .unwrap_or_else(|| short_label(key_hex))
+            .unwrap_or_else(|| ducktape_view_guest::kit::short_id(key_hex, 8))
     }
 }
 
@@ -295,7 +295,7 @@ pub fn author_display(author: &str, names: &Names) -> String {
 /// frame: a user is named by the shortened key.
 fn author_name(author: &str) -> String {
     match author.split_once(':') {
-        Some(("user", id)) => format!("user {}", short_label(id)),
+        Some(("user", id)) => format!("user {}", ducktape_view_guest::kit::short_id(id, 8)),
         Some(("acct", account)) => format!("account {account}"),
         Some(("module", id)) => id.to_owned(),
         Some(_) | None => "system".to_owned(),
@@ -359,14 +359,6 @@ fn mention_account(party: &Party) -> String {
         Party::Account(account) => account.to_string(),
         Party::Key(_) | Party::Module(_) | Party::System => String::new(),
     }
-}
-
-pub fn short_label(id: &str) -> String {
-    let mut label: String = id.chars().take(8).collect();
-    if id.chars().count() > 8 {
-        label.push('…');
-    }
-    label
 }
 
 pub fn hex_encode(bytes: &[u8]) -> String {

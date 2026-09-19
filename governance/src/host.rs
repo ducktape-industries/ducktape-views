@@ -417,7 +417,7 @@ fn principal_label(principal: &serde_json::Value, voter_kind: &serde_json::Value
     if account_mode && let Ok(number) = <[u8; 8]>::try_from(bytes.as_slice()) {
         return format!("account #{}", u64::from_le_bytes(number));
     }
-    short_label(&hex_encode(&bytes))
+    ducktape_view_guest::kit::short_id(&hex_encode(&bytes), 8)
 }
 
 /// The block each settled proposal was EXECUTED at, off the recent op
@@ -475,7 +475,9 @@ pub fn gov_action_fields(action: &serde_json::Value) -> Vec<Field> {
         return Vec::new();
     };
     let text = |name: &str| payload[name].as_str().unwrap_or_default().to_string();
-    let bytes = |name: &str| short_label(&hex_encode(&json_bytes(&payload[name])));
+    let bytes = |name: &str| {
+        ducktape_view_guest::kit::short_id(&hex_encode(&json_bytes(&payload[name])), 8)
+    };
     let module = || {
         vec![
             Field::prose("Module", text("name")),
@@ -625,14 +627,6 @@ fn hex_encode(bytes: &[u8]) -> String {
         let _ = write!(output, "{byte:02x}");
     }
     output
-}
-
-fn short_label(id: &str) -> String {
-    let mut label: String = id.chars().take(8).collect();
-    if id.chars().count() > 8 {
-        label.push('…');
-    }
-    label
 }
 
 fn count_i64(value: usize) -> i64 {

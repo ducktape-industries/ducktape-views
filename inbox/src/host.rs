@@ -446,7 +446,7 @@ impl Directory {
                 .get(key)
                 .filter(|name| !name.is_empty())
                 .cloned()
-                .unwrap_or_else(|| short_label(key)),
+                .unwrap_or_else(|| ducktape_view_guest::kit::short_id(key, 8)),
             Some(("module", module)) => capitalized(module),
             _ => "System".to_owned(),
         }
@@ -959,14 +959,6 @@ fn preview(text: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-fn short_label(id: &str) -> String {
-    let mut label: String = id.chars().take(8).collect();
-    if id.chars().count() > 8 {
-        label.push('…');
-    }
-    label
 }
 
 fn hex_encode(bytes: &[u8]) -> String {

@@ -715,8 +715,10 @@ impl Names {
             true => key_hex.to_owned(),
             false => format!("user:{key_hex}"),
         };
-        self.name_of_handle(&handle)
-            .map_or_else(|| short_label(key_hex), str::to_owned)
+        self.name_of_handle(&handle).map_or_else(
+            || ducktape_view_guest::kit::short_id(key_hex, 8),
+            str::to_owned,
+        )
     }
 
     /// The account a signing key holds, if the directory knows one.
@@ -2249,7 +2251,7 @@ pub fn author_display(author: &str, names: &Names) -> String {
 
 fn author_name(author: &str) -> String {
     match author.split_once(':') {
-        Some(("user", id)) => format!("user {}", short_label(id)),
+        Some(("user", id)) => format!("user {}", ducktape_view_guest::kit::short_id(id, 8)),
         Some(("acct", account)) => format!("account {account}"),
         Some(("module", id)) => id.to_owned(),
         _ => "system".into(),
@@ -2283,14 +2285,6 @@ fn avatar_kind(author: &str, names: &Names) -> &'static str {
         },
         Some(_) | None => "agent",
     }
-}
-
-fn short_label(id: &str) -> String {
-    let mut label: String = id.chars().take(8).collect();
-    if id.chars().count() > 8 {
-        label.push('…');
-    }
-    label
 }
 
 fn json_bytes(value: &serde_json::Value) -> Vec<u8> {

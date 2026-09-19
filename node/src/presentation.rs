@@ -251,12 +251,18 @@ impl NodeView {
             let Node::Button { label, .. } = &mut copy else {
                 unreachable!("a copy control is a button")
             };
-            *label = Some(format!("Copy peer key {}", host::short_label(&peer.key)));
+            *label = Some(format!(
+                "Copy peer key {}",
+                ducktape_view_guest::kit::short_id(&peer.key, 8)
+            ));
             peers.push(Self::list_row(
                 &key,
                 [
                     kit::sized(
-                        mono(format!("{key}/key"), host::short_label(&peer.key)),
+                        mono(
+                            format!("{key}/key"),
+                            ducktape_view_guest::kit::short_id(&peer.key, 8),
+                        ),
                         Some(Length::Fill),
                         None,
                     ),
@@ -516,7 +522,7 @@ impl NodeView {
                         [
                             mono(
                                 format!("{key}/pending/value"),
-                                host::short_digest(&module.pending_hash),
+                                ducktape_view_guest::kit::short_id(&module.pending_hash, 12),
                             ),
                             caption(
                                 format!("{key}/activation"),
@@ -811,7 +817,12 @@ impl NodeView {
 
     /// A digest reading: the head of it on the row, all of it on the copy.
     fn digest(key: &str, label: &str, value: &str) -> Node {
-        Self::copyable_showing(key, label, value, &host::short_digest(value))
+        Self::copyable_showing(
+            key,
+            label,
+            value,
+            &ducktape_view_guest::kit::short_id(value, 12),
+        )
     }
 
     /// A reading the reader can take with them: the value, and a ghost copy
