@@ -29,56 +29,23 @@ impl super::ChatView {
             on_scroll: None,
             content: Box::new(self.chat_screen(node_scope.clone())),
         };
-        // A message menu stacks over the screen: a transparent backdrop
-        // that closes it on any press, then the card floated at the press.
-        // (Not an `Overlay`: its modal wrapper paints a surface at the
-        // un-translated origin, which a floated card leaves behind.)
-        let mut layers = vec![screen];
-        if let Some(menu) = self.floating_menu(&node_scope) {
-            let close = self.close_menu();
-            layers.push(wire::Node::MouseArea {
-                key: format!("{node_scope}/menu-backdrop"),
-                role: Some(wire::Role::Button),
-                label: Some("Close menu".into()),
-                expanded: None,
-                selected: None,
-                checked: None,
-                on_press: Some(slots::message(close.clone())),
-                on_release: None,
-                on_double_click: None,
-                on_right_press: Some(slots::message(close)),
-                on_right_release: None,
-                on_middle_press: None,
-                on_middle_release: None,
-                on_enter: None,
-                on_exit: None,
-                on_move: None,
-                on_press_at: None,
-                on_scroll: None,
-                content: Box::new(native::space(
-                    Some(wire::Length::Fill),
-                    Some(wire::Length::Fill),
-                )),
-            });
-            layers.push(menu);
-        }
-        // `under: 1`: the screen lies under the in-flow backdrop; the menu
-        // floats over both.
-        let stack = wire::Node::Stack {
-            key: format!("{node_scope}/menu-stack"),
-            width: Some(wire::Length::Fill),
-            height: Some(wire::Length::Fill),
-            padding: None,
-            background: None,
-            border: None,
-            clip: false,
-            under: 1,
-            children: layers,
+        let overlay = match self.floating_menu(&node_scope) {
+            None => screen,
+            Some(menu) => wire::Node::Overlay {
+                key: format!("{node_scope}/menu-overlay"),
+                label: Some("Message menu".into()),
+                padding: 0.,
+                backdrop: wire::Rgba([0.; 4]),
+                align_x: wire::AlignX::Left,
+                align_y: wire::AlignY::Top,
+                on_dismiss: Some(slots::message(self.close_menu())),
+                children: vec![screen, menu],
+            },
         };
         // An open attachment previews in a modal card over everything: the
         // screen dims, and a press outside the card closes it.
         let overlay = match self.attachment_preview(&node_scope) {
-            None => stack,
+            None => overlay,
             Some(card) => wire::Node::Overlay {
                 key: format!("{node_scope}/preview-overlay"),
                 label: Some("Attachment preview".into()),
@@ -87,7 +54,7 @@ impl super::ChatView {
                 align_x: wire::AlignX::Center,
                 align_y: wire::AlignY::Center,
                 on_dismiss: Some(slots::message(Message::ClosePreview)),
-                children: vec![stack, card],
+                children: vec![overlay, card],
             },
         };
         let overlay = match self.channel_creation(&format!("{node_scope}/create")) {

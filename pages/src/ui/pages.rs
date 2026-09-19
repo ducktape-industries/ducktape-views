@@ -90,51 +90,21 @@ impl PagesView {
                 0.,
             ))),
         };
-        // The screen always sits in a stack: a mouse area reports no size of
-        // its own, so a sensor around it would collapse it. A row menu adds
-        // a transparent backdrop that closes it on any press, then the card
-        // floated at the press.
-        let mut layers = vec![screen];
-        if let Some(menu) = self.page_row_menu() {
-            layers.push(page_menu_backdrop());
-            layers.push(menu);
+        // A row menu becomes a modal over the screen, with its card floated at
+        // the press.
+        match self.page_row_menu() {
+            None => screen,
+            Some(menu) => Node::Overlay {
+                key: format!("{PAGE_KEY}/menu-overlay"),
+                label: Some("Page menu".into()),
+                padding: 0.,
+                backdrop: wire::Rgba([0.; 4]),
+                align_x: wire::AlignX::Left,
+                align_y: wire::AlignY::Top,
+                on_dismiss: Some(slots::message(Message::ClosePageMenu)),
+                children: vec![screen, menu],
+            },
         }
-        Node::Stack {
-            key: format!("{PAGE_KEY}/menu-stack"),
-            width: Some(Length::Fill),
-            height: Some(Length::Fill),
-            padding: None,
-            background: None,
-            border: None,
-            clip: false,
-            under: 1,
-            children: layers,
-        }
-    }
-}
-
-/// The press-through sheet under an open row menu.
-fn page_menu_backdrop() -> Node {
-    Node::MouseArea {
-        key: format!("{PAGE_KEY}/menu-backdrop"),
-        role: Some(wire::Role::Button),
-        label: Some("Close the menu".into()),
-        expanded: None,
-        selected: None,
-        checked: None,
-        on_press: Some(slots::message(Message::ClosePageMenu)),
-        on_release: None,
-        on_double_click: None,
-        on_right_press: Some(slots::message(Message::ClosePageMenu)),
-        on_right_release: None,
-        on_middle_press: None,
-        on_middle_release: None,
-        on_enter: None,
-        on_exit: None,
-        on_move: None,
-        on_press_at: None,
-        on_scroll: None,
-        content: Box::new(kit::space(Some(Length::Fill), Some(Length::Fill))),
     }
 }
 

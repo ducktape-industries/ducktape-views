@@ -4490,6 +4490,47 @@ fn overlays_are_named_only_when_blocking() {
         "persistent board islands must not be named dialogs"
     );
 
+    let mut menu = view();
+    menu.on_size(1400., 900.);
+    card(&mut menu, "a", 40);
+    menu.cursor = menu.screen(400., 300.);
+    menu.on_open_menu();
+    assert_eq!(named_dialogs(&menu.view()), ["boards/menu-overlay"]);
+    let mut menu_overlays = 0;
+    let mut old_backdrops = 0;
+    menu.view().for_each_mut(&mut |node| match node {
+        wire::Node::Overlay {
+            key,
+            label,
+            backdrop,
+            on_dismiss,
+            children,
+            ..
+        } if key == "boards/menu-overlay" => {
+            assert_eq!(label.as_deref(), Some("Board menu"));
+            assert_eq!(*backdrop, wire::Rgba([0.; 4]));
+            assert!(on_dismiss.is_some());
+            assert_eq!(children.len(), 2);
+            assert_eq!(children[0].key(), Some("boards/stage"));
+            let mut floats = 0;
+            children[1].for_each_mut(&mut |child| {
+                if matches!(child, wire::Node::Float { key, .. } if key == "boards/menu-card") {
+                    floats += 1;
+                }
+            });
+            assert_eq!(floats, 1, "the board menu dialog carries its Float");
+            menu_overlays += 1;
+        }
+        wire::Node::MouseArea { key, .. } if key == "boards/menu-backdrop" => {
+            old_backdrops += 1;
+        }
+        _ => {}
+    });
+    assert_eq!(menu_overlays, 1, "one named board menu dialog is open");
+    assert_eq!(old_backdrops, 0, "the old actionable backdrop remains");
+    menu.on_close_menu();
+    assert_eq!(named_dialogs(&menu.view()), Vec::<String>::new());
+
     let mut picker = view();
     picker.on_size(1400., 900.);
     picker.on_board_picker();

@@ -599,7 +599,7 @@ mod tests {
         assert!(has(&present, "PagesView/root/pages/page/beta/more"));
         assert!(has(&present, "PagesView/root/pages/page/beta/area"));
         assert!(!has(&present, "PagesView/root/pages/page/beta/menu"));
-        assert!(!has(&present, "PagesView/root/pages/menu-backdrop"));
+        assert!(!has(&present, "PagesView/root/pages/menu-overlay"));
 
         app.update(Message::AddSubpage("alpha".into()));
         assert!(app.busy, "the host is asked for the page");
@@ -618,7 +618,50 @@ mod tests {
         let opened = keys(&frame);
         assert!(has(&opened, "PagesView/root/pages/page/beta/menu"));
         assert!(has(&opened, "PagesView/root/pages/page/beta/menu/delete"));
-        assert!(has(&opened, "PagesView/root/pages/menu-backdrop"));
+        assert!(has(&opened, "PagesView/root/pages/menu-overlay"));
+
+        let mut menu_overlays = 0;
+        let mut old_backdrops = 0;
+        view(&app).for_each_mut(&mut |node| match node {
+            Node::Overlay {
+                key,
+                label,
+                backdrop,
+                on_dismiss,
+                children,
+                ..
+            } if key == "PagesView/root/pages/menu-overlay" => {
+                assert_eq!(label.as_deref(), Some("Page menu"));
+                assert_eq!(*backdrop, wire::Rgba([0.; 4]));
+                assert!(on_dismiss.is_some());
+                assert_eq!(children.len(), 2);
+                assert_eq!(children[0].key(), Some("PagesView/root/pages/press-area"));
+                let mut floats = 0;
+                children[1].for_each_mut(&mut |child| {
+                    if matches!(child, Node::Float { key, .. } if key == "PagesView/root/pages/page/beta/menu") {
+                        floats += 1;
+                    }
+                });
+                assert_eq!(floats, 1, "the page menu dialog carries its Float");
+                menu_overlays += 1;
+            }
+            Node::MouseArea { key, .. } if key == "PagesView/root/pages/menu-backdrop" => {
+                old_backdrops += 1;
+            }
+            _ => {}
+        });
+        assert_eq!(menu_overlays, 1, "one named page menu dialog is open");
+        assert_eq!(old_backdrops, 0, "the old actionable backdrop remains");
+
+        app.update(Message::ClosePageMenu);
+        assert!(app.page_menu_page.is_empty());
+        assert!(!keys(&wire::Frame {
+            root: Some(view(&app)),
+            ..Default::default()
+        })
+        .iter()
+        .any(|key| key == "PagesView/root/pages/menu-overlay"));
+        app.update(Message::OpenPageRowMenu("beta".into()));
 
         app.update(Message::ArmPageDelete("beta".into()));
         assert!(app.page_delete_armed);
@@ -630,6 +673,7 @@ mod tests {
             ..Default::default()
         };
         assert!(!has(&keys(&frame), "PagesView/root/pages/page/beta/menu"));
+        assert!(!has(&keys(&frame), "PagesView/root/pages/menu-overlay"));
 
         app.update(Message::DeletePageSubmit);
         assert!(app.busy);
@@ -645,9 +689,8 @@ mod tests {
     }
 
     /// The host lays a float out in the box it is handed and paints its
-    /// surface and shadow across that whole box. Handed the screen's stack
-    /// layer, the row menu drew a slab from the press to the window's right
-    /// edge over the page title; its box must be the card's own size.
+    /// surface and shadow across that whole box; the row menu's box must be
+    /// the card's own size.
     #[test]
     fn the_row_menu_float_is_laid_out_in_a_box_of_the_card_size() {
         fn parent_of_float<'a>(node: &'a wire::Node, key: &str) -> Option<&'a wire::Node> {

@@ -313,8 +313,7 @@ impl PagesView {
         let shade = if kit::is_dark() { 0.5 } else { 0.16 };
         // The box around the float, not the card inside it: the host lays a
         // float out in the box it is handed and paints its surface across
-        // that box. The stack layer is the whole screen — a slab from the
-        // press to the right edge over the page title.
+        // that box, so the modal hands it the card's own size.
         let float = Node::Float {
             key: key.clone(),
             x: x as f32,
