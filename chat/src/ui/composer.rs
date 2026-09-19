@@ -65,18 +65,31 @@ impl ChatView {
     ) -> wire::Node {
         let draft = self.composers.get(&scope).cloned().unwrap_or_default();
         let choices = crate::host::composer_choices(&self.channel_members);
+        // The scope is the draft's identity — one per room, per thread, per
+        // message being edited — so it is also the editor document's. The node
+        // key is the place on screen, and that place shows a different draft
+        // every time the reader moves.
+        let document = scope.clone();
         let route = Route {
             scope,
             key: key.clone(),
             target,
             connection: self.connection_serial,
         };
-        composer::view(&draft, &key, hint, editable, &choices, move |event| {
-            Message::Composer(Box::new(ComposerMessage::Editor(
-                route.clone(),
-                Box::new(event),
-            )))
-        })
+        composer::view(
+            &draft,
+            &key,
+            &document,
+            hint,
+            editable,
+            &choices,
+            move |event| {
+                Message::Composer(Box::new(ComposerMessage::Editor(
+                    route.clone(),
+                    Box::new(event),
+                )))
+            },
+        )
     }
     pub(crate) fn on_composer(&mut self, message: ComposerMessage) -> Task<Message> {
         match message {

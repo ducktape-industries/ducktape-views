@@ -131,9 +131,16 @@ fn key_tag(
     }
 }
 
+/// `key` names the NODE — the accessibility tree and every test door address
+/// it. `document` names the DOCUMENT, and the host keys its native editor
+/// state by that, not by the node key. They are not the same identity: one
+/// place on screen presents a different draft as the reader moves between
+/// rooms, so each draft must carry its own document id or the host hands the
+/// new draft the old one's text and drops every transaction after it.
 pub fn editor<M: 'static>(
     draft: &Draft,
     key: &str,
+    document: &str,
     placeholder: &str,
     editable: bool,
     choices: &[MentionChoice],
@@ -141,9 +148,9 @@ pub fn editor<M: 'static>(
 ) -> wire::Node {
     let wrap: Rc<dyn Fn(Event<M>) -> M> = Rc::new(wrap);
     let doc_wrap = wrap.clone();
-    let (document, on_document) = draft
-        .editor
-        .document(key.into(), move |update| doc_wrap(Event::Document(update)));
+    let (document, on_document) = draft.editor.document(document.into(), move |update| {
+        doc_wrap(Event::Document(update))
+    });
     let draft = draft.clone();
     let choices = choices.to_vec();
     let bare = Modifiers::default();
@@ -428,6 +435,7 @@ fn chip(key: &str, name: &str, note: &str, tone: kit::Tone, remove: Option<u32>)
 pub fn view<M: Clone + 'static>(
     draft: &Draft,
     key: &str,
+    document: &str,
     hint: &str,
     editable: bool,
     choices: &[MentionChoice],
@@ -490,6 +498,7 @@ pub fn view<M: Clone + 'static>(
     rows.push(editor(
         draft,
         &editor_key,
+        document,
         hint,
         editable,
         choices,
@@ -696,7 +705,49 @@ mod tests {
     }
 
     fn drawn(draft: &Draft) -> wire::Node {
-        view(draft, "c", "Message #general", true, &[], |_: Event<()>| ())
+        view(
+            draft,
+            "c",
+            "c",
+            "Message #general",
+            true,
+            &[],
+            |_: Event<()>| (),
+        )
+    }
+
+    /// ONE PLACE ON SCREEN, ONE DOCUMENT PER DRAFT. The host keys its native
+    /// editor state by the document id, not by the node key, so two drafts
+    /// presented at the same key under one id are one document to the host:
+    /// it hands the second draft the first's text and then drops every
+    /// transaction, because the guest's `before` never matches. The node key
+    /// is what the accessibility tree and every test door address, so it must
+    /// NOT move when the document does.
+    #[test]
+    fn two_drafts_at_one_key_are_two_documents_the_host_can_tell_apart() {
+        let field = |draft: &Draft, document: &str| {
+            let wire::Node::Editor { key, document, .. } = editor(
+                draft,
+                "c/editor",
+                document,
+                "Message",
+                true,
+                &[],
+                |_: Event<()>| (),
+            ) else {
+                panic!("the composer's field is an editor node");
+            };
+            (key, document.document)
+        };
+        let (a_key, a_document) = field(&Draft::from_body("room a draft", &[]), "chat\u{1f}room-a");
+        let (b_key, b_document) = field(&Draft::default(), "chat\u{1f}room-b");
+        assert_eq!(a_key, b_key, "the field keeps its place and its name");
+        assert_ne!(
+            a_document, b_document,
+            "two drafts the host must not share text between"
+        );
+        assert_eq!(a_document, "chat\u{1f}room-a");
+        assert_eq!(b_document, "chat\u{1f}room-b");
     }
 
     /// The composer's shape is a claim a reader can see at a glance: ONE
@@ -827,7 +878,15 @@ mod tests {
 
     /// The keys this frame's field asks the host to route to the guest.
     fn claimed(draft: &Draft) -> Vec<wire::EditorKeyClaim> {
-        let node = editor(draft, "c", "Message", true, &roster(), |_: Event<()>| ());
+        let node = editor(
+            draft,
+            "c",
+            "c",
+            "Message",
+            true,
+            &roster(),
+            |_: Event<()>| (),
+        );
         let wire::Node::Editor { options, .. } = node else {
             panic!("the composer's field is an editor node");
         };

@@ -668,10 +668,21 @@ fn composer_commit(
     text: Option<&str>,
     action: Option<&str>,
 ) -> Vec<ducktape_view_guest::wire::Event> {
+    composer_commit_at(frame, "/composer/editor", text, action)
+}
+
+/// The same, aimed at a named field — the timeline's composer and a thread's
+/// are two drafts, and a transaction meant for one must be addressed to it.
+fn composer_commit_at(
+    frame: &Frame,
+    suffix: &str,
+    text: Option<&str>,
+    action: Option<&str>,
+) -> Vec<ducktape_view_guest::wire::Event> {
     use ducktape_view_guest::wire;
     let Node::Editor {
         document, options, ..
-    } = node_ending(frame, "/composer/editor")
+    } = node_ending(frame, suffix)
     else {
         panic!("composer editor")
     };
@@ -1890,4 +1901,187 @@ fn a_key_with_no_account_is_not_offered_a_channel_it_cannot_create() {
             "the empty network still offers a form the host would refuse"
         );
     });
+}
+
+/// Answers the reads a room costs on entry, so the room the reader moved to
+/// is as live as the one they left.
+fn room_settles(frame: Frame) -> Frame {
+    let record = request(&frame, "rpc.view").id;
+    let frame = tick_native(vec![answer(record, &channel_record())]);
+    let read = request(&frame, "rpc.view").id;
+    let frame = tick_native(vec![answer(read, &roots())]);
+    let roster = request(&frame, "rpc.view").id;
+    tick_native(vec![answer(roster, &members())])
+}
+
+/// Pushes the session that puts `channel` on screen and lets its reads land.
+fn enter_room(props: u64, channel: &str) -> Frame {
+    let mut next = session(true);
+    next.active_channel = channel.into();
+    room_settles(tick_native(vec![item(props, &encoded(&next))]))
+}
+
+fn composer_document(
+    frame: &Frame,
+    suffix: &str,
+) -> ducktape_view_guest::wire::editor_document::EditorDocumentRef {
+    let Node::Editor { document, .. } = node_ending(frame, suffix) else {
+        panic!("composer editor")
+    };
+    document.clone()
+}
+
+fn send_is_live(frame: &Frame, suffix: &str) -> bool {
+    let Node::Button { on_press, .. } = node_ending(frame, suffix) else {
+        panic!("send button")
+    };
+    on_press.is_some()
+}
+
+/// A DRAFT BELONGS TO ITS ROOM, NOT TO THE FIELD IT IS TYPED IN. Every room
+/// draws its composer at the same node key, and the host keys its native
+/// editor by the DOCUMENT id — so while every draft shared one id, moving
+/// rooms left the old room's words sitting in the new room's field, typing
+/// appended to them, and Send stayed dead because the guest dropped every
+/// transaction whose `before` did not match the draft it actually held.
+#[test]
+fn a_draft_left_unsent_stays_in_its_own_room() {
+    on_a_deep_stack(|| {
+        let (frame, _, props) = connected_room_with(&session(true), roots());
+        let frame = tick_native(composer_commit(&frame, Some("room a draft"), None));
+        let a = composer_document(&frame, "/composer/editor");
+        assert_eq!(a.byte_len, "room a draft".len() as u32);
+
+        let frame = enter_room(props, "channel-b");
+        let b = composer_document(&frame, "/composer/editor");
+        assert_ne!(
+            b.document, a.document,
+            "each room's draft is its own editor document"
+        );
+        assert_eq!(b.byte_len, 0, "a room never opens holding another's words");
+        assert!(
+            !send_is_live(&frame, "/composer/send"),
+            "nothing to send yet"
+        );
+
+        // The host's transaction is addressed to B's document, and lands.
+        let frame = tick_native(composer_commit(&frame, Some("room b draft"), None));
+        assert_eq!(
+            composer_document(&frame, "/composer/editor").byte_len,
+            "room b draft".len() as u32,
+            "the transaction addressed to B's document reached B's draft"
+        );
+        assert!(
+            send_is_live(&frame, "/composer/send"),
+            "a draft the guest accepted can be sent"
+        );
+
+        let frame = enter_room(props, "channel-a");
+        let back = composer_document(&frame, "/composer/editor");
+        assert_eq!(back.document, a.document, "the room keeps its document");
+        assert_eq!(
+            (back.reset, back.text_revision, back.revision, back.byte_len),
+            (a.reset, a.text_revision, a.revision, a.byte_len),
+            "the draft is the one it was left as, counters and all"
+        );
+        assert!(send_is_live(&frame, "/composer/send"));
+    });
+}
+
+/// The same rule one room down. A thread's reply is a draft of its own, and
+/// so is the room's timeline draft — two drafts at two node keys. But two
+/// THREADS share one node key, the way two rooms do, so the reply left in one
+/// thread must not be sitting in the next thread's field.
+#[test]
+fn a_reply_stays_in_the_thread_it_was_written_in() {
+    on_a_deep_stack(|| {
+        let (frame, _) = connected_room();
+        let frame = tick_native(composer_commit(&frame, Some("timeline draft"), None));
+        let timeline = composer_document(&frame, "/composer/editor");
+
+        let frame = open_thread(&frame, 1);
+        let first = composer_document(&frame, "/reply_composer/editor");
+        assert_ne!(
+            first.document, timeline.document,
+            "a thread reply is not the room's own draft"
+        );
+        let frame = tick_native(composer_commit_at(
+            &frame,
+            "/reply_composer/editor",
+            Some("a reply"),
+            None,
+        ));
+        assert!(
+            send_is_live(&frame, "/reply_composer/send"),
+            "the reply the guest accepted can be sent"
+        );
+        assert_eq!(
+            composer_document(&frame, "/composer/editor").byte_len,
+            timeline.byte_len,
+            "typing a reply does not touch the room's own draft"
+        );
+
+        let frame = open_thread(&frame, 2);
+        let second = composer_document(&frame, "/reply_composer/editor");
+        assert_ne!(
+            second.document, first.document,
+            "each thread's reply is its own editor document"
+        );
+        assert_eq!(
+            second.byte_len, 0,
+            "a thread never opens holding another thread's reply"
+        );
+    });
+}
+
+/// Opens the thread anchored at `seq` and answers the page it reads.
+fn open_thread(frame: &Frame, seq: u64) -> Frame {
+    let Node::Button { on_press, .. } = node_ending(frame, &format!("/message/{seq}/thread"))
+    else {
+        panic!("thread control")
+    };
+    let frame = tick_native(vec![ducktape_view_guest::wire::Event::Message(
+        on_press.expect("the thread control is live"),
+    )]);
+    let read = request(&frame, "rpc.view").id;
+    let page = serde_json::json!({"thread":{
+        "root": row(seq, "a message with replies"),
+        "replies": [], "has_more": false, "next_reply_seq": null,
+    }})
+    .to_string();
+    tick_native(vec![answer(read, page.as_bytes())])
+}
+
+/// AN EDIT IS A DRAFT TOO. Every message being rewritten draws its editor at
+/// the one `edit-composer` key, so under a shared document id the second
+/// message opened for editing inherited the first one's text and could not be
+/// typed into either.
+#[test]
+fn an_edit_in_progress_stays_on_the_message_it_rewrites() {
+    on_a_deep_stack(|| {
+        let (frame, _) = connected_room();
+        let frame = begin_edit(&frame, 1);
+        let first = composer_document(&frame, "message-edit-composer/editor");
+        let frame = begin_edit(&frame, 2);
+        let second = composer_document(&frame, "message-edit-composer/editor");
+        assert_ne!(
+            second.document, first.document,
+            "each message being edited is its own editor document"
+        );
+    });
+}
+
+/// Opens the row menu for `seq` and chooses Edit.
+fn begin_edit(frame: &Frame, seq: u64) -> Frame {
+    let frame = press_node(frame, &format!("/message/{seq}/more"));
+    tick_native(press(&frame, "Edit message"))
+}
+
+fn press_node(frame: &Frame, suffix: &str) -> Frame {
+    let Node::Button { on_press, .. } = node_ending(frame, suffix) else {
+        panic!("no button ending {suffix:?}")
+    };
+    tick_native(vec![ducktape_view_guest::wire::Event::Message(
+        on_press.unwrap_or_else(|| panic!("button {suffix:?} is disabled")),
+    )])
 }
