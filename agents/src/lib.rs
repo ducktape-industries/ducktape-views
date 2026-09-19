@@ -353,10 +353,8 @@ impl AgentsView {
                 summary
             }
         });
-        if self.connected {
-            if !self.account.is_empty() {
-                items.push(primary("agents/new", "New agent", Some(Message::OpenNew)));
-            }
+        if self.connected && !self.account.is_empty() {
+            items.push(primary("agents/new", "New agent", Some(Message::OpenNew)));
         }
         kit::sized(
             kit::padded(
