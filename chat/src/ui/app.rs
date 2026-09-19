@@ -1463,8 +1463,8 @@ mod tests {
     /// and Files is a button inside it, never where the press lands.
     #[test]
     fn attachment_press_previews_in_place_and_files_is_one_press_away() {
-        let doc = "duck://files/shared/attachments/u1/notes.txt".to_owned();
-        let shot = "duck://files/shared/attachments/u1/shot.png".to_owned();
+        let doc = "duck://testnet-0a1b2c3d/files/shared/attachments/u1/notes.txt".to_owned();
+        let shot = "duck://testnet-0a1b2c3d/files/shared/attachments/u1/shot.png".to_owned();
         let mut state = ChatView::state();
         state.connected = true;
         state.active_channel = "room".into();
@@ -1567,7 +1567,7 @@ mod tests {
             ..Default::default()
         }));
         assert_eq!(surfaces(&state), vec![("code".to_owned(), false)]);
-        let readme = "duck://files/shared/attachments/u1/README.md".to_owned();
+        let readme = "duck://testnet-0a1b2c3d/files/shared/attachments/u1/README.md".to_owned();
         let _ = state.update(Message::OpenAttachment(readme));
         let _ = state.update(Message::PreviewArrived(crate::host::PreviewItem {
             path: "/shared/attachments/u1/README.md".into(),

@@ -422,7 +422,7 @@ fn a_room_and_a_run_open_through_the_link_plane() {
     assert_eq!(intent.kind, "host.open_link");
     assert_eq!(
         payload(intent),
-        serde_json::json!({ "link": "duck://channel/general?net=a1b2c3d4" })
+        serde_json::json!({ "link": "duck://dev-a1b2c3d4/chat/general" })
     );
 
     let frame = tick_native(press(&frame, "Open run abababab"));
@@ -432,7 +432,7 @@ fn a_room_and_a_run_open_through_the_link_plane() {
     assert_eq!(intent.kind, "host.open_link");
     assert_eq!(
         payload(intent),
-        serde_json::json!({ "link": format!("duck://run/{}?net=a1b2c3d4", "ab".repeat(32)) })
+        serde_json::json!({ "link": format!("duck://dev-a1b2c3d4/runs/{}", "ab".repeat(32)) })
     );
 }
 

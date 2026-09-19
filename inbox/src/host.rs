@@ -23,8 +23,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
+use chat_wire::MessageAddress;
+use duck_address::{Address, ChainId, Refused};
 use ducktape_view_guest::host;
+use forge_wire::{ForgeLocator, ForgeRepoAddress, ForgeTarget};
 use futures::{Stream, StreamExt, stream};
+use pages_wire::PageAddress;
+use runs_wire::RunAddress;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
@@ -864,39 +869,71 @@ pub async fn mark_read(account: String, up_to_seq: i64) -> Result<(), String> {
 
 // ---------- the addresses a row opens ----------
 
-/// `duck://channel/<id>?net=…#<seq>` — one message. The query precedes the
-/// fragment, as in every other URI.
 fn channel_message_link(channel: &str, seq: i64, chain: &str) -> String {
-    format!("duck://channel/{channel}{}#{seq}", net_query(chain))
+    let seq = u64::try_from(seq).ok();
+    minted(chain, |chain| {
+        MessageAddress {
+            channel: channel.to_owned(),
+            seq,
+        }
+        .address(chain)
+    })
 }
 
 fn page_link(page: &str, chain: &str) -> String {
-    format!("duck://page/{page}{}", net_query(chain))
+    minted(chain, |chain| {
+        PageAddress {
+            page: page.to_owned(),
+            block: None,
+        }
+        .address(chain)
+    })
 }
 
 fn forge_item_link(repo: &str, number: u64, chain: &str) -> String {
-    format!("duck://forge/{repo}/{number}{}", net_query(chain))
+    forge_link(repo, Some(number), chain)
 }
 
 fn forge_repo_link(repo: &str, chain: &str) -> String {
-    format!("duck://forge/{repo}{}", net_query(chain))
+    forge_link(repo, None, chain)
 }
 
-/// `duck://run/<dispatch_id>?net=…`. A run is addressed by its DISPATCH id
-/// everywhere outside the runs module: the run id's hex sha256.
+/// A forge repo, or an item in it. The forge's namespace is flat today: a
+/// name that carries no `<owner>/` has no address.
+fn forge_link(repo: &str, number: Option<u64>, chain: &str) -> String {
+    let Some((owner, name)) = repo.split_once('/') else {
+        return String::new();
+    };
+    let repo = ForgeRepoAddress {
+        owner: owner.to_owned(),
+        repo: name.to_owned(),
+    };
+    minted(chain, |chain| match number {
+        Some(number) => ForgeLocator {
+            repo,
+            target: ForgeTarget::Item { number },
+        }
+        .address(chain),
+        None => repo.address(chain),
+    })
+}
+
+/// A run is addressed by its DISPATCH id everywhere outside the runs
+/// module: the run id's hex sha256.
 fn run_link(run_id: &str, chain: &str) -> String {
-    let dispatch_id = hex_encode(&Sha256::digest(run_id.as_bytes()));
-    format!("duck://run/{dispatch_id}{}", net_query(chain))
+    let digest = hex_encode(&Sha256::digest(run_id.as_bytes()));
+    minted(chain, |chain| RunAddress { digest }.address(chain))
 }
 
-/// The `?net=` a produced `duck://` link carries: the chain id's hash half
-/// (the part after its `#`), or nothing when the chain is unknown.
-fn net_query(chain: &str) -> String {
-    let digest = chain.rsplit_once('#').map_or("", |(_, hex)| hex);
-    match digest.is_empty() {
-        true => String::new(),
-        false => format!("?net={digest}"),
-    }
+/// `address` on `chain` (`<label>#<salt>`) as a `duck://` link, or "" when
+/// there is none to give: no chain known, or a tail its module refuses.
+fn minted(chain: &str, address: impl FnOnce(ChainId) -> Result<Address, Refused>) -> String {
+    chain
+        .parse()
+        .ok()
+        .and_then(|chain| address(chain).ok())
+        .map(|address| address.to_string())
+        .unwrap_or_default()
 }
 
 /// A row's address, handed to the kernel's ONE open door, which routes a

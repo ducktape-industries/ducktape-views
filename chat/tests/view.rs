@@ -75,7 +75,7 @@ fn session(connected: bool) -> Session {
         connected,
         endpoint: "http://127.0.0.1:1".into(),
         network_name: "testnet".into(),
-        network_chain_id: "testnet#abcd".into(),
+        network_chain_id: "testnet#0a1b2c3d".into(),
         status: "Live".into(),
         block_height: 84_912,
         me: "acct:7".into(),
@@ -1429,7 +1429,7 @@ fn a_dm_click_creates_the_room_through_common_requests_before_navigation() {
         let navigate = request(&frame, "host.open_link");
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&navigate.payload).unwrap(),
-            serde_json::json!({"link":format!("duck://channel/{channel}")})
+            serde_json::json!({"link":format!("duck://testnet-0a1b2c3d/chat/{channel}")})
         );
     });
 }
@@ -1580,7 +1580,7 @@ fn creating_a_text_channel_uses_common_requests_and_waits_before_navigation() {
         let navigate = request(&frame, "host.open_link");
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&navigate.payload).unwrap(),
-            serde_json::json!({"link":"duck://channel/channel-new"})
+            serde_json::json!({"link":"duck://testnet-0a1b2c3d/chat/channel-new"})
         );
         assert!(!has_text(&frame, "Create a channel"));
     });

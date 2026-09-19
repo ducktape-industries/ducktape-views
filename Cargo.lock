@@ -50,8 +50,13 @@ name = "agents-view"
 version = "0.1.0"
 dependencies = [
  "agent-wire",
+ "chat-wire",
+ "duck-address",
  "ducktape-view-guest",
+ "forge-wire",
  "futures",
+ "pages-wire",
+ "refusal-class",
  "runs-wire",
  "serde",
  "serde_json",
@@ -368,9 +373,13 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "chat-message",
+ "chat-wire",
+ "duck-address",
  "ducktape-view-composer",
  "ducktape-view-guest",
+ "files-wire",
  "futures",
+ "runs-wire",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -1322,6 +1331,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "files-wire"
+version = "0.1.0"
+source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#2af877933fc0164a12e3c9f26aa4b886201aec6c"
+dependencies = [
+ "duck-address",
+ "duckfs-core",
+ "refusal-class",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1647,8 +1666,11 @@ dependencies = [
 name = "home-view"
 version = "0.1.0"
 dependencies = [
+ "chat-wire",
+ "duck-address",
  "ducktape-view-guest",
  "futures",
+ "runs-wire",
  "serde",
  "serde_json",
  "view-wire",
@@ -1686,8 +1708,13 @@ dependencies = [
 name = "inbox-view"
 version = "0.1.0"
 dependencies = [
+ "chat-wire",
+ "duck-address",
  "ducktape-view-guest",
+ "forge-wire",
  "futures",
+ "pages-wire",
+ "runs-wire",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -2080,11 +2107,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "pages-wire"
+version = "0.1.0"
+source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#2af877933fc0164a12e3c9f26aa4b886201aec6c"
+dependencies = [
+ "duck-address",
+ "index-guest",
+ "sdk",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "palette-view"
 version = "0.1.0"
 dependencies = [
+ "chat-wire",
+ "duck-address",
  "ducktape-view-guest",
  "futures",
+ "pages-wire",
  "serde",
  "serde_json",
  "view-wire",

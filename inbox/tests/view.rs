@@ -103,7 +103,7 @@ fn the_wording_the_unread_rule_and_the_door_are_this_view_s() {
     let frame = tick_native(door);
     assert_eq!(
         payload(request(&frame, "host.open_link"))["link"],
-        "duck://channel/general?net=a1b2c3d4#42"
+        "duck://dev-a1b2c3d4/chat/general/42"
     );
 }
 

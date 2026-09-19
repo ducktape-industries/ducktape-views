@@ -149,7 +149,7 @@ fn the_chord_opens_it_a_query_finds_and_a_hit_leaves_as_one_open_link() {
     let frame = tick_native(press(&frame, "palette/chat/general/42/press"));
     assert_eq!(
         payload(request(&frame, "host.open_link"))["link"],
-        "duck://channel/general?net=a1b2c3d4#42"
+        "duck://dev-a1b2c3d4/chat/general/42"
     );
     // What it was opened to find has been found: the palette gets out of the
     // way, and an empty tree is what tells the app there is no overlay.
@@ -179,7 +179,7 @@ fn a_page_hit_leaves_at_its_block() {
     let frame = tick_native(press(&frame, "palette/page/p-1/b-9/press"));
     assert_eq!(
         payload(request(&frame, "host.open_link"))["link"],
-        "duck://page/p-1?net=a1b2c3d4#b-9"
+        "duck://dev-a1b2c3d4/pages/p-1/block/b-9"
     );
 }
 

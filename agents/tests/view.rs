@@ -685,7 +685,7 @@ fn the_open_run_draws_its_places_as_chips() {
     let opened = tick_native(press(&frame, "Open in chat"));
     assert_eq!(
         opened_link(&opened),
-        "duck://channel/general?net=a1b2c3d4#9"
+        "duck://duck-1-a1b2c3d4/chat/general/9"
     );
     let frame = tick_native(press(&opened, "Hide message"));
     assert!(
@@ -706,7 +706,7 @@ fn the_open_run_draws_its_places_as_chips() {
     // the chain's digest, never its whole id
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&intent.payload).expect("decodes")["link"],
-        "duck://page/p-9?net=a1b2c3d4"
+        "duck://duck-1-a1b2c3d4/pages/p-9"
     );
 }
 
