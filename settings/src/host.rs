@@ -76,6 +76,13 @@ pub struct Session {
     /// did not)
     #[serde(default)]
     pub rpc_endpoint_refusal: String,
+    /// whether this workspace may edit its node RPC endpoint (absent on older
+    /// apps, true for a local workspace, false for a remote connection)
+    #[serde(default)]
+    pub rpc_endpoint_editable: Option<bool>,
+    /// why the app does not offer endpoint editing ("" when it does)
+    #[serde(default)]
+    pub rpc_endpoint_editability_reason: String,
     pub account_ceremony_phase: String,
     pub account_ceremony_qr: String,
     pub account_ceremony_detail: String,
