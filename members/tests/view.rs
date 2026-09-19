@@ -131,6 +131,48 @@ fn opened(holds_a_seat: bool, label: &str) -> Frame {
     tick_native(press(&frame, label))
 }
 
+/// In a narrow pane nothing runs past the edge: the filter chips wrap, a
+/// member's name and an agent's model take the row's rest and truncate, and
+/// an open record stacks under the roster (no width to drag) instead of
+/// leaving the list a sliver beside it. A wide pane keeps the split.
+#[test]
+fn a_narrow_pane_stacks_the_record_and_truncates_long_names() {
+    use ducktape_view_guest::testing::{find, measure};
+    use ducktape_view_guest::wire::{Axis, Length};
+
+    let frame = opened(true, "Reviewer Bot");
+    let narrow = tick_native(measure(&frame, "members/viewport", 360., 700.));
+    let Some(Node::Linear { axis, .. }) = find(&narrow, "members") else {
+        panic!("no panes");
+    };
+    assert_eq!(*axis, Axis::Column, "stacked");
+    assert!(find(&narrow, "members/member-resize").is_none());
+    let Some(Node::Container { width, .. }) = find(&narrow, "members/member") else {
+        panic!("no record");
+    };
+    assert_eq!(*width, Some(Length::Fill));
+    let Some(Node::Linear { wrap, .. }) = find(&narrow, "members/filter") else {
+        panic!("no filter strip");
+    };
+    assert!(wrap.is_some(), "the chips wrap");
+    for key in [
+        "members/row/reviewer-bot/name",
+        "members/row/reviewer-bot/model",
+    ] {
+        let Some(Node::Text { width, .. }) = find(&narrow, key) else {
+            panic!("no {key}");
+        };
+        assert_eq!(*width, Some(Length::Fill), "{key} truncates");
+    }
+
+    let wide = tick_native(measure(&narrow, "members/viewport", 1280., 700.));
+    let Some(Node::Linear { axis, .. }) = find(&wide, "members") else {
+        panic!("no panes");
+    };
+    assert_eq!(*axis, Axis::Row, "side by side");
+    assert!(find(&wide, "members/member-resize").is_some());
+}
+
 /// At boot the view asks for the session only; connected, it reads the
 /// roster itself — the node's key marks this node, the peer sample marks
 /// who is live, and the runs register adds the machines.
