@@ -5,7 +5,7 @@
 //! `rpc.stream`, and retunes the running node's tracing filter with one
 //! `rpc.admin` POST. The clipboard is the one intent left.
 
-use ducktape_view_guest::testing::{answer, has_text, item, press, refuse, texts, type_into};
+use ducktape_view_guest::testing::{answer, find, has_text, item, press, refuse, texts, type_into};
 use ducktape_view_guest::wire::{Event, Frame, Length, Node, Request, Wrapping};
 use node_view::boot_native;
 use node_view::host::{Copy, Session};
@@ -762,6 +762,45 @@ fn every_row_cell_keeps_one_line() {
         ],
         "the texts that may wrap, and no others"
     );
+}
+
+/// In a narrow pane nothing runs past the edge: a reading's text takes its
+/// row's rest and truncates, a module's name gives way to its badges, and
+/// the pending swap's parts and the console's controls wrap onto further
+/// lines instead of sitting on one that cannot hold them.
+#[test]
+fn a_narrow_pane_truncates_long_text_and_wraps_the_controls() {
+    let (overview, _) = connected();
+    let (permissions, _) = settle(tick_native(press(&overview, "Node permissions")));
+    let (modules, _) = settle(tick_native(press(&permissions, "Node modules")));
+    let (activity, _) = settle(tick_native(press(&modules, "Node activity")));
+    let text = |frame: &Frame, key: &str| match find(frame, key) {
+        Some(Node::Text { width, options, .. }) => (*width, options.wrapping),
+        other => panic!("{key}: {other:?}"),
+    };
+    for (frame, key) in [
+        (&overview, "node/sync/value"),
+        (&overview, "node/finalized/value"),
+        (&permissions, "node/admin/value"),
+        (&modules, "node/module/governance/name"),
+    ] {
+        assert_eq!(
+            text(frame, key),
+            (Some(Length::Fill), Some(Wrapping::None)),
+            "{key} truncates"
+        );
+    }
+    let wraps = |frame: &Frame, key: &str| {
+        matches!(find(frame, key), Some(Node::Linear { wrap: Some(_), .. }))
+    };
+    for (frame, key) in [
+        (&modules, "node/module/governance/pending/row"),
+        (&activity, "node/filters"),
+        (&activity, "node/level"),
+        (&activity, "node/retune"),
+    ] {
+        assert!(wraps(frame, key), "{key} wraps: {:?}", find(frame, key));
+    }
 }
 
 #[test]

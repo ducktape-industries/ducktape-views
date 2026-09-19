@@ -470,8 +470,14 @@ impl NodeView {
                 kit::centered_row(
                     &key,
                     [
-                        kit::nowrap(kit::strong(format!("{key}/name"), &module.id)),
-                        kit::spacer(),
+                        // the name takes the row's rest and truncates there; a
+                        // label at its own width never shrinks and pushed the
+                        // badges out
+                        kit::sized(
+                            kit::nowrap(kit::strong(format!("{key}/name"), &module.id)),
+                            Some(Length::Fill),
+                            None,
+                        ),
                         kit::badge(
                             format!("{key}/category"),
                             host::capitalized(&module.category),
@@ -498,38 +504,44 @@ impl NodeView {
             if module.pending_hash.is_empty() {
                 continue;
             }
-            content.push(Self::reading(
-                &format!("{key}/pending"),
-                "Pending code",
-                kit::centered_row(
-                    format!("{key}/pending/row"),
-                    [
-                        mono(
-                            format!("{key}/pending/value"),
-                            host::short_digest(&module.pending_hash),
-                        ),
-                        caption(
-                            format!("{key}/activation"),
-                            format!(
-                                "activates at {}",
-                                host::height_label_short(module.activation_height)
+            // a digest, two captions and a copy do not fit one 24px line in
+            // a narrow pane: this reading has no fixed height, and its parts
+            // wrap onto further lines instead of running past the edge
+            content.push(kit::aligned(
+                kit::kv(
+                    format!("{key}/pending"),
+                    "Pending code",
+                    kit::wrapped_row(
+                        format!("{key}/pending/row"),
+                        [
+                            mono(
+                                format!("{key}/pending/value"),
+                                host::short_digest(&module.pending_hash),
                             ),
-                        ),
-                        caption(
-                            format!("{key}/readiness"),
-                            format!("{} signalled ready", module.readiness),
-                        ),
-                        kit::button(
-                            format!("{key}/pending/copy"),
-                            "Copy pending code",
-                            Some(slots::message(Message::CopyToClipboard(
-                                module.pending_hash.clone(),
-                                "Pending code copied".into(),
-                            ))),
-                            ButtonPreset::Subtle,
-                        ),
-                    ],
+                            caption(
+                                format!("{key}/activation"),
+                                format!(
+                                    "activates at {}",
+                                    host::height_label_short(module.activation_height)
+                                ),
+                            ),
+                            caption(
+                                format!("{key}/readiness"),
+                                format!("{} signalled ready", module.readiness),
+                            ),
+                            kit::button(
+                                format!("{key}/pending/copy"),
+                                "Copy pending code",
+                                Some(slots::message(Message::CopyToClipboard(
+                                    module.pending_hash.clone(),
+                                    "Pending code copied".into(),
+                                ))),
+                                ButtonPreset::Subtle,
+                            ),
+                        ],
+                    ),
                 ),
+                AlignX::Center,
             ));
         }
         if content.is_empty() {
@@ -598,9 +610,18 @@ impl NodeView {
             ),
         ];
         retune.extend(retune_note.map(kit::wrapping));
+        // both control rows wrap: the chips, a filter and the retune do
+        // not fit one line of a narrow pane, and a row that cannot wrap ran
+        // its controls past the edge
         let mut content = vec![
-            kit::centered_row("node/filters", [self.level_chips(), filter]),
-            kit::centered_row("node/retune", retune),
+            kit::wrapped_row(
+                "node/filters",
+                [
+                    self.level_chips(),
+                    kit::sized(filter, Some(Length::Fixed(240.)), None),
+                ],
+            ),
+            kit::wrapped_row("node/retune", retune),
         ];
         let visible =
             host::visible_log(&self.log_lines, &self.node_log_filter, &self.node_log_level);
@@ -712,7 +733,15 @@ impl NodeView {
                 )
             }),
         );
-        kit::sized(chips, Some(Length::Shrink), None)
+        let mut chips = kit::sized(chips, Some(Length::Shrink), None);
+        let Node::Linear { wrap, .. } = &mut chips else {
+            unreachable!("a chip row is a row")
+        };
+        *wrap = Some(wire::Wrap {
+            spacing: None,
+            align: None,
+        });
+        chips
     }
 
     fn section(key: &str, title_key: &str, title: &str, content: Node) -> Node {
@@ -728,7 +757,13 @@ impl NodeView {
     }
 
     /// One reading: a fixed-width label and its value, on one 24px line.
+    /// A text value takes the row's rest and truncates there: a label at
+    /// its own width never shrinks, so a long sync line ran past the card.
     fn reading(key: &str, label: &str, value: Node) -> Node {
+        let value = match value {
+            Node::Text { .. } => kit::sized(value, Some(Length::Fill), None),
+            other => other,
+        };
         kit::sized(
             kit::aligned(kit::kv(key, label, value), AlignX::Center),
             Some(Length::Fill),
