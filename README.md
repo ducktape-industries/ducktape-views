@@ -8,12 +8,12 @@ the browser. `ops/build-views.sh` builds the set through
 checkouts produce byte-identical components with no builder-local path baked
 into a symbol hash.
 
-`ops/build-views.sh` first runs every workspace test whose name holds
-`accessibility` and builds nothing while one fails. Each view keeps one:
-an `accessibility_*` test that renders the view's states and asserts, with
-`ducktape_view_guest::testing::assert_accessible`, that
-`view_wire::accessibility_faults` finds no unnamed control, click area
-without a role, unlabelled input or duplicate key in any of them.
+`ops/build-views.sh` first runs the workspace's tests and builds nothing
+while one fails. That is the accessibility gate: every view's tests pass each
+tree they render through a check that `view_wire::accessibility_faults` finds
+no unnamed control, click area without a role, unlabelled input or duplicate
+key (`ducktape_view_guest::testing::assert_accessible`, or the same call in
+the view's own frame helper). A new view earns its build by doing the same.
 
 `support/guest` is the renderer-independent execution and host-protocol
 crate every view links; `support/composer` and `support/files` are the

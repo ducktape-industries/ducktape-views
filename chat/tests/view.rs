@@ -871,7 +871,9 @@ fn attachment_upload_uses_file_grants_and_posts_a_guest_built_link() {
         let write = request(&frame, "op.submit");
         let payload = String::from_utf8(write.payload.clone()).unwrap();
         assert!(
-            payload.contains("duck://files/shared/attachments/attachment-1/hello.txt"),
+            payload.contains(
+                "duck://testnet-0a1b2c3d/files/shared/attachments/attachment-1/hello.txt"
+            ),
             "{payload}"
         );
     });
