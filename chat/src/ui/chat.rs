@@ -1104,6 +1104,12 @@ impl ChatView {
         if self.active_channel_members_only {
             title.push(self.private_badge(format!("{key}/private")));
         }
+        // no chain, no address: the item says so instead of copying nothing
+        let link = crate::host::duck_channel_link(
+            self.active_channel.clone(),
+            self.network_chain_id.clone(),
+        );
+        let unlinked = link.is_empty();
         let about = vec![
             native::spaced(native::centered_row(format!("{key}/title-row"), title), 8.),
             native::row(
@@ -1112,14 +1118,8 @@ impl ChatView {
                     format!("{key}/link"),
                     "🔗 Copy link",
                     "Copy channel link",
-                    Message::CopyToClipboard(
-                        crate::host::duck_channel_link(
-                            self.active_channel.clone(),
-                            self.network_chain_id.clone(),
-                        ),
-                        "Channel link copied".into(),
-                    ),
-                    false,
+                    Message::CopyToClipboard(link, "Channel link copied".into()),
+                    unlinked,
                 )],
             ),
         ];
@@ -1368,6 +1368,12 @@ impl ChatView {
                         false,
                     ));
                 }
+                let link = crate::host::duck_channel_message_link(
+                    self.active_channel.clone(),
+                    seq,
+                    self.network_chain_id.clone(),
+                );
+                let unlinked = link.is_empty();
                 items.extend([
                     menu_item(
                         format!("{key}/{prefix}add-reaction"),
@@ -1380,12 +1386,8 @@ impl ChatView {
                         format!("{key}/{prefix}copy-link"),
                         "🔗",
                         "Copy link",
-                        Message::CopyMessageLink(crate::host::duck_channel_message_link(
-                            self.active_channel.clone(),
-                            seq,
-                            self.network_chain_id.clone(),
-                        )),
-                        false,
+                        Message::CopyMessageLink(link),
+                        unlinked,
                     ),
                     menu_item(
                         format!("{key}/{prefix}edit"),
