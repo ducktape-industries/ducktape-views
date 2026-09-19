@@ -689,7 +689,7 @@ fn settings_subtle(
 /// labels on the left and controls on the right, whatever the value is.
 const FIELD_WIDTH: f32 = 280.;
 /// The band a settings row takes above and below its content.
-const ROW_BAND: f32 = 8.;
+const ROW_BAND: f32 = ducktape_view_guest::kit::spacing::SM as f32;
 fn settings_input(
     key: &str,
     placeholder: &str,
@@ -829,7 +829,7 @@ fn settings_section(
                 body,
             ],
         ),
-        6.,
+        kit::spacing::XS as f32,
     )
 }
 impl SettingsView {
@@ -861,12 +861,12 @@ impl SettingsView {
                                 }),
                             ),
                             Some(wire::Length::Fill),
-                            Some(wire::Length::Fixed(28.)),
+                            Some(wire::Length::Fixed(kit::height::CONTROL as f32)),
                         ),
                         kit::divider("settings/tab-rule"),
                     ],
                 ),
-                6.,
+                kit::spacing::XS as f32,
             ),
         ];
         if !self.host_error.is_empty() {
@@ -1086,7 +1086,10 @@ impl SettingsView {
             "settings/updates-title",
             "Updates",
             "",
-            kit::spaced(kit::column("settings/updates-body", body), 10.),
+            kit::spaced(
+                kit::column("settings/updates-body", body),
+                kit::spacing::MD as f32,
+            ),
         )
     }
     fn network_settings(&self) -> wire::Node {
@@ -1109,24 +1112,11 @@ impl SettingsView {
             ],
         );
         if !self.connected {
-            // The empty state insets itself by 24; the actions line up under
-            // its words rather than at the page edge.
-            let inset = wire::Edges {
-                top: 0.,
-                right: 24.,
-                bottom: 24.,
-                left: 24.,
-            };
-            return kit::column(
-                "settings/disconnected-network",
-                [
-                    kit::empty_state(
-                        "settings/disconnected",
-                        "Not connected",
-                        "Reconnect to this network, or open another one.",
-                    ),
-                    kit::padded(actions, inset),
-                ],
+            return kit::empty_state_action(
+                "settings/disconnected",
+                "Not connected",
+                "Reconnect to this network, or open another one.",
+                actions,
             );
         }
         let network_name = if self.network_name.is_empty() {
@@ -1274,7 +1264,7 @@ impl SettingsView {
                         actions,
                     ],
                 ),
-                12.,
+                kit::spacing::LG as f32,
             ),
         );
         if self.tasting.is_empty() {
@@ -1282,7 +1272,7 @@ impl SettingsView {
         }
         kit::spaced(
             kit::column("settings/network-panes", [network, self.proposed_views()]),
-            24.,
+            kit::spacing::XL as f32,
         )
     }
     /// The views a code ballot or a scheduled swap would install, one row
@@ -1690,7 +1680,10 @@ impl SettingsView {
                 "settings/add-device",
                 "Add a device",
                 "A ticket admits one more key to this account.",
-                kit::spaced(kit::column("settings/add-body", add), 12.),
+                kit::spaced(
+                    kit::column("settings/add-body", add),
+                    kit::spacing::LG as f32,
+                ),
             ));
         }
         match self.account_ceremony_phase.as_str() {
@@ -1728,7 +1721,7 @@ impl SettingsView {
                                 ),
                             ],
                         ),
-                        8.,
+                        kit::spacing::SM as f32,
                     ),
                 ));
             }

@@ -15,7 +15,7 @@ use ducktape_view_guest::{
 };
 
 /// The density a card's row is built on.
-const LIST_ROW: f32 = 28.;
+const LIST_ROW: f32 = kit::height::CONTROL as f32;
 
 /// The gutter between tiles, between columns and between the cards of one
 /// column.
@@ -212,7 +212,7 @@ impl HomeView {
                     kit::caption(format!("{key}/label"), label),
                 ],
             ),
-            4.,
+            kit::spacing::XXS as f32,
         );
         kit::sized(kit::card(key, body), Some(Length::FillPortion(1)), None)
     }
@@ -238,7 +238,10 @@ impl HomeView {
             ));
         }
         children.push(body);
-        let body = kit::spaced(kit::column(format!("{key}/body"), children), 8.);
+        let body = kit::spaced(
+            kit::column(format!("{key}/body"), children),
+            kit::spacing::SM as f32,
+        );
         kit::card(key, body)
     }
 
@@ -437,7 +440,7 @@ impl HomeView {
                             kit::badge(format!("{key}/state"), state, tone),
                         ],
                     ),
-                    8.,
+                    kit::spacing::SM as f32,
                 ),
                 None,
                 Some(Length::Fixed(LIST_ROW)),
@@ -478,7 +481,7 @@ impl HomeView {
                             ),
                         ],
                     ),
-                    8.,
+                    kit::spacing::SM as f32,
                 ),
                 None,
                 Some(Length::Fixed(LIST_ROW)),
@@ -518,7 +521,7 @@ impl HomeView {
                             ),
                         ],
                     ),
-                    8.,
+                    kit::spacing::SM as f32,
                 ),
                 None,
                 Some(Length::Fixed(LIST_ROW)),
@@ -557,7 +560,10 @@ impl HomeView {
             ));
             let row = kit::list_row(
                 key.clone(),
-                kit::spaced(kit::centered_row(format!("{key}/row"), cells), 8.),
+                kit::spaced(
+                    kit::centered_row(format!("{key}/row"), cells),
+                    kit::spacing::SM as f32,
+                ),
                 false,
                 Some(slots::message(Message::OpenRoom(room.id.clone()))),
             );
@@ -604,7 +610,7 @@ impl HomeView {
                             ),
                         ],
                     ),
-                    8.,
+                    kit::spacing::SM as f32,
                 ),
                 false,
                 Some(slots::message(Message::OpenRun(run.dispatch_id.clone()))),
@@ -653,7 +659,7 @@ impl HomeView {
                             ),
                         ],
                     ),
-                    8.,
+                    kit::spacing::SM as f32,
                 ),
                 None,
                 Some(Length::Fixed(LIST_ROW)),
@@ -696,7 +702,7 @@ impl HomeView {
                             mono(format!("{key}/height"), host::height_label(snapshot.height)),
                         ],
                     ),
-                    8.,
+                    kit::spacing::SM as f32,
                 ),
                 None,
                 Some(Length::Fixed(LIST_ROW)),
