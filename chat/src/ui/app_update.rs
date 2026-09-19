@@ -242,9 +242,7 @@ impl super::ChatView {
         let changed_dm_reader = changed_reader || self.me != next.me;
         let cancel_creation = changed_dm_reader || !next.connected || moved_room || requested_dm;
         if cancel_creation {
-            self.retire_channel_creation();
-            self.channel_create_open = false;
-            self.channel_create_id.clear();
+            self.close_channel_create();
         }
         let cancel_dm = changed_dm_reader || !next.connected || moved_room || requested_dm;
         if cancel_dm {
@@ -342,8 +340,7 @@ impl super::ChatView {
     fn on_visibility_changed(&mut self, visible: bool) -> ducktape_view_guest::Task<Message> {
         if !visible {
             self.retire_dm();
-            self.retire_channel_creation();
-            self.channel_create_open = false;
+            self.close_channel_create();
         }
         let was_visible = self.read_visit != ReadVisit::Hidden;
         if was_visible == visible {
@@ -751,8 +748,7 @@ impl super::ChatView {
         target_seq: i64,
     ) -> ducktape_view_guest::Task<Message> {
         self.retire_dm();
-        self.retire_channel_creation();
-        self.channel_create_open = false;
+        self.close_channel_create();
         self.search_phase = SearchPhase::Idle;
         self.search_hits = Vec::new();
         self.search_query = "".to_owned();
@@ -767,12 +763,25 @@ impl super::ChatView {
         self.channel_creating.take();
         self.channel_create_generation = self.channel_create_generation.wrapping_add(1);
     }
+    fn close_channel_create(&mut self) {
+        self.retire_channel_creation();
+        self.channel_create_open = false;
+        self.channel_draft.clear();
+        self.channel_create_id.clear();
+        self.channel_create_error.clear();
+        self.channel_create_voice = false;
+        self.channel_create_members_only = false;
+    }
     fn on_toggle_channel_create(&mut self) -> ducktape_view_guest::Task<Message> {
         if self.channel_creating.is_some() {
             return ducktape_view_guest::Task::none();
         }
-        self.channel_create_open = !self.channel_create_open;
-        self.channel_create_error.clear();
+        if self.channel_create_open {
+            self.close_channel_create();
+        } else {
+            self.channel_create_open = true;
+            self.channel_create_error.clear();
+        }
         ducktape_view_guest::Task::none()
     }
     fn on_channel_draft_changed(&mut self, value: String) -> ducktape_view_guest::Task<Message> {
@@ -875,11 +884,7 @@ impl super::ChatView {
                 self.network_chain_id.clone(),
             ));
         }
-        self.channel_create_open = false;
-        self.channel_draft.clear();
-        self.channel_create_id.clear();
-        self.channel_create_voice = false;
-        self.channel_create_members_only = false;
+        self.close_channel_create();
         ducktape_view_guest::Task::perform(
             crate::host::read_sidebar(self.connection_serial, self.names_serial, self.me.clone()),
             Message::SidebarArrived,
@@ -887,8 +892,7 @@ impl super::ChatView {
     }
     fn on_choose_channel(&mut self, id: String) -> ducktape_view_guest::Task<Message> {
         self.retire_dm();
-        self.retire_channel_creation();
-        self.channel_create_open = false;
+        self.close_channel_create();
         self.sent = crate::host::send_open_link(&crate::host::duck_channel_link(
             id,
             self.network_chain_id.clone(),
@@ -905,8 +909,7 @@ impl super::ChatView {
         if !may_open {
             return ducktape_view_guest::Task::none();
         }
-        self.retire_channel_creation();
-        self.channel_create_open = false;
+        self.close_channel_create();
         self.retire_dm();
         let generation = self.dm_generation;
         let (task, handle) = ducktape_view_guest::Task::perform(
@@ -971,8 +974,7 @@ impl super::ChatView {
     /// the tab it lands on.
     fn on_open_message_link(&mut self, url: String) -> ducktape_view_guest::Task<Message> {
         self.retire_dm();
-        self.retire_channel_creation();
-        self.channel_create_open = false;
+        self.close_channel_create();
         self.preview_link = "".to_owned();
         let url = crate::host::pressed_link(url, &self.network_chain_id);
         self.sent = crate::host::send_open_link(&url);
@@ -1621,6 +1623,24 @@ impl super::ChatView {
         surface: CopySurface,
     ) -> ducktape_view_guest::Task<Message> {
         if !self.shift_held {
+            if seq <= 0 {
+                return ::ducktape_view_guest::Task::none();
+            }
+            match surface {
+                CopySurface::Timeline => {
+                    self.selected_message_seq = seq;
+                    self.message_action = MessageAction::Toolbar;
+                    self.thread_selected_seq = 0;
+                    self.thread_message_action = MessageAction::Toolbar;
+                }
+                CopySurface::Thread => {
+                    self.thread_selected_seq = seq;
+                    self.thread_message_action = MessageAction::Toolbar;
+                    self.selected_message_seq = 0;
+                    self.message_action = MessageAction::Toolbar;
+                }
+                CopySurface::Nowhere => {}
+            }
             return ::ducktape_view_guest::Task::none();
         }
         let range = crate::host::copy_range_after_press(

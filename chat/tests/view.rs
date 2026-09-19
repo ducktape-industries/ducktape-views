@@ -7,7 +7,7 @@
 use chat_view::boot_native;
 use chat_view::host::{Channel, Session};
 use ducktape_view_guest::testing::{answer, has_text, item, press, refuse, texts, type_into};
-use ducktape_view_guest::wire::{ButtonContent, Frame, Node, Request, SurfaceValue};
+use ducktape_view_guest::wire::{ButtonContent, Frame, Node, Request, Role, SurfaceValue};
 
 /// A native tick of this screen walks a deep tree; libtest's 2 MiB thread is
 /// at the edge of it in a debug build, so every test runs on its own roomier
@@ -1600,6 +1600,41 @@ fn creating_a_text_channel_uses_common_requests_and_waits_before_navigation() {
 }
 
 #[test]
+fn reopening_after_channel_creation_session_update_resets_the_form() {
+    on_a_deep_stack(|| {
+        let (frame, _, props) = connected_room_with(&session(true), roots());
+        let frame = tick_native(press(&frame, "New channel"));
+        let frame = tick_native(type_into(&frame, "Channel name", "Design"));
+        let frame = tick_native(press(&frame, "Members only: Off"));
+        let frame = tick_native(press(&frame, "Create channel"));
+        let frame = tick_native(vec![answer(request(&frame, "host.id").id, b"channel-new")]);
+        let frame = tick_native(vec![answer(
+            request(&frame, "rpc.view").id,
+            br#"{"channel":null}"#,
+        )]);
+        let submit = request(&frame, "op.submit").id;
+        let mut next = session(true);
+        next.active_channel = "channel-new".into();
+        let frame = tick_native(vec![item(props, &encoded(&next))]);
+        assert!(!has_text(&frame, "Create a channel"));
+        let frame = tick_native(vec![answer(
+            view_asking(&frame, "channel").id,
+            br#"{"channel":{"id":"channel-new","name":"Design","created_at":1,"post_policy":"members_only","owner":"acct:7","archived":false,"hooks":[],"huddle":[],"head_seq":0}}"#,
+        )]);
+        let frame = tick_native(vec![answer(request(&frame, "rpc.view").id, &roots())]);
+        let frame = tick_native(vec![answer(request(&frame, "rpc.view").id, &members())]);
+        let frame = tick_native(press(&frame, "New channel"));
+        assert!(has_text(&frame, "Channel name"));
+        assert!(has_text(&frame, "Voice room: Off"));
+        assert!(has_text(&frame, "Members only: Off"));
+        let frame = tick_native(vec![answer(submit, b"42")]);
+        assert!(has_text(&frame, "Channel name"));
+        assert!(has_text(&frame, "Voice room: Off"));
+        assert!(has_text(&frame, "Members only: Off"));
+    });
+}
+
+#[test]
 fn voice_creation_preserves_the_text_room_and_ignores_the_members_toggle() {
     on_a_deep_stack(|| {
         let (frame, _) = connected_room();
@@ -1834,6 +1869,138 @@ fn a_key_with_no_account_reads_the_room_and_every_write_says_what_to_do() {
         let op: serde_json::Value =
             serde_json::from_slice(&request(&frame, "op.submit").payload).expect("an op decodes");
         assert_eq!(op["payload"]["add_reaction"]["emoji"], "👍");
+    });
+}
+
+#[test]
+fn message_rows_name_and_reveal_actions_on_keyboard_activation() {
+    on_a_deep_stack(|| {
+        let mut root = row(1, "first light");
+        root["reply_count"] = 1.into();
+        let window = serde_json::json!({
+            "roots": {"roots": [root.clone(), row(2, "second wind")], "has_more": false}
+        })
+        .to_string()
+        .into_bytes();
+        let (frame, _, _) = connected_room_with(&session(true), window.clone());
+        let Node::Button {
+            on_press: Some(open),
+            ..
+        } = labelled(&frame, "Open thread")
+        else {
+            panic!("the timeline message lost its Open thread control");
+        };
+        let frame = tick_native(vec![ducktape_view_guest::wire::Event::Message(*open)]);
+        let read = request(&frame, "rpc.view").id;
+        let page = serde_json::json!({
+            "thread": {
+                "root": root,
+                "replies": [reply(3, "thread reply", 1)],
+                "has_more": false,
+                "next_reply_seq": null
+            }
+        });
+        let frame = tick_native(vec![answer(read, page.to_string().as_bytes())]);
+
+        for suffix in ["/Timeline/2/contents/select", "/Thread/3/contents/select"] {
+            let Node::MouseArea {
+                role: Some(Role::Row),
+                label: Some(label),
+                on_press: Some(_),
+                ..
+            } = node_ending(&frame, suffix)
+            else {
+                panic!("the message row is not a named Row control: {suffix}");
+            };
+            assert!(
+                label.starts_with("Select message, shows its actions: "),
+                "unexpected message row name: {label}"
+            );
+        }
+
+        let Node::MouseArea {
+            on_press: Some(press),
+            ..
+        } = node_ending(&frame, "/Timeline/2/contents/select")
+        else {
+            panic!("the timeline message lost its PressMessage");
+        };
+        let frame = tick_native(vec![ducktape_view_guest::wire::Event::Message(*press)]);
+        let Node::Hover { open, .. } = node_ending(&frame, "/message/2/hover") else {
+            panic!("the timeline message lost its Hover");
+        };
+        assert!(*open, "ordinary timeline activation did not open its Hover");
+        for (suffix, expected) in [
+            ("/message/2/thread", "Open thread"),
+            ("/message/2/thumbs-up", "React with 👍"),
+            ("/message/2/react", "Manage reactions"),
+            ("/message/2/more", "More message actions"),
+        ] {
+            let Node::Button {
+                label: Some(label), ..
+            } = node_ending(&frame, suffix)
+            else {
+                panic!("missing timeline action {expected:?}");
+            };
+            assert_eq!(label, expected);
+        }
+
+        let Node::MouseArea {
+            on_press: Some(press),
+            ..
+        } = node_ending(&frame, "/Thread/3/contents/select")
+        else {
+            panic!("the thread message lost its PressMessage");
+        };
+        let frame = tick_native(vec![ducktape_view_guest::wire::Event::Message(*press)]);
+        let Node::Hover { open, .. } = node_ending(&frame, "/message/3/hover") else {
+            panic!("the thread message lost its Hover");
+        };
+        assert!(*open, "ordinary thread activation did not open its Hover");
+        for (suffix, expected) in [
+            ("/message/3/thumbs-up", "React with 👍"),
+            ("/message/3/react", "Manage reactions"),
+            ("/message/3/more", "More message actions"),
+        ] {
+            let Node::Button {
+                label: Some(label), ..
+            } = node_ending(&frame, suffix)
+            else {
+                panic!("missing thread action {expected:?}");
+            };
+            assert_eq!(label, expected);
+        }
+
+        let mut shifted = session(true);
+        shifted.shift_held = true;
+        let (frame, _, _) = connected_room_with(&shifted, window);
+        let Node::MouseArea {
+            on_press: Some(press),
+            ..
+        } = node_ending(&frame, "/Timeline/2/contents/select")
+        else {
+            panic!("the shifted timeline message lost its PressMessage");
+        };
+        let frame = tick_native(vec![ducktape_view_guest::wire::Event::Message(*press)]);
+        assert!(has_text(&frame, "1 message selected"));
+        let Node::Hover { open, .. } = node_ending(&frame, "/message/2/hover") else {
+            panic!("the shifted timeline message lost its Hover");
+        };
+        assert!(!*open, "Shift activation selected the toolbar");
+
+        let Node::MouseArea {
+            on_press: Some(press),
+            ..
+        } = node_ending(&frame, "/Timeline/1/contents/select")
+        else {
+            panic!("the second shifted timeline message lost its PressMessage");
+        };
+        let frame = tick_native(vec![ducktape_view_guest::wire::Event::Message(*press)]);
+        assert!(has_text(&frame, "2 messages selected"));
+        let Node::Hover { open, .. } = node_ending(&frame, "/message/1/hover") else {
+            panic!("the second shifted timeline message lost its Hover");
+        };
+        assert!(!*open, "Shift activation selected the second toolbar");
     });
 }
 
