@@ -22,9 +22,9 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 
+use duck_address::forge::{ForgeLocator, ForgeRepoAddress, ForgeTarget};
 use duck_address::{Address, ChainId};
 use ducktape_view_guest::host;
-use forge_wire::{ForgeLocator, ForgeRepoAddress, ForgeTarget};
 use futures::{Stream, StreamExt, stream};
 use serde::{Deserialize, Serialize};
 
@@ -1150,11 +1150,7 @@ pub fn own_chain(session: &Session) -> String {
 /// validate (a blob's rev is a 40-hex commit id, never a branch name).
 fn forge_address(chain: &str, repo: &str, target: ForgeTarget) -> Option<String> {
     let chain = chain.parse::<ChainId>().ok()?;
-    let (owner, repo) = repo.split_once('/')?;
-    let repo = ForgeRepoAddress {
-        owner: owner.to_owned(),
-        repo: repo.to_owned(),
-    };
+    let repo = ForgeRepoAddress::from_name(repo).ok()?;
     let address = ForgeLocator { repo, target }.address(chain).ok()?;
     Some(address.to_string())
 }
@@ -1510,7 +1506,7 @@ pub fn forge_link(url: &str) -> ForgeLink {
     let Ok(address) = Address::parse(url) else {
         return ForgeLink::default();
     };
-    let named = |repo: &ForgeRepoAddress| format!("{}/{}", repo.owner, repo.repo);
+    let named = ForgeRepoAddress::name;
     if let Ok(repo) = ForgeRepoAddress::try_from(&address) {
         return ForgeLink {
             repo: named(&repo),

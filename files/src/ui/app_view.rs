@@ -69,12 +69,18 @@ impl FilesView {
         match self.modal() {
             Modal::Deleting => kit::modal(
                 format!("{key}/delete-dialog"),
+                "Delete",
                 content,
                 self.confirm_delete(format!("{key}/confirm-delete")),
                 Message::DisarmDelete,
             ),
             Modal::Naming => kit::modal(
                 format!("{key}/name-dialog"),
+                match &self.name_prompt {
+                    NamePrompt::NewFolder => "New folder",
+                    NamePrompt::NewFile => "New file",
+                    _ => "Rename",
+                },
                 content,
                 self.name_dialog(format!("{key}/name-prompt")),
                 Message::Prompt(NamePrompt::Closed),

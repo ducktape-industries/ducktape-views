@@ -12,8 +12,6 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 duck-address = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "duck-address" }
-chat-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "chat-wire" }
-runs-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "runs-wire" }
 files-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "files-wire" }
 base64.workspace = true
 futures.workspace = true

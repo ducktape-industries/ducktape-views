@@ -17,11 +17,11 @@
 
 use std::collections::BTreeMap;
 
-use chat_wire::MessageAddress;
+use duck_address::chat::MessageAddress;
+use duck_address::runs::RunAddress;
 use duck_address::{Address, ChainId, Refused};
 use ducktape_view_guest::host;
 use futures::{Stream, StreamExt, stream};
-use runs_wire::RunAddress;
 use serde::{Deserialize, Serialize};
 
 /// The planes each card re-reads on: every block for the node itself, and

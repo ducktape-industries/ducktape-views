@@ -530,18 +530,23 @@ impl ForgeView {
                 // no spacer here: a Fill-height space inside a WRAPPING row
                 // takes a line of its own and leaves the button drawn over
                 // the body text under it
-                meta.push(subtle(
+                // no address to give (no chain, or a repo named without an
+                // `<owner>/`) is a control drawn disabled, and it says why
+                let link = host::duck_forge_item_link(
+                    &self.open_repo,
+                    self.forge_item_number,
+                    &self.network_chain_id,
+                );
+                let unlinked = link.is_none();
+                let mut copy = subtle(
                     "forge/copy-item",
                     "Copy link",
-                    // no address to give (no chain, no owner) is a
-                    // control drawn disabled
-                    host::duck_forge_item_link(
-                        &self.open_repo,
-                        self.forge_item_number,
-                        &self.network_chain_id,
-                    )
-                    .map(|link| Message::CopyToClipboard(link, "Link copied".into())),
-                ));
+                    link.map(|link| Message::CopyToClipboard(link, "Link copied".into())),
+                );
+                if let (true, wire::Node::Button { description, .. }) = (unlinked, &mut copy) {
+                    *description = Some("This repository has no address yet.".into());
+                }
+                meta.push(copy);
                 content.push(native::spaced(
                     native::column(
                         "forge/item-head",

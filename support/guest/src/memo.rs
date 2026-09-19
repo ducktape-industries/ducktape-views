@@ -308,6 +308,7 @@ mod tests {
             checked: None,
             expanded: None,
             selected: None,
+            role: None,
             description: None,
             on_press: Some(slots::message(value)),
             width: None,

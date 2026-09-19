@@ -17,12 +17,12 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 
-use chat_wire::MessageAddress;
+use duck_address::chat::MessageAddress;
+use duck_address::runs::RunAddress;
 use duck_address::{Address, ChainId, Refused};
 use ducktape_view_guest::host;
 use files_wire::FileAddress;
 use futures::{FutureExt, Stream, StreamExt, stream};
-use runs_wire::RunAddress;
 use serde::{Deserialize, Serialize};
 
 /// One page of roots, replies or hits — chat's own index page size.

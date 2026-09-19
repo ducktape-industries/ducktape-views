@@ -246,12 +246,14 @@ pub(super) fn error_plate(key: String, reason: &str, retry: Message) -> wire::No
 /// is the cancel.
 pub(super) fn modal(
     key: String,
+    label: &str,
     base: wire::Node,
     card: wire::Node,
     dismiss: Message,
 ) -> wire::Node {
     wire::Node::Overlay {
         key,
+        label: Some(label.into()),
         padding: 30.,
         backdrop: wire::Rgba([0., 0., 0., 0.45]),
         align_x: wire::AlignX::Center,

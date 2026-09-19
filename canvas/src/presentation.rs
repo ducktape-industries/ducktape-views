@@ -357,10 +357,10 @@ impl BoardsView {
         };
         stage = float(
             "boards/menu-float",
+            "Board menu",
             stage,
             self.menu_island(&board, picker_open, menu_room),
-            AlignX::Left,
-            AlignY::Top,
+            (AlignX::Left, AlignY::Top),
             ISLAND,
             dismiss,
         );
@@ -374,39 +374,39 @@ impl BoardsView {
             };
             stage = float(
                 "boards/tools-float",
+                "Tools",
                 stage,
                 self.tool_island(),
-                AlignX::Center,
-                tools_y,
+                (AlignX::Center, tools_y),
                 tools_inset,
                 None,
             );
             if let Some(inspector) = self.inspector_island(board) {
                 stage = float(
                     "boards/properties-float",
+                    "Properties",
                     stage,
                     inspector,
-                    AlignX::Right,
-                    AlignY::Top,
+                    (AlignX::Right, AlignY::Top),
                     ISLAND,
                     None,
                 );
             }
             stage = float(
                 "boards/camera-float",
+                "Zoom and view",
                 stage,
                 self.camera_island(),
-                AlignX::Left,
-                AlignY::Bottom,
+                (AlignX::Left, AlignY::Bottom),
                 ISLAND,
                 None,
             );
             stage = float(
                 "boards/help-float",
+                "Shortcuts",
                 stage,
                 self.help_island(),
-                AlignX::Right,
-                AlignY::Bottom,
+                (AlignX::Right, AlignY::Bottom),
                 ISLAND,
                 None,
             );
@@ -414,10 +414,10 @@ impl BoardsView {
                 let strip_y = if compact { AlignY::Top } else { AlignY::Bottom };
                 stage = float(
                     "boards/typing-float",
+                    "Text entry",
                     stage,
                     self.typing_strip(inline),
-                    AlignX::Center,
-                    strip_y,
+                    (AlignX::Center, strip_y),
                     ISLAND,
                     None,
                 );
@@ -427,10 +427,10 @@ impl BoardsView {
             let card = kit::sized(notice, Some(Length::Fixed(480.)), None);
             stage = float(
                 "boards/notice-float",
+                "Notice",
                 stage,
                 card,
-                AlignX::Center,
-                AlignY::Top,
+                (AlignX::Center, AlignY::Top),
                 PAST_ISLANDS,
                 None,
             );
@@ -443,7 +443,13 @@ impl BoardsView {
             // key you cannot see is worse than a description you can guess.
             let sheet = (w - 2. * 24.).min(700.);
             let card = kit::sized(self.help_card(), Some(Length::Fixed(sheet)), None);
-            stage = modal("boards/help-modal", stage, card, Message::Help);
+            stage = modal(
+                "boards/help-modal",
+                "Keyboard shortcuts",
+                stage,
+                card,
+                Message::Help,
+            );
         }
         // Every tree the crate's own tests render is one assistive
         // technology can read.
@@ -2429,15 +2435,16 @@ fn pin(key: &str, x: f32, y: f32, width: f32, content: Node) -> Node {
 /// the card on a press anywhere else.
 fn float(
     key: &str,
+    label: &str,
     base: Node,
     card: Node,
-    align_x: AlignX,
-    align_y: AlignY,
+    (align_x, align_y): (AlignX, AlignY),
     inset: f32,
     dismiss: Option<Message>,
 ) -> Node {
     Node::Overlay {
         key: key.into(),
+        label: Some(label.into()),
         padding: inset,
         backdrop: Rgba([0.; 4]),
         align_x,
@@ -2881,9 +2888,10 @@ fn island(key: &str, content: Node) -> Node {
     kit::padded(kit::card(key, content), wire::Edges::all(4.))
 }
 /// A card over a shaded stage that a press anywhere else closes.
-fn modal(key: &str, base: Node, card: Node, dismiss: Message) -> Node {
+fn modal(key: &str, label: &str, base: Node, card: Node, dismiss: Message) -> Node {
     Node::Overlay {
         key: key.into(),
+        label: Some(label.into()),
         padding: 24.,
         backdrop: Rgba([0., 0., 0., 0.18]),
         align_x: AlignX::Center,

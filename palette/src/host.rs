@@ -10,7 +10,7 @@
 //! Nothing here links a module crate: every request and every reply is
 //! spelled as the JSON the module's wire already is.
 
-use chat_wire::MessageAddress;
+use duck_address::chat::MessageAddress;
 use duck_address::{Address, ChainId, Refused};
 use ducktape_view_guest::host;
 use futures::StreamExt;

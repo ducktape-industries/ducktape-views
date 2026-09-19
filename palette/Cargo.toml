@@ -12,7 +12,6 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 duck-address = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "duck-address" }
-chat-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "chat-wire" }
 pages-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "pages-wire" }
 futures.workspace = true
 serde.workspace = true

@@ -530,6 +530,7 @@ impl PagesView {
         }
         overlay(
             "pages/search",
+            "Search pages",
             panel,
             Message::ClearPageSearch,
             wire::AlignX::Center,

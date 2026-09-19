@@ -179,6 +179,7 @@ fn modal(key: &str, child: Node, width: f32) -> Node {
 
 fn overlay(
     key: &str,
+    label: &str,
     card: Node,
     dismiss: Message,
     align_x: wire::AlignX,
@@ -186,6 +187,7 @@ fn overlay(
 ) -> Node {
     Node::Overlay {
         key: key.into(),
+        label: Some(label.into()),
         padding: 24.,
         backdrop: wire::Rgba([0.; 4]),
         align_x,
@@ -251,6 +253,7 @@ impl PagesView {
         );
         overlay(
             "pages/delete",
+            "Delete page",
             modal("pages/delete/card", contents, 440.),
             Message::DisarmPageDelete,
             wire::AlignX::Center,

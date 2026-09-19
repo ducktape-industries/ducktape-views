@@ -21,13 +21,13 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 
-use chat_wire::MessageAddress;
+use duck_address::chat::MessageAddress;
+use duck_address::forge::{ForgeLocator, ForgeRepoAddress, ForgeTarget};
+use duck_address::runs::RunAddress;
 use duck_address::{Address, ChainId, Refused};
 use ducktape_view_guest::host;
-use forge_wire::{ForgeLocator, ForgeRepoAddress, ForgeTarget};
 use futures::{Stream, StreamExt, stream};
 use pages_wire::PageAddress;
-use runs_wire::RunAddress;
 use serde::{Deserialize, Serialize};
 
 /// The planes the register follows: `runs` carries every model record and
@@ -2802,12 +2802,8 @@ fn minted(chain: &str, address: impl FnOnce(ChainId) -> Result<Address, Refused>
 /// A forge repo, or an item in it. The forge's namespace is flat today: a
 /// name that carries no `<owner>/` has no address.
 fn forge_link(repo: &str, number: Option<u64>, chain: &str) -> String {
-    let Some((owner, name)) = repo.split_once('/') else {
+    let Ok(repo) = ForgeRepoAddress::from_name(repo) else {
         return String::new();
-    };
-    let repo = ForgeRepoAddress {
-        owner: owner.to_owned(),
-        repo: name.to_owned(),
     };
     minted(chain, |chain| match number {
         Some(number) => ForgeLocator {
