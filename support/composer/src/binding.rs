@@ -118,6 +118,13 @@ fn key_tag(
         Key::Named(Named::ArrowDown) if draft.query(state).is_some() => "menu-next".into(),
         Key::Named(Named::ArrowUp) if draft.query(state).is_some() => "menu-previous".into(),
         Key::Named(Named::Escape) if draft.query(state).is_some() => "menu-dismiss".into(),
+        // These three are claimed only while the menu is open (see `editor`),
+        // but a claim is a frame behind the keystroke: if the menu closed in
+        // between, the host still asks this frame. "ignore" is the answer —
+        // never the empty tag, which falls to the catch-all default action,
+        // and an app that knows only Enter/Tab/Backspace as defaults stops
+        // the whole view when it is handed any other key.
+        Key::Named(Named::ArrowUp | Named::ArrowDown | Named::Escape) => "ignore".into(),
         Key::Named(Named::Backspace) => "backspace".into(),
         Key::Named(Named::Delete) => "delete".into(),
         _ => String::new(),
@@ -140,22 +147,28 @@ pub fn editor<M: 'static>(
     let draft = draft.clone();
     let choices = choices.to_vec();
     let bare = Modifiers::default();
-    let mut claims = [
-        Named::Enter,
-        Named::Tab,
-        Named::Backspace,
-        Named::Delete,
-        Named::ArrowUp,
-        Named::ArrowDown,
-        Named::Escape,
-    ]
-    .into_iter()
-    .map(|key| wire::EditorKeyClaim {
-        key: Key::Named(key),
-        modifiers: bare,
-        command: false,
-    })
-    .collect::<Vec<_>>();
+    let mut claims = [Named::Enter, Named::Tab, Named::Backspace, Named::Delete]
+        .into_iter()
+        .chain(
+            // An arrow moves the caret, and this view cannot: it has no
+            // layout to move it through. So the arrows are the menu's keys
+            // while the menu is open, and the host's own the rest of the
+            // time — claiming them always is how a plain ArrowUp reached the
+            // guest with nothing to say. Escape rides along: a closed menu
+            // has nothing to dismiss.
+            draft
+                .query(draft.editor.state_view())
+                .is_some()
+                .then_some([Named::ArrowUp, Named::ArrowDown, Named::Escape])
+                .into_iter()
+                .flatten(),
+        )
+        .map(|key| wire::EditorKeyClaim {
+            key: Key::Named(key),
+            modifiers: bare,
+            command: false,
+        })
+        .collect::<Vec<_>>();
     claims.extend(
         [
             ("z", false),
@@ -775,5 +788,195 @@ mod tests {
         );
         draft.observed("@A", "@Al");
         assert!(!draft.menu_dismissed);
+    }
+
+    fn roster() -> Vec<MentionChoice> {
+        vec![MentionChoice {
+            token: "<@1>".into(),
+            label: "Ada".into(),
+        }]
+    }
+
+    /// The draft `body` reads, with the caret at byte `at` and nothing
+    /// selected — the state a person is in between keystrokes.
+    fn caret(body: &str, at: usize) -> Draft {
+        let choices = roster();
+        let mut draft = Draft::from_body(body, &choices);
+        let text = draft.editor.text();
+        draft.editor.move_to(wire::EditorCursor {
+            position: editing::position(&text, at),
+            selection: None,
+        });
+        draft
+    }
+
+    fn key_state(claim: &wire::EditorKeyClaim) -> wire::keyboard::KeyState {
+        wire::keyboard::KeyState {
+            key: claim.key.clone(),
+            modifiers: Modifiers {
+                control: claim.command,
+                ..claim.modifiers
+            },
+            modified_key: claim.key.clone(),
+            physical_key: wire::keyboard::Physical::Unidentified(
+                wire::keyboard::NativeCode::Unidentified,
+            ),
+            location: wire::keyboard::Location::Standard,
+        }
+    }
+
+    /// The keys this frame's field asks the host to route to the guest.
+    fn claimed(draft: &Draft) -> Vec<wire::EditorKeyClaim> {
+        let node = editor(draft, "c", "Message", true, &roster(), |_: Event<()>| ());
+        let wire::Node::Editor { options, .. } = node else {
+            panic!("the composer's field is an editor node");
+        };
+        options
+            .binding
+            .expect("the field carries its binding")
+            .claims
+    }
+
+    fn decision(draft: &Draft, claim: &wire::EditorKeyClaim) -> wire::EditorDecision {
+        let choices = roster();
+        let state = draft.editor.state_view();
+        let tag = key_tag(draft, &choices, state, &key_state(claim));
+        draft.decide(&tag, &choices, state)
+    }
+
+    fn bare(key: Named) -> wire::EditorKeyClaim {
+        wire::EditorKeyClaim {
+            key: Key::Named(key),
+            modifiers: Modifiers::default(),
+            command: false,
+        }
+    }
+
+    /// Escape with no menu open has nothing to dismiss. The host keeps it
+    /// (it is not claimed), and if a stale claim routes it here anyway the
+    /// answer is silence — not the native default, which stops the view.
+    #[test]
+    fn escape_with_no_menu_is_the_hosts_and_says_nothing_if_asked() {
+        let draft = caret("hello", 5);
+        assert!(!claimed(&draft).contains(&bare(Named::Escape)));
+        assert_eq!(
+            key_tag(
+                &draft,
+                &roster(),
+                draft.editor.state_view(),
+                &key_state(&bare(Named::Escape))
+            ),
+            "ignore"
+        );
+        assert!(matches!(
+            decision(&draft, &bare(Named::Escape)),
+            wire::EditorDecision::Noop
+        ));
+    }
+
+    /// Cut with nothing selected cuts nothing — and says so itself, because
+    /// an installed app faults on a cut handed back as its own default.
+    #[test]
+    fn cut_with_nothing_selected_says_nothing() {
+        let draft = caret("hello", 2);
+        let cut = wire::EditorKeyClaim {
+            key: Key::Character("x".into()),
+            modifiers: Modifiers::default(),
+            command: true,
+        };
+        assert_eq!(
+            key_tag(
+                &draft,
+                &roster(),
+                draft.editor.state_view(),
+                &key_state(&cut)
+            ),
+            "cut"
+        );
+        assert!(matches!(decision(&draft, &cut), wire::EditorDecision::Noop));
+    }
+
+    /// Forward delete is the view's own work: one character ahead of the
+    /// caret, a whole mention when the caret sits at its edge (the rule
+    /// `expanded` already keeps for a selection), and nothing at the end.
+    #[test]
+    fn forward_delete_removes_what_is_ahead_of_the_caret() {
+        let removed = |draft: &Draft| {
+            let before = draft.editor.text();
+            match decision(draft, &bare(Named::Delete)) {
+                wire::EditorDecision::Apply {
+                    patches, cursor, ..
+                } => Some(wire::patched_editor_text(&before, &patches, cursor).unwrap()),
+                wire::EditorDecision::Noop => None,
+                other => panic!("a delete never hands the key back: {other:?}"),
+            }
+        };
+        assert_eq!(removed(&caret("hello", 2)).as_deref(), Some("helo"));
+        // a character is not a byte
+        assert_eq!(removed(&caret("héllo", 1)).as_deref(), Some("hllo"));
+        // at the end there is nothing ahead to remove
+        assert_eq!(removed(&caret("hello", 5)), None);
+        // the mention goes whole, the same as a selection over it would
+        let mut mention = Draft::from_body("Hi <@1> there", &roster());
+        let at = mention.mentions[0].range.start;
+        let text = mention.editor.text();
+        mention.editor.move_to(wire::EditorCursor {
+            position: editing::position(&text, at),
+            selection: None,
+        });
+        assert_eq!(removed(&mention).as_deref(), Some("Hi  there"));
+    }
+
+    /// The arrows need a caret move through a layout this view does not
+    /// have, so they are the menu's keys while the menu is open and the
+    /// host's own the rest of the time.
+    #[test]
+    fn the_arrows_are_claimed_only_while_the_menu_is_open() {
+        let closed = claimed(&caret("hello", 5));
+        for key in [Named::ArrowUp, Named::ArrowDown, Named::Escape] {
+            assert!(
+                !closed.contains(&bare(key)),
+                "{key:?} is the host's while no menu is open"
+            );
+        }
+        let open = claimed(&caret("@A", 2));
+        for key in [Named::ArrowUp, Named::ArrowDown, Named::Escape] {
+            assert!(
+                open.contains(&bare(key)),
+                "{key:?} moves the open menu, so the menu claims it"
+            );
+        }
+    }
+
+    /// The whole defect in one assertion: an app installed today knows only
+    /// Enter, Tab and Backspace as native editor defaults and stops the view
+    /// on any other key handed back. So no claimed key but Tab and Backspace
+    /// may ever answer `DefaultEditorAction` — whatever the draft holds.
+    #[test]
+    fn no_claimed_key_but_tab_and_backspace_asks_the_app_for_its_default() {
+        let drafts = [
+            ("an empty draft", Draft::default()),
+            ("words, nothing selected", caret("hello", 2)),
+            ("the caret at the end", caret("hello", 5)),
+            ("an open mention menu", caret("@A", 2)),
+        ];
+        for (what, draft) in drafts {
+            for claim in claimed(&draft) {
+                let native = matches!(
+                    decision(&draft, &claim),
+                    wire::EditorDecision::DefaultEditorAction
+                );
+                let allowed = !claim.command
+                    && matches!(
+                        claim.key,
+                        Key::Named(Named::Tab) | Key::Named(Named::Backspace)
+                    );
+                assert!(
+                    !native || allowed,
+                    "{:?} on {what} stops every app installed today",
+                    claim.key
+                );
+            }
+        }
     }
 }
