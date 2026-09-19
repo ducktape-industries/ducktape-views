@@ -897,7 +897,7 @@ impl Chips {
                 None => chip_label(&text),
             },
         };
-        let url = page_link(&page_id, Some(&block_id), &self.chain);
+        let url = page_link(&page_id, Some(block_id), &self.chain);
         Some((label, url))
     }
 
