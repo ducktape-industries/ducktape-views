@@ -410,6 +410,34 @@ fn every_row_cell_keeps_one_line() {
     assert!(wrapping.is_empty(), "cells that may wrap: {wrapping:?}");
 }
 
+/// A reading's text takes what its row leaves and truncates there: a
+/// label's own width never shrinks, so a long sync line — or, in a pane
+/// 320 px wide, a digest beside its Copy — ran over the card's edge.
+#[test]
+fn a_reading_truncates_to_what_its_row_leaves() {
+    let (frame, _) = connected_dashboard();
+    let frame = tick_native(measure(&frame, "home/viewport", 320., 800.));
+    for key in [
+        "home/node/sync/value",
+        "home/node/chain/value",
+        "home/node/root/value",
+        "home/node/key/value",
+        "home/members/account/value",
+    ] {
+        let Some(Node::Text { width, options, .. }) = find(&frame, key) else {
+            panic!("no {key}");
+        };
+        assert_eq!(
+            (*width, options.wrapping),
+            (
+                Some(Length::Fill),
+                Some(ducktape_view_guest::wire::Wrapping::None)
+            ),
+            "{key}"
+        );
+    }
+}
+
 /// A pressed room leaves as `host.open_link` with the room's `duck://`
 /// address on this chain; so does a run.
 #[test]
