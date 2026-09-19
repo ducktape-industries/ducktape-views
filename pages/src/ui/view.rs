@@ -982,7 +982,7 @@ mod tests {
         app.page_search_draft = "  missing  ".into();
         let empty_answer = |app: &PagesView| {
             let mut found = false;
-            view(&app).for_each_mut(&mut |node| {
+            view(app).for_each_mut(&mut |node| {
                 if let Node::Text { content, .. } = node {
                     found |= content == "No matching pages";
                 }
