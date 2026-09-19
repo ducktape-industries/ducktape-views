@@ -383,6 +383,53 @@ fn a_met_rule_offers_settle_which_leaves_as_execute() {
     );
 }
 
+/// A card holds in a narrow pane: an id takes its row's rest and truncates
+/// (no spacer beside it), the proposer and deadline wrap, and the ballot
+/// sits in a wrapping row beside notes that are a portion — so it drops
+/// under them only when the card is too narrow to hold both.
+#[test]
+fn a_card_holds_in_a_narrow_pane() {
+    use ducktape_view_guest::testing::find;
+
+    let (frame, _) = connected_with_register();
+    let card = "governance/proposal/prop-open";
+    let wraps = |key: &str| match find(&frame, key) {
+        Some(Node::Linear { wrap, .. }) => wrap.is_some(),
+        other => panic!("{key}: {other:?}"),
+    };
+    assert!(wraps(&format!("{card}/about")), "the proposer line wraps");
+    assert!(wraps(&format!("{card}/actions")), "the ballot row wraps");
+    let Some(Node::Linear { width, .. }) = find(&frame, &format!("{card}/notes")) else {
+        panic!("no notes");
+    };
+    assert_eq!(*width, Some(Length::FillPortion(1)));
+    let Some(Node::Linear { width, .. }) = find(&frame, &format!("{card}/ballot")) else {
+        panic!("no ballot");
+    };
+    assert_eq!(*width, Some(Length::Shrink));
+    for (row, id) in [
+        (format!("{card}/head"), format!("{card}/id")),
+        (
+            "governance/settled/prop-done".to_owned(),
+            "governance/settled/prop-done/id".to_owned(),
+        ),
+    ] {
+        let Some(Node::Text { width, .. }) = find(&frame, &id) else {
+            panic!("no {id}");
+        };
+        assert_eq!(*width, Some(Length::Fill), "{id} truncates");
+        let Some(Node::Linear { children, .. }) = find(&frame, &row) else {
+            panic!("no {row}");
+        };
+        assert!(
+            !children
+                .iter()
+                .any(|child| matches!(child, Node::Space { .. })),
+            "{row} carries no spacer"
+        );
+    }
+}
+
 /// Every text the screen may break onto a second line, by key: the view's
 /// own title and its two section headings, a proposal field's value, and a
 /// refused taste. Each sits in a row with no fixed height, so a second line

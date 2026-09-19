@@ -21,6 +21,12 @@ pub mod host;
 /// refused taste — belongs in a row with no fixed height, never here.
 const ROW: f32 = 28.;
 
+/// A one-line cell that takes its row's rest and truncates there.
+fn one_line(node: ducktape_view_guest::wire::Node) -> ducktape_view_guest::wire::Node {
+    use ducktape_view_guest::{kit, wire};
+    kit::sized(kit::nowrap(node), Some(wire::Length::Fill), None)
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct GovernanceView {
     pub(crate) rows: Vec<crate::host::ProposalRow>,
@@ -347,7 +353,11 @@ impl GovernanceView {
             ));
         }
         if !self.answered {
-            content.push(kit::secondary("governance/loading", "Reading proposals…"));
+            content.push(kit::empty_state(
+                "governance/loading",
+                "Reading proposals…",
+                "Every proposal and its tally arrive from the node.",
+            ));
             return kit::reading_page("governance", content);
         }
         let open = host::open_proposals(&self.rows);
@@ -376,10 +386,12 @@ impl GovernanceView {
                 let key = format!("governance/settled/{}", proposal.id);
                 let passed = proposal.status.eq_ignore_ascii_case("passed")
                     || proposal.status.eq_ignore_ascii_case("executed");
+                // the id takes the row's rest and truncates there: a label at
+                // its own width never shrinks, and a long id pushed the
+                // status off the row
                 let mut cells = vec![
-                    kit::nowrap(kit::mono(format!("{key}/id"), &proposal.id)),
+                    one_line(kit::mono(format!("{key}/id"), &proposal.id)),
                     kit::nowrap(kit::secondary(format!("{key}/kind"), &proposal.action)),
-                    kit::spacer(),
                     kit::badge(
                         format!("{key}/status"),
                         &proposal.status,
@@ -420,8 +432,7 @@ impl GovernanceView {
                 format!("{key}/head"),
                 [
                     kit::badge(format!("{key}/kind"), &proposal.action, Tone::Neutral),
-                    kit::nowrap(kit::mono(format!("{key}/id"), &proposal.id)),
-                    kit::spacer(),
+                    one_line(kit::mono(format!("{key}/id"), &proposal.id)),
                     kit::badge(
                         format!("{key}/tally"),
                         host::tally_label(proposal.approvals, proposal.required_yes),
@@ -456,33 +467,52 @@ impl GovernanceView {
                 format!("expires {}", host::height_label_short(proposal.deadline)),
             )),
         ];
-        let mut actions = vec![kit::nowrap(kit::secondary(
+        let mut notes = vec![kit::nowrap(kit::secondary(
             format!("{key}/quorum"),
             host::tally_note(proposal.approvals, proposal.required_yes),
         ))];
         if proposal.rejections > 0 {
-            actions.push(kit::nowrap(kit::tone_text(
+            notes.push(kit::nowrap(kit::tone_text(
                 format!("{key}/rejections"),
                 format!("{} against", proposal.rejections),
                 Tone::Danger,
             )));
         }
+        // the notes are a portion of a wrapping row: its least width is the
+        // notes themselves, so the ballot sits at their right while it fits
+        // and drops under them in a narrow card, where one line ran it past
+        // the edge
+        let mut actions = vec![kit::sized(
+            kit::centered_row(format!("{key}/notes"), notes),
+            Some(wire::Length::FillPortion(1)),
+            None,
+        )];
         // the ballot is a validator's: a reader sees the tally and nothing
         // to press.
         if self.admin {
-            actions.extend(self.ballot(proposal, &key, available, met));
+            actions.push(kit::sized(
+                kit::centered_row(
+                    format!("{key}/ballot"),
+                    self.ballot(proposal, &key, available, met),
+                ),
+                Some(wire::Length::Shrink),
+                None,
+            ));
         }
         let mut body = vec![
             head,
             kit::spaced(kit::column(format!("{key}/fields"), fields), 4.),
-            kit::spaced(kit::centered_row(format!("{key}/about"), about), 12.),
+            kit::spaced(kit::wrapped_row(format!("{key}/about"), about), 12.),
         ];
         // a code ballot's view can be tried before the vote: every member,
         // on their own screen alone
         if let Some(taste) = host::taste_of(&self.tasting, proposal) {
             body.push(self.taste(taste, &key));
         }
-        body.push(kit::centered_row(format!("{key}/actions"), actions));
+        body.push(kit::aligned(
+            kit::wrapped_row(format!("{key}/actions"), actions),
+            wire::AlignX::Center,
+        ));
         kit::card(
             &key,
             kit::spaced(kit::column(format!("{key}/body"), body), 8.),
@@ -503,7 +533,7 @@ impl GovernanceView {
                 host::refusal_words(&row.reason),
             ));
         }
-        let status = kit::nowrap(kit::caption(
+        let status = one_line(kit::caption(
             format!("{key}/taste/status"),
             host::taste_status(row),
         ));
@@ -520,7 +550,7 @@ impl GovernanceView {
             Some(slots::message(message)),
             wire::ButtonPreset::Secondary,
         );
-        kit::centered_row(format!("{key}/taste"), [status, kit::spacer(), button])
+        kit::centered_row(format!("{key}/taste"), [status, button])
     }
     /// The validator's controls on one open proposal: a note while an op
     /// is out, then Reject and Approve, or Settle once the rule is met.
@@ -564,7 +594,7 @@ impl GovernanceView {
         if let wire::Node::Button { label, .. } = &mut approval {
             *label = Some(if met { "Settle" } else { "Approve" }.into());
         }
-        controls.extend([kit::spacer(), reject, approval]);
+        controls.extend([reject, approval]);
         controls
     }
 }
