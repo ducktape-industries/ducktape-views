@@ -31,6 +31,8 @@ pub struct SettingsView {
     pub(crate) rpc_endpoint: String,
     pub(crate) rpc_endpoint_override: String,
     pub(crate) rpc_endpoint_refusal: String,
+    pub(crate) rpc_endpoint_editable: Option<bool>,
+    pub(crate) rpc_endpoint_editability_reason: String,
     pub(crate) account_ceremony_phase: String,
     pub(crate) account_ceremony_qr: String,
     pub(crate) account_ceremony_detail: String,
@@ -144,6 +146,8 @@ impl SettingsView {
             rpc_endpoint: "".to_owned(),
             rpc_endpoint_override: "".to_owned(),
             rpc_endpoint_refusal: "".to_owned(),
+            rpc_endpoint_editable: None,
+            rpc_endpoint_editability_reason: "".to_owned(),
             account_ceremony_phase: "".to_owned(),
             account_ceremony_qr: "".to_owned(),
             account_ceremony_detail: "".to_owned(),
@@ -190,7 +194,7 @@ impl SettingsView {
     pub(crate) const PREFERRED_WINDOW_SIZE: &'static str = "none";
     /// This state's layout, digested — `snapshot_schema` holds it here.
     pub(crate) const SNAPSHOT_SCHEMA: &'static str =
-        "a82cb2074bcc93f6b90f7ae5323509f0400a00deeb8835c7791bdfe400a86ecd";
+        "136e80e2fa0150c63aebfd41042cc84a37bceb2f1a6dcc9304e70b09af7cbb7c";
     pub(crate) fn snapshot(&self) -> Result<Vec<u8>, String> {
         wire::Snapshot {
             schema: Self::SNAPSHOT_SCHEMA.into(),
@@ -386,6 +390,8 @@ impl SettingsView {
         self.rpc_endpoint = next.rpc_endpoint.to_owned();
         self.rpc_endpoint_override = next.rpc_endpoint_override.to_owned();
         self.rpc_endpoint_refusal = next.rpc_endpoint_refusal.to_owned();
+        self.rpc_endpoint_editable = next.rpc_endpoint_editable;
+        self.rpc_endpoint_editability_reason = next.rpc_endpoint_editability_reason.to_owned();
         self.account_ceremony_phase = next.account_ceremony_phase.to_owned();
         self.account_ceremony_qr = next.account_ceremony_qr.to_owned();
         self.account_ceremony_detail = next.account_ceremony_detail.to_owned();
@@ -626,10 +632,16 @@ impl SettingsView {
         Task::none()
     }
     fn on_save_rpc_endpoint(&mut self) -> Task<Message> {
+        if self.rpc_endpoint_editable == Some(false) {
+            return Task::none();
+        }
         crate::host::set_endpoint(&self.rpc_endpoint_draft);
         Task::none()
     }
     fn on_clear_rpc_endpoint(&mut self) -> Task<Message> {
+        if self.rpc_endpoint_editable == Some(false) {
+            return Task::none();
+        }
         crate::host::set_endpoint("");
         Task::none()
     }
@@ -1137,7 +1149,7 @@ impl SettingsView {
                 },
             )),
         );
-        let mut rpc_field = vec![kit::wrapped_row(
+        let rpc_controls = kit::wrapped_row(
             "settings/node-rpc-controls",
             [
                 settings_input(
@@ -1160,25 +1172,44 @@ impl SettingsView {
                     !self.rpc_endpoint_override.is_empty(),
                 ),
             ],
-        )];
+        );
         // the app checks the URL and the node; its refusal sits under the field
-        if !self.rpc_endpoint_refusal.is_empty() {
-            rpc_field.push(kit::sized(
+        let rpc_refusal = (!self.rpc_endpoint_refusal.is_empty()).then(|| {
+            kit::sized(
                 kit::wrapping(kit::caption(
                     "settings/node-rpc-refusal",
                     &self.rpc_endpoint_refusal,
                 )),
                 Some(wire::Length::Fixed(FIELD_WIDTH)),
                 None,
-            ));
-        }
-        let rpc_override = setting_row(
-            "settings/node-rpc-edit",
-            "Node RPC URL",
-            "Used instead of the one in node.toml; Clear goes back to it.",
-            "",
-            kit::column("settings/node-rpc-field", rpc_field),
-        );
+            )
+        });
+        let rpc_override = if self.rpc_endpoint_editable == Some(false) {
+            let mut details = vec![kit::wrapping(kit::caption(
+                "settings/node-rpc-editability-reason",
+                &self.rpc_endpoint_editability_reason,
+            ))];
+            if let Some(refusal) = rpc_refusal {
+                details.push(refusal);
+            }
+            kit::kv(
+                "settings/node-rpc-editability",
+                "Node RPC URL",
+                kit::column("settings/node-rpc-editability-details", details),
+            )
+        } else {
+            let mut rpc_field = vec![rpc_controls];
+            if let Some(refusal) = rpc_refusal {
+                rpc_field.push(refusal);
+            }
+            setting_row(
+                "settings/node-rpc-edit",
+                "Node RPC URL",
+                "Used instead of the one in node.toml; Clear goes back to it.",
+                "",
+                kit::column("settings/node-rpc-field", rpc_field),
+            )
+        };
         let network = settings_section(
             "settings/network",
             "settings/network-name",

@@ -45,6 +45,8 @@ fn facts() -> Session {
         rpc_endpoint: "http://127.0.0.1:32989".into(),
         rpc_endpoint_override: String::new(),
         rpc_endpoint_refusal: String::new(),
+        rpc_endpoint_editable: None,
+        rpc_endpoint_editability_reason: String::new(),
         account_ceremony_phase: String::new(),
         account_ceremony_qr: String::new(),
         account_ceremony_detail: String::new(),
@@ -1142,6 +1144,110 @@ fn a_refused_node_rpc_url_keeps_its_draft_under_the_refusal() {
     );
 }
 
+#[test]
+fn node_rpc_endpoint_editability_keeps_legacy_and_true_and_removes_false_controls() {
+    let (frame, _, _) = connected(&facts(), 2);
+    let frame = tick_native(press(&frame, "Network"));
+    assert!(find(&frame, "settings/node-rpc-draft").is_some());
+    assert!(find(&frame, "settings/node-rpc-edit").is_some());
+
+    let enabled = Session {
+        rpc_endpoint_editable: Some(true),
+        ..facts()
+    };
+    let (frame, props, _) = connected(&enabled, 2);
+    let frame = tick_native(press(&frame, "Network"));
+    assert!(find(&frame, "settings/node-rpc-draft").is_some());
+    assert!(find(&frame, "settings/node-rpc-edit").is_some());
+
+    let reason = "This connection has no local workspace.";
+    let refused = Session {
+        rpc_endpoint_editable: Some(false),
+        rpc_endpoint_editability_reason: reason.into(),
+        rpc_endpoint_refusal: ENDPOINT_REFUSAL.into(),
+        ..facts()
+    };
+    let frame = tick_native(vec![item(props, &encoded(&refused))]);
+    assert!(
+        has_text(&frame, "http://127.0.0.1:32989"),
+        "{:?}",
+        texts(&frame)
+    );
+    assert!(has_text(&frame, reason), "{:?}", texts(&frame));
+    assert!(has_text(&frame, ENDPOINT_REFUSAL), "{:?}", texts(&frame));
+    for key in [
+        "settings/node-rpc-draft",
+        "settings/node-rpc-save",
+        "settings/node-rpc-clear",
+        "settings/node-rpc-edit",
+    ] {
+        assert!(find(&frame, key).is_none(), "{key}: {:?}", texts(&frame));
+    }
+    assert!(
+        !frame
+            .requests
+            .iter()
+            .any(|request| request.kind == "settings.endpoint")
+    );
+}
+
+#[test]
+fn node_rpc_actions_keep_network_selected_through_refusal_and_reconnect() {
+    let (frame, props, _) = connected(&facts(), 2);
+    let frame = tick_native(press(&frame, "Network"));
+    let assert_network_selected = |frame: &Frame| {
+        assert!(matches!(
+            find(frame, "settings/tab/network"),
+            Some(Node::Button {
+                checked: Some(true),
+                ..
+            })
+        ));
+        assert!(matches!(
+            find(frame, "settings/tab/general"),
+            Some(Node::Button {
+                checked: Some(false),
+                ..
+            })
+        ));
+    };
+    let frame = tick_native(type_into(&frame, "node RPC URL…", "ftp://node"));
+    let frame = tick_native(press(&frame, "Save"));
+    assert_eq!(endpoint(one_intent(&frame)).url, "ftp://node");
+
+    let refused = Session {
+        rpc_endpoint_refusal: ENDPOINT_REFUSAL.into(),
+        ..facts()
+    };
+    let frame = tick_native(vec![item(props, &encoded(&refused))]);
+    assert_network_selected(&frame);
+    assert_eq!(field(&frame, "settings/node-rpc-draft"), "ftp://node");
+    assert!(has_text(&frame, ENDPOINT_REFUSAL), "{:?}", texts(&frame));
+
+    let frame = tick_native(type_into(
+        &frame,
+        "node RPC URL…",
+        "http://100.92.85.92:28990",
+    ));
+    let frame = tick_native(press(&frame, "Save"));
+    assert_eq!(
+        endpoint(one_intent(&frame)).url,
+        "http://100.92.85.92:28990"
+    );
+    let saved = Session {
+        connected_rpc: "http://100.92.85.92:28990".into(),
+        rpc_endpoint: "http://100.92.85.92:28990".into(),
+        rpc_endpoint_override: "http://100.92.85.92:28990".into(),
+        ..facts()
+    };
+    let frame = tick_native(vec![item(props, &encoded(&saved))]);
+    assert_network_selected(&frame);
+    assert_eq!(
+        field(&frame, "settings/node-rpc-draft"),
+        "http://100.92.85.92:28990"
+    );
+}
+
 /// A stored URL seeds the field and can be cleared: Clear sends the empty
 /// URL, and once the app drops the stored one the field is empty too.
 #[test]
@@ -1179,6 +1285,8 @@ fn a_session_from_an_older_app_draws_no_node_rpc_url() {
         "rpc_endpoint",
         "rpc_endpoint_override",
         "rpc_endpoint_refusal",
+        "rpc_endpoint_editable",
+        "rpc_endpoint_editability_reason",
         "update_refused",
     ] {
         assert!(older_fields.remove(newer).is_some(), "{newer} is sent");
