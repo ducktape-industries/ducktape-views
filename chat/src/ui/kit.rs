@@ -263,7 +263,10 @@ impl ChatView {
         children.push(wire::Node::MouseArea {
             key: format!("{key}/select"),
             role: Some(wire::Role::Row),
-            label: Some(format!("{}: {}", message.author, message.body)),
+            label: Some(format!(
+                "Select message, shows its actions: {}: {}",
+                message.author, message.body
+            )),
             expanded: None,
             selected: Some(plate != RowPlate::Plain),
             checked: None,
