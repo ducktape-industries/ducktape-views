@@ -317,7 +317,7 @@ impl ChatView {
                 Some(reaction.count),
                 label,
                 reaction.reacted_by_me,
-                (!self.active_channel_archived).then(|| slots::message(event)),
+                (!self.active_channel_archived && self.may_write()).then(|| slots::message(event)),
             ));
         }
         // a row of reactions ends with the way to add one more
@@ -338,7 +338,7 @@ impl ChatView {
                 None,
                 "Add reaction",
                 false,
-                (!self.active_channel_archived).then(|| slots::message(open)),
+                (!self.active_channel_archived && self.may_write()).then(|| slots::message(open)),
             ));
             children.push(native::spaced(
                 native::wrapped_row(format!("{key}/reactions"), reactions),
@@ -767,14 +767,23 @@ impl ChatView {
         join: impl Fn() -> Message + Clone + 'static,
     ) -> wire::Node {
         // one word in the header; the full name is what a reader hears
+        let allowed = self.may_write();
         let mut button = native::button(
             key,
             "Huddle",
-            Some(slots::message(join())),
+            allowed.then(|| slots::message(join())),
             wire::ButtonPreset::Subtle,
         );
-        if let wire::Node::Button { label, .. } = &mut button {
+        if let wire::Node::Button {
+            label, description, ..
+        } = &mut button
+        {
             *label = Some("Start a huddle".into());
+            if !allowed {
+                // pressing it only ever met the host's refusal; the step out
+                // of that is what the button says instead
+                *description = Some("Create an account to start a huddle".into());
+            }
         }
         button
     }
@@ -819,6 +828,19 @@ impl ChatView {
                 native::spacing::LG as f32,
             ),
             Tone::Neutral,
+        )
+    }
+
+    /// What stands where the composer would for a key that holds no account:
+    /// the reason the host would give, before a press has to go and fetch it.
+    pub(super) fn account_notice(&self, key: String) -> wire::Node {
+        native::notice(
+            key.clone(),
+            native::wrapping(native::text(
+                format!("{key}/text"),
+                "Your signing key holds no account on this network, and every message here is posted by one. Create an account to write; until then the room is yours to read.",
+            )),
+            Tone::Warning,
         )
     }
 

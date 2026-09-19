@@ -312,7 +312,49 @@ impl ChatView {
             wire::Length::Fixed(self.sidebar_width as f32),
         )
     }
+    /// The pane with no room open. Nothing here has a name, so nothing here
+    /// pretends to: no "#" without a channel behind it, no composer whose
+    /// buttons are dead for a reason the reader cannot see. The network
+    /// answering comes first, so "No channels yet" never flashes over rooms
+    /// about to arrive; a list with rooms in it means one is waiting to be
+    /// picked, not that the network is empty.
+    fn no_room(&self, key: String) -> wire::Node {
+        let plate = if self.loading {
+            native::empty_state(
+                &key,
+                "Loading channels…",
+                "This network's rooms arrive with the next block.",
+            )
+        } else if !self.rooms.is_empty() {
+            native::empty_state(
+                &key,
+                "No channel open",
+                "Pick a room from the list to read it.",
+            )
+        } else {
+            native::empty_state_action(
+                &key,
+                "No channels yet",
+                "This network has no channel to read. The first one you create is there for everyone on it.",
+                primary(
+                    format!("{key}/create"),
+                    "Create a channel",
+                    // the same door the sidebar's New channel opens: this only
+                    // opens the form, so it is never a dead button
+                    Message::ToggleChannelCreate,
+                    false,
+                ),
+            )
+        };
+        native::sized(plate, Some(wire::Length::Fill), Some(wire::Length::Fill))
+    }
     fn room(&self, key: &str) -> wire::Node {
+        // a room is what the rest of this reads from; with none open there is
+        // no name for the header, no beginning for the intro and nowhere for
+        // the composer to post
+        if self.active_channel.is_empty() && self.active_dm.name.is_empty() {
+            return self.no_room(format!("{key}/no-room"));
+        }
         // The title takes what Huddle and Details leave, and in it only the
         // channel's name gives way: a long one is cut, never the buttons.
         let mut title = Vec::new();
@@ -457,7 +499,7 @@ impl ChatView {
         }
         // a room that refuses posts shows why where the composer would be;
         // a disabled composer under the reason would only repeat it
-        if !self.post_refusal.is_empty() {
+        if !self.write_refusal().is_empty() {
             children.push(native::padded(
                 self.composer_gate(format!("{key}/refusal")),
                 wire::Edges {
@@ -489,7 +531,7 @@ impl ChatView {
                     !self.loading
                         && self.connected
                         && !self.active_channel.is_empty()
-                        && self.post_refusal.is_empty(),
+                        && self.write_refusal().is_empty(),
                 ),
             ),
             COMPOSER_MARGIN,
@@ -701,7 +743,7 @@ impl ChatView {
                     "👍",
                     "React with 👍",
                     Message::AddReactionAt(message.seq, "👍".into()),
-                    self.active_channel_archived,
+                    self.active_channel_archived || !self.may_write(),
                 ));
                 controls.extend([
                     glyph(
@@ -709,7 +751,7 @@ impl ChatView {
                         "😀",
                         "Manage reactions",
                         reaction,
-                        self.active_channel_archived,
+                        self.active_channel_archived || !self.may_write(),
                     ),
                     glyph(
                         format!("{scope}/more"),
@@ -1085,7 +1127,7 @@ impl ChatView {
                         thread: Some(self.active_thread_seq as u64),
                     },
                     "Reply in thread",
-                    !self.thread_loading && self.connected && self.post_refusal.is_empty(),
+                    !self.thread_loading && self.connected && self.write_refusal().is_empty(),
                 ),
             ),
             COMPOSER_MARGIN,
@@ -1392,7 +1434,7 @@ impl ChatView {
                         "😀",
                         "Add reaction",
                         reaction,
-                        self.active_channel_archived,
+                        self.active_channel_archived || !self.may_write(),
                     ),
                     menu_item(
                         format!("{key}/{prefix}copy-link"),
@@ -1406,14 +1448,14 @@ impl ChatView {
                         "✎",
                         "Edit message",
                         edit,
-                        self.active_channel_archived,
+                        self.active_channel_archived || !self.may_write(),
                     ),
                     menu_item(
                         format!("{key}/{prefix}delete"),
                         "🗑",
                         "Delete message",
                         delete,
-                        self.active_channel_archived,
+                        self.active_channel_archived || !self.may_write(),
                     ),
                 ]);
                 children.push(native::spaced(
@@ -1428,7 +1470,7 @@ impl ChatView {
                         format!("{key}/{prefix}reaction/{emoji}"),
                         &emoji,
                         Message::AddReactionAt(seq, emoji.clone()),
-                        self.active_channel_archived,
+                        self.active_channel_archived || !self.may_write(),
                     ));
                 }
                 // the host cuts cells from the grid's measured width, so the

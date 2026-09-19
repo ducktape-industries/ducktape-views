@@ -264,8 +264,26 @@ impl ChatView {
         button
     }
 
+    /// Whether this reader may write in chat at all. Read live from the
+    /// handle, never stored: an account made mid-session is hers at once, and
+    /// nothing re-reads the room to say so.
+    pub(super) fn may_write(&self) -> bool {
+        crate::host::holds_account(&self.me)
+    }
+
+    /// Why the reader may not write here, as a reason token — empty when she
+    /// may. The account comes first: with none, every write in the room is
+    /// refused, and offering to unarchive the room would only refuse again.
+    pub(super) fn write_refusal(&self) -> &str {
+        match self.may_write() {
+            false => "no_account",
+            true => &self.post_refusal,
+        }
+    }
+
     pub(super) fn composer_gate(&self, key: String) -> wire::Node {
-        match self.post_refusal.as_str() {
+        match self.write_refusal() {
+            "no_account" => self.account_notice(key),
             "channel_archived" => self.archived_notice(key),
             "members_only" => self.private_notice(key),
             _ => native::column(key, []),

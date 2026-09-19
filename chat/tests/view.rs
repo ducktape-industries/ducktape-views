@@ -1693,3 +1693,118 @@ fn a_lost_creation_reply_is_reconciled_before_retrying_the_write() {
         assert!(!has_text(&frame, "Create a channel"));
     });
 }
+
+/// Boots on a network that has no channel at all: the session names no room
+/// and the sidebar read comes back empty. Not `seated_view`, which hands the
+/// view three channels.
+fn empty_network() -> Frame {
+    boot_native();
+    let frame = nameable(chat_view::tick_native(Vec::new()));
+    let props = request(&frame, "chat.props").id;
+    let mut empty = session(true);
+    empty.active_channel = String::new();
+    let frame = nameable(chat_view::tick_native(vec![item(props, &encoded(&empty))]));
+    let sidebar = view_asking(&frame, "channels").id;
+    let none = serde_json::to_vec(
+        &serde_json::json!({"channels": {"channels": [], "has_more": false, "next_after": null}}),
+    )
+    .expect("the empty sidebar encodes");
+    nameable(chat_view::tick_native(vec![answer(sidebar, &none)]))
+}
+
+/// A network with no channel says so and offers the one way on. What it must
+/// not do is what it did: draw a nameless `#` room, tell the reader this is the
+/// very beginning of nothing, and hang a composer of dead buttons under it.
+#[test]
+fn a_network_with_no_channel_says_so_and_offers_the_way_to_make_one() {
+    on_a_deep_stack(|| {
+        let frame = empty_network();
+        assert!(has_text(&frame, "No channels yet"), "{:?}", texts(&frame));
+        for lie in ["This is the very beginning of #", "#", "Send"] {
+            assert!(
+                !has_text(&frame, lie),
+                "`{lie}` with no channel behind it: {:?}",
+                texts(&frame)
+            );
+        }
+        // the action opens the very form the sidebar's New channel opens
+        let frame = nameable(chat_view::tick_native(press(&frame, "Create a channel")));
+        assert!(
+            has_text(&frame, "Voice room: Off"),
+            "the create form did not open: {:?}",
+            texts(&frame)
+        );
+    });
+}
+
+/// A control by the name a reader hears. `press` panics on a dead button, so a
+/// button that should be dead has to be read off the tree instead of pressed.
+fn labelled<'a>(frame: &'a Frame, label: &str) -> &'a Node {
+    fn walk<'a>(node: &'a Node, label: &str) -> Option<&'a Node> {
+        if matches!(node, Node::Button { label: Some(name), .. } if name == label) {
+            return Some(node);
+        }
+        node.children().iter().find_map(|node| walk(node, label))
+    }
+    walk(frame.root.as_ref().expect("a tree"), label).expect("a named control")
+}
+
+/// A KEY THAT HOLDS NO ACCOUNT IS TOLD THE STEP, NOT REFUSED AFTER THE PRESS.
+/// The header offered "Start a huddle" to a signing key with no account and the
+/// host turned it away; the composer and the reactions were live in the same
+/// way. One thing gates all of them now, it says what to do, and an account
+/// made on a later block opens the room's writes without a re-read.
+#[test]
+fn a_key_with_no_account_reads_the_room_and_every_write_says_what_to_do() {
+    on_a_deep_stack(|| {
+        let notice = "Your signing key holds no account on this network, and every message here is posted by one. Create an account to write; until then the room is yours to read.";
+        let mut keyed = session(true);
+        keyed.me = "user:cc".into();
+        keyed.me_key = "cc".into();
+        let (frame, _, props) = connected_room_with(&keyed, roots());
+
+        let Node::Button {
+            on_press,
+            description,
+            ..
+        } = labelled(&frame, "Start a huddle")
+        else {
+            panic!("the header lost its huddle button")
+        };
+        assert!(
+            on_press.is_none(),
+            "the huddle still presses into the host's refusal"
+        );
+        assert_eq!(
+            description.as_deref(),
+            Some("Create an account to start a huddle"),
+            "the disabled huddle gives no reason"
+        );
+
+        // the composer is not there to be pressed at all: the reason stands
+        // where it was, and the same one thing holds the reactions
+        assert!(has_text(&frame, notice), "{:?}", texts(&frame));
+        let Node::Button { on_press, .. } = labelled(&frame, "React with 👍") else {
+            panic!("a message lost its reaction control")
+        };
+        assert!(
+            on_press.is_none(),
+            "a reaction is still offered to a key that cannot sign one"
+        );
+
+        // an account of her own, on the next block, and the room is writable —
+        // nothing re-reads it to find that out
+        keyed.me = "acct:7".into();
+        keyed.block_height += 1;
+        let frame = tick_native(vec![item(props, &encoded(&keyed))]);
+        assert!(
+            !has_text(&frame, notice),
+            "the account is made and the room still says it is not: {:?}",
+            texts(&frame)
+        );
+        let frame = tick_native(press(&frame, "React with 👍"));
+        let op: serde_json::Value =
+            serde_json::from_slice(&request(&frame, "op.submit").payload).expect("an op decodes");
+        assert_eq!(op["payload"]["add_reaction"]["emoji"], "👍");
+    });
+}
