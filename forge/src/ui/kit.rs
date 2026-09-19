@@ -205,8 +205,8 @@ impl ForgeView {
                     }
                     lines.push(code);
                     let mut boxed = native::padded(
-                        native::spaced(native::column(&key, lines), 4.),
-                        wire::Edges::all(10.),
+                        native::spaced(native::column(&key, lines), native::spacing::XXS as f32),
+                        wire::Edges::all(native::spacing::MD as f32),
                     );
                     if let wire::Node::Linear {
                         background, border, ..
@@ -241,7 +241,7 @@ impl ForgeView {
                                 top: 2.,
                                 right: 0.,
                                 bottom: 2.,
-                                left: 12.,
+                                left: native::spacing::LG as f32,
                             },
                         );
                         if let wire::Node::Linear { border, .. } = &mut quote {
@@ -260,7 +260,7 @@ impl ForgeView {
                 _ => {}
             }
         }
-        native::spaced(native::column(key, children), 8.)
+        native::spaced(native::column(key, children), native::spacing::SM as f32)
     }
     /// The item's own body: a reading, wider type at 1.5 leading, held to a
     /// measure a person can track a line across.
