@@ -8,7 +8,9 @@
 
 use std::collections::BTreeSet;
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 
+use ducktape_view_guest::host;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -23,6 +25,45 @@ const MAX_FOLDED_SESSIONS: usize = MAX_SESSION_PAGES * MAX_SESSION_PAGE;
 const MAX_HISTORY_PAGES: usize = 32;
 const MAX_HISTORY_EVENTS: usize = MAX_HISTORY_PAGES * MAX_EVENT_PAGE;
 const MAX_RECENT_EVENTS: usize = 128;
+
+/// One reply, checked on `bytes.len()` before any decoding: a full event
+/// page of 500 events at ~4 KiB each. Larger is a producer fault, not a page.
+pub const MAX_REPLY_BYTES: usize = 2 * 1024 * 1024;
+/// Sessions retained per list lane: 3200 summaries at ~1 KiB each.
+pub const MAX_SESSION_LIST_BYTES: usize = 4 * 1024 * 1024;
+/// History retained per open session: one long log, the largest thing a
+/// wasm view keeps resident; beyond this the reader narrows or resets.
+pub const MAX_HISTORY_BYTES: usize = 16 * 1024 * 1024;
+/// Recent tail retained per open session: 128 events at ~16 KiB each, the
+/// same per-event ceiling `host.rs` clips live trace lines to.
+pub const MAX_RECENT_TAIL_BYTES: usize = 2 * 1024 * 1024;
+
+/// Request generations are minted process-wide, so a generation from one
+/// state never matches another state's current one. Same idea as
+/// `LiveRun::subscription_generation` in `host.rs`: A→B→A leaves an old A
+/// reply in flight that identity checks alone cannot tell from the new A.
+static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
+
+fn mint_generation() -> u64 {
+    NEXT_GENERATION.fetch_add(1, Ordering::Relaxed)
+}
+
+/// A query together with the generation that asked it. The reply must be
+/// folded with this generation; the state rejects any other.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FencedQuery {
+    pub query: RunRecordsQuery,
+    pub request_generation: u64,
+}
+
+/// The host answer for one fenced query, split so a refusal stays typed and
+/// never reaches a decoder.
+pub fn reply_bytes(answer: host::Answer) -> Result<Vec<u8>, AdapterError> {
+    answer.map_err(|refusal| AdapterError::Refused {
+        reason: refusal.reason,
+        sentence: refusal.sentence,
+    })
+}
 
 /// Core's exact status vocabulary. Unknown statuses are not silently mapped.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -136,7 +177,7 @@ pub enum RunRecordsQuery {
     },
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SessionsReply {
     pub kind: String,
@@ -146,7 +187,7 @@ pub struct SessionsReply {
     pub has_more: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct EventsReply {
     pub kind: String,
@@ -171,11 +212,46 @@ pub enum AdapterError {
     PageLimit,
     ItemLimit,
     CursorDidNotAdvance,
+    /// The reply answers a generation this state is no longer asking for.
+    StaleGeneration {
+        current: u64,
+        answered: u64,
+    },
+    /// Refused on `bytes.len()` alone, before any decoding.
+    ReplyTooLarge {
+        bytes: usize,
+        limit: usize,
+    },
+    /// Keeping this page would exceed the lane's retained-byte budget. The
+    /// state is unchanged; the caller resets the lane or narrows the query.
+    RetainedBudgetExceeded {
+        limit: usize,
+    },
+    /// The host refused the request; nothing was decoded.
+    Refused {
+        reason: String,
+        sentence: String,
+    },
 }
 
 impl fmt::Display for AdapterError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::StaleGeneration { current, answered } => write!(
+                f,
+                "machine-session reply answers request generation {answered}, current is {current}"
+            ),
+            Self::ReplyTooLarge { bytes, limit } => write!(
+                f,
+                "machine-session reply of {bytes} bytes exceeds the {limit}-byte reply limit"
+            ),
+            Self::RetainedBudgetExceeded { limit } => write!(
+                f,
+                "keeping this page would exceed the {limit}-byte retained budget; reset the lane or narrow the query"
+            ),
+            Self::Refused { reason, sentence } => {
+                write!(f, "machine-session request refused ({reason}): {sentence}")
+            }
             Self::Json(error) => write!(f, "machine-session JSON: {error}"),
             Self::InvalidQuery(reason) => write!(f, "invalid machine-session query: {reason}"),
             Self::MalformedReply(reason) => {
@@ -208,7 +284,32 @@ pub fn encode_query_bytes(query: &RunRecordsQuery) -> Result<Vec<u8>, AdapterErr
     serde_json::to_vec(&body).map_err(|error| AdapterError::Json(error.to_string()))
 }
 
+fn check_reply_size(bytes: &[u8]) -> Result<(), AdapterError> {
+    if bytes.len() > MAX_REPLY_BYTES {
+        return Err(AdapterError::ReplyTooLarge {
+            bytes: bytes.len(),
+            limit: MAX_REPLY_BYTES,
+        });
+    }
+    Ok(())
+}
+
+fn check_generation(current: u64, answered: u64) -> Result<(), AdapterError> {
+    if answered != current {
+        return Err(AdapterError::StaleGeneration { current, answered });
+    }
+    Ok(())
+}
+
+fn check_budget(retained: usize, incoming: usize, limit: usize) -> Result<(), AdapterError> {
+    if retained + incoming > limit {
+        return Err(AdapterError::RetainedBudgetExceeded { limit });
+    }
+    Ok(())
+}
+
 pub fn decode_sessions_reply(bytes: &[u8]) -> Result<SessionsReply, AdapterError> {
+    check_reply_size(bytes)?;
     let reply: SessionsReply =
         serde_json::from_slice(bytes).map_err(|error| AdapterError::Json(error.to_string()))?;
     reply.validate()?;
@@ -216,6 +317,7 @@ pub fn decode_sessions_reply(bytes: &[u8]) -> Result<SessionsReply, AdapterError
 }
 
 pub fn decode_events_reply(bytes: &[u8]) -> Result<EventsReply, AdapterError> {
+    check_reply_size(bytes)?;
     let reply: EventsReply =
         serde_json::from_slice(bytes).map_err(|error| AdapterError::Json(error.to_string()))?;
     reply.validate()?;
@@ -273,7 +375,9 @@ impl EventsReply {
 }
 
 /// Bounded state for the sessions list lane. A reset is required before
-/// changing the run filter, preventing pages from different queries mixing.
+/// changing the run filter, preventing pages from different queries mixing;
+/// the reset also moves the request generation so a reply to the old filter
+/// arriving late is rejected rather than folded as current.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SessionListState {
     identity: StoreIdentity,
@@ -282,6 +386,9 @@ pub struct SessionListState {
     next_cursor: Option<String>,
     has_more: bool,
     pages: usize,
+    retained_bytes: usize,
+    /// The generation of the query last handed out; 0 until one is minted.
+    request_generation: u64,
 }
 
 impl SessionListState {
@@ -297,10 +404,14 @@ impl SessionListState {
             next_cursor: None,
             has_more: false,
             pages: 0,
+            retained_bytes: 0,
+            request_generation: 0,
         })
     }
 
-    pub fn next_query(&self) -> Result<Option<RunRecordsQuery>, AdapterError> {
+    /// Mints the next page query. Minting again before the reply lands makes
+    /// the earlier reply stale: only the latest ask is current.
+    pub fn next_query(&mut self) -> Result<Option<FencedQuery>, AdapterError> {
         if self.pages != 0 && !self.has_more {
             return Ok(None);
         }
@@ -310,11 +421,18 @@ impl SessionListState {
             limit: Some(DEFAULT_SESSION_PAGE),
         };
         encode_query(&query)?;
-        Ok(Some(query))
+        self.request_generation = mint_generation();
+        Ok(Some(FencedQuery {
+            query,
+            request_generation: self.request_generation,
+        }))
     }
 
-    pub fn fold(&mut self, page: SessionsReply) -> Result<(), AdapterError> {
-        page.validate()?;
+    /// Folds the reply bytes for `request_generation`. Every refusal leaves
+    /// the state exactly as it was.
+    pub fn fold(&mut self, request_generation: u64, bytes: &[u8]) -> Result<(), AdapterError> {
+        check_generation(self.request_generation, request_generation)?;
+        let page = decode_sessions_reply(bytes)?;
         if page.identity != self.identity {
             return Err(AdapterError::IdentityMismatch);
         }
@@ -330,6 +448,7 @@ impl SessionListState {
         if self.sessions.len() + page.sessions.len() > MAX_FOLDED_SESSIONS {
             return Err(AdapterError::ItemLimit);
         }
+        check_budget(self.retained_bytes, bytes.len(), MAX_SESSION_LIST_BYTES)?;
 
         let mut known: BTreeSet<&str> = self
             .sessions
@@ -353,11 +472,15 @@ impl SessionListState {
         self.next_cursor = page.next_cursor;
         self.has_more = page.has_more;
         self.pages += 1;
+        self.retained_bytes += bytes.len();
         Ok(())
     }
 
+    /// Drops every page and moves the generation: a reply to any query minted
+    /// before the reset is stale, even for the same filter.
     pub fn reset(&mut self, run_id: Option<String>) -> Result<(), AdapterError> {
-        let replacement = Self::new(self.identity.clone(), run_id)?;
+        let mut replacement = Self::new(self.identity.clone(), run_id)?;
+        replacement.request_generation = mint_generation();
         *self = replacement;
         Ok(())
     }
@@ -369,6 +492,10 @@ impl SessionListState {
     pub fn sessions(&self) -> &[SessionSummary] {
         &self.sessions
     }
+
+    pub fn retained_bytes(&self) -> usize {
+        self.retained_bytes
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -377,6 +504,14 @@ pub struct HistoryState {
     pub next_cursor: Option<String>,
     pub has_more: bool,
     pages: usize,
+    retained_bytes: usize,
+    request_generation: u64,
+}
+
+impl HistoryState {
+    pub fn retained_bytes(&self) -> usize {
+        self.retained_bytes
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -386,6 +521,14 @@ pub struct RecentTailState {
     pub high_water: Option<String>,
     /// This is display state only. It is never a continuation cursor.
     pub older_omitted: bool,
+    retained_bytes: usize,
+    request_generation: u64,
+}
+
+impl RecentTailState {
+    pub fn retained_bytes(&self) -> usize {
+        self.retained_bytes
+    }
 }
 
 /// Independent history and recent-tail folds for one provider session.
@@ -414,7 +557,9 @@ impl SessionEventsState {
         })
     }
 
-    pub fn history_query(&self) -> Result<Option<RunRecordsQuery>, AdapterError> {
+    /// Mints the next history page query; its generation is the history
+    /// lane's own and never matches a tail generation.
+    pub fn history_query(&mut self) -> Result<Option<FencedQuery>, AdapterError> {
         if self.history.pages != 0 && !self.history.has_more {
             return Ok(None);
         }
@@ -425,13 +570,17 @@ impl SessionEventsState {
             tail: false,
         };
         encode_query(&query)?;
-        Ok(Some(query))
+        self.history.request_generation = mint_generation();
+        Ok(Some(FencedQuery {
+            query,
+            request_generation: self.history.request_generation,
+        }))
     }
 
     /// Tail polling is independent from historical pagination. `has_more`
     /// from a tail response is represented as `older_omitted`, never as a
     /// forward request condition.
-    pub fn recent_tail_query(&self) -> Result<RunRecordsQuery, AdapterError> {
+    pub fn recent_tail_query(&mut self) -> Result<FencedQuery, AdapterError> {
         let query = RunRecordsQuery::Events {
             session_id: self.session_id.clone(),
             after: self.recent_tail.high_water.clone(),
@@ -439,10 +588,20 @@ impl SessionEventsState {
             tail: true,
         };
         encode_query(&query)?;
-        Ok(query)
+        self.recent_tail.request_generation = mint_generation();
+        Ok(FencedQuery {
+            query,
+            request_generation: self.recent_tail.request_generation,
+        })
     }
 
-    pub fn fold_history(&mut self, page: EventsReply) -> Result<(), AdapterError> {
+    pub fn fold_history(
+        &mut self,
+        request_generation: u64,
+        bytes: &[u8],
+    ) -> Result<(), AdapterError> {
+        check_generation(self.history.request_generation, request_generation)?;
+        let page = decode_events_reply(bytes)?;
         self.validate_event_reply(&page)?;
         if self.history.pages != 0 && !self.history.has_more {
             return Err(AdapterError::PageAfterComplete);
@@ -456,26 +615,43 @@ impl SessionEventsState {
         if self.history.events.len() + page.events.len() > MAX_HISTORY_EVENTS {
             return Err(AdapterError::ItemLimit);
         }
+        check_budget(self.history.retained_bytes, bytes.len(), MAX_HISTORY_BYTES)?;
 
         self.validate_append(&self.history.events, &page.events)?;
         self.history.events.extend(page.events);
         self.history.next_cursor = page.has_more.then_some(page.end_cursor);
         self.history.has_more = page.has_more;
         self.history.pages += 1;
+        self.history.retained_bytes += bytes.len();
         Ok(())
     }
 
-    pub fn fold_recent_tail(&mut self, page: EventsReply) -> Result<(), AdapterError> {
+    /// The tail keeps the newest `MAX_RECENT_EVENTS` by count as before;
+    /// bytes are measured on what would remain, and a page that would push
+    /// that past the budget is refused without touching the state.
+    pub fn fold_recent_tail(
+        &mut self,
+        request_generation: u64,
+        bytes: &[u8],
+    ) -> Result<(), AdapterError> {
+        check_generation(self.recent_tail.request_generation, request_generation)?;
+        let page = decode_events_reply(bytes)?;
         self.validate_event_reply(&page)?;
         self.validate_append(&self.recent_tail.events, &page.events)?;
 
-        let mut events = std::mem::take(&mut self.recent_tail.events);
+        let mut events = self.recent_tail.events.clone();
         events.extend(page.events);
         let dropped = events.len().saturating_sub(MAX_RECENT_EVENTS);
         if dropped != 0 {
             events.drain(..dropped);
         }
+        let retained = serde_json::to_vec(&events)
+            .map_err(|error| AdapterError::Json(error.to_string()))?
+            .len();
+        check_budget(0, retained, MAX_RECENT_TAIL_BYTES)?;
+
         self.recent_tail.events = events;
+        self.recent_tail.retained_bytes = retained;
         self.recent_tail.high_water = Some(page.end_cursor);
         self.recent_tail.older_omitted |= page.has_more || dropped != 0;
         Ok(())
@@ -486,9 +662,17 @@ impl SessionEventsState {
         false
     }
 
+    /// Drops both lanes and moves both generations, so a reply in flight for
+    /// either lane is stale after the reset.
     pub fn reset(&mut self) {
-        self.history = HistoryState::default();
-        self.recent_tail = RecentTailState::default();
+        self.history = HistoryState {
+            request_generation: mint_generation(),
+            ..HistoryState::default()
+        };
+        self.recent_tail = RecentTailState {
+            request_generation: mint_generation(),
+            ..RecentTailState::default()
+        };
     }
 
     pub fn identity(&self) -> &StoreIdentity {
@@ -792,41 +976,352 @@ mod tests {
         assert_eq!(reply.events[0].payload["provider_specific"]["value"], true);
     }
 
+    fn bytes(reply: &impl Serialize) -> Vec<u8> {
+        serde_json::to_vec(reply).unwrap()
+    }
+
+    fn session_query(state: &mut SessionListState) -> FencedQuery {
+        state.next_query().unwrap().expect("a page to ask for")
+    }
+
     #[test]
     fn session_pages_require_identity_and_reset_before_a_new_filter() {
         let id = identity("machine-a");
         let first = summary(&id, "session-a");
         let second = summary(&id, "session-b");
         let mut state = SessionListState::new(id.clone(), None).unwrap();
+        let ask = session_query(&mut state);
         assert!(matches!(
-            state.next_query().unwrap(),
-            Some(RunRecordsQuery::Sessions { after: None, .. })
+            ask.query,
+            RunRecordsQuery::Sessions { after: None, .. }
         ));
         state
-            .fold(sessions_page(&id, vec![first], Some("opaque-next"), true))
+            .fold(
+                ask.request_generation,
+                &bytes(&sessions_page(&id, vec![first], Some("opaque-next"), true)),
+            )
             .unwrap();
+        let ask = session_query(&mut state);
         assert!(matches!(
-            state.next_query().unwrap(),
-            Some(RunRecordsQuery::Sessions { after: Some(cursor), .. }) if cursor == "opaque-next"
+            ask.query,
+            RunRecordsQuery::Sessions { after: Some(cursor), .. } if cursor == "opaque-next"
         ));
         state
-            .fold(sessions_page(&id, vec![second], None, false))
+            .fold(
+                ask.request_generation,
+                &bytes(&sessions_page(&id, vec![second], None, false)),
+            )
             .unwrap();
         assert!(state.next_query().unwrap().is_none());
+        assert_eq!(state.sessions().len(), 2);
 
         state.reset(Some(RUN_ID.into())).unwrap();
+        assert!(state.sessions().is_empty());
+        assert_eq!(state.retained_bytes(), 0);
+        let ask = session_query(&mut state);
         assert!(matches!(
-            state.next_query().unwrap(),
-            Some(RunRecordsQuery::Sessions { run_id: Some(run_id), after: None, .. }) if run_id == RUN_ID
+            ask.query,
+            RunRecordsQuery::Sessions { run_id: Some(run_id), after: None, .. } if run_id == RUN_ID
         ));
 
         let wrong = identity("machine-b");
         assert_eq!(
             state
-                .fold(sessions_page(&wrong, vec![], None, false))
+                .fold(
+                    ask.request_generation,
+                    &bytes(&sessions_page(&wrong, vec![], None, false))
+                )
                 .unwrap_err(),
             AdapterError::IdentityMismatch
         );
+    }
+
+    #[test]
+    fn session_list_rejects_a_late_reply_after_a_b_a_filter_changes() {
+        let id = identity("machine-a");
+        let mut state = SessionListState::new(id.clone(), Some(RUN_ID.into())).unwrap();
+        let first_a = session_query(&mut state);
+        let reply_a = bytes(&sessions_page(
+            &id,
+            vec![summary(&id, "session-a")],
+            None,
+            false,
+        ));
+
+        state.reset(None).unwrap();
+        let _b = session_query(&mut state);
+        state.reset(Some(RUN_ID.into())).unwrap();
+        let second_a = session_query(&mut state);
+        assert_ne!(first_a.request_generation, second_a.request_generation);
+        assert_eq!(
+            first_a.query, second_a.query,
+            "the same filter asks the same query"
+        );
+
+        assert_eq!(
+            state
+                .fold(first_a.request_generation, &reply_a)
+                .unwrap_err(),
+            AdapterError::StaleGeneration {
+                current: second_a.request_generation,
+                answered: first_a.request_generation,
+            }
+        );
+        assert!(state.sessions().is_empty(), "a stale reply is not folded");
+        state.fold(second_a.request_generation, &reply_a).unwrap();
+        assert_eq!(state.sessions().len(), 1);
+    }
+
+    #[test]
+    fn session_list_same_filter_reset_makes_the_in_flight_reply_stale() {
+        let id = identity("machine-a");
+        let mut state = SessionListState::new(id.clone(), None).unwrap();
+        let ask = session_query(&mut state);
+        let reply = bytes(&sessions_page(
+            &id,
+            vec![summary(&id, "session-a")],
+            None,
+            false,
+        ));
+        state.reset(None).unwrap();
+        assert!(matches!(
+            state.fold(ask.request_generation, &reply).unwrap_err(),
+            AdapterError::StaleGeneration { .. }
+        ));
+        assert!(state.sessions().is_empty());
+        // Nothing minted since the reset: no generation answers.
+        assert!(matches!(
+            state.fold(0, &reply).unwrap_err(),
+            AdapterError::StaleGeneration { .. }
+        ));
+    }
+
+    #[test]
+    fn session_list_refuses_a_generation_minted_by_another_state() {
+        let id = identity("machine-a");
+        let mut source = SessionListState::new(id.clone(), None).unwrap();
+        let mut other = SessionListState::new(id.clone(), None).unwrap();
+        let from_source = session_query(&mut source);
+        let from_other = session_query(&mut other);
+        assert_ne!(
+            from_source.request_generation,
+            from_other.request_generation
+        );
+        let reply = bytes(&sessions_page(&id, vec![], None, false));
+        assert!(matches!(
+            other
+                .fold(from_source.request_generation, &reply)
+                .unwrap_err(),
+            AdapterError::StaleGeneration { .. }
+        ));
+        other.fold(from_other.request_generation, &reply).unwrap();
+    }
+
+    #[test]
+    fn session_list_refuses_an_oversized_reply_before_decoding() {
+        let id = identity("machine-a");
+        let mut state = SessionListState::new(id.clone(), None).unwrap();
+        let ask = session_query(&mut state);
+        // Not even JSON: the size check must come first.
+        let oversized = vec![b'x'; MAX_REPLY_BYTES + 1];
+        assert_eq!(
+            state.fold(ask.request_generation, &oversized).unwrap_err(),
+            AdapterError::ReplyTooLarge {
+                bytes: MAX_REPLY_BYTES + 1,
+                limit: MAX_REPLY_BYTES,
+            }
+        );
+        assert_eq!(
+            decode_events_reply(&oversized).unwrap_err(),
+            AdapterError::ReplyTooLarge {
+                bytes: MAX_REPLY_BYTES + 1,
+                limit: MAX_REPLY_BYTES,
+            }
+        );
+        assert!(state.sessions().is_empty());
+    }
+
+    #[test]
+    fn session_list_refuses_the_page_that_would_exceed_the_retained_budget() {
+        let id = identity("machine-a");
+        let mut state = SessionListState::new(id.clone(), None).unwrap();
+        // Pad each summary so the byte budget trips well before the count caps.
+        let mut page_index = 0;
+        loop {
+            let ask = session_query(&mut state);
+            let mut item = summary(&id, &format!("session-{page_index}"));
+            item.model = Some("m".repeat(MAX_REPLY_BYTES / 2));
+            let cursor = format!("next-{page_index}");
+            let page = bytes(&sessions_page(&id, vec![item], Some(&cursor), true));
+            let before = state.retained_bytes();
+            match state.fold(ask.request_generation, &page) {
+                Ok(()) => {
+                    assert_eq!(state.retained_bytes(), before + page.len());
+                    page_index += 1;
+                    assert!(page_index < MAX_SESSION_PAGES, "budget never tripped");
+                }
+                Err(AdapterError::RetainedBudgetExceeded { limit }) => {
+                    assert_eq!(limit, MAX_SESSION_LIST_BYTES);
+                    assert_eq!(state.retained_bytes(), before, "refusal keeps the state");
+                    assert_eq!(state.sessions().len(), page_index);
+                    break;
+                }
+                Err(other) => panic!("unexpected refusal {other}"),
+            }
+        }
+        // A reset frees the budget; the caller was told that is the way out.
+        state.reset(None).unwrap();
+        assert_eq!(state.retained_bytes(), 0);
+    }
+
+    #[test]
+    fn session_list_folds_the_session_for_run_reply_shape() {
+        let id = identity("machine-a");
+        let mut state = SessionListState::new(id.clone(), Some(RUN_ID.into())).unwrap();
+        let ask = session_query(&mut state);
+        // `session_for_run` answers with the same `sessions` envelope.
+        let reply = json!({
+            "kind": "sessions",
+            "identity": {"machine_id": "machine-a", "network_id": "network-a"},
+            "sessions": [{
+                "session_id": "provider-session",
+                "parent_session_id": null,
+                "run_id": RUN_ID,
+                "agent_id": "agent-a",
+                "origin": {"kind": "delegation"},
+                "requester": {"kind": "program", "account_id": 7},
+                "model": null,
+                "executor": null,
+                "invocation_kind": "runs",
+                "status": "completed",
+                "started_at": "2026-09-20T09:00:00Z",
+                "last_activity_at": null,
+                "owner_account_id": null,
+                "machine_id": "machine-a",
+                "network_id": "network-a"
+            }],
+            "next_cursor": null,
+            "has_more": false
+        });
+        state.fold(ask.request_generation, &bytes(&reply)).unwrap();
+        assert_eq!(state.sessions()[0].status, SessionStatus::Completed);
+        assert_eq!(state.sessions()[0].run_id.as_deref(), Some(RUN_ID));
+        assert!(state.next_query().unwrap().is_none());
+    }
+
+    #[test]
+    fn session_list_rejects_a_summary_mapped_to_another_run() {
+        let id = identity("machine-a");
+        let mut state = SessionListState::new(id.clone(), Some(RUN_ID.into())).unwrap();
+        let ask = session_query(&mut state);
+        let mut other_run = summary(&id, "session-a");
+        other_run.run_id = Some("f".repeat(64));
+        assert_eq!(
+            state
+                .fold(
+                    ask.request_generation,
+                    &bytes(&sessions_page(&id, vec![other_run], None, false))
+                )
+                .unwrap_err(),
+            AdapterError::RunMismatch
+        );
+    }
+
+    #[test]
+    fn malformed_ids_and_limits_are_typed_query_refusals() {
+        assert_eq!(
+            encode_query(&RunRecordsQuery::Sessions {
+                run_id: None,
+                after: None,
+                limit: Some(0),
+            })
+            .unwrap_err(),
+            AdapterError::InvalidQuery("zero limit")
+        );
+        assert_eq!(
+            encode_query(&RunRecordsQuery::Events {
+                session_id: "provider-session".into(),
+                after: None,
+                limit: Some(MAX_EVENT_PAGE + 1),
+                tail: false,
+            })
+            .unwrap_err(),
+            AdapterError::InvalidQuery("limit too large")
+        );
+        assert_eq!(
+            encode_query(&RunRecordsQuery::Events {
+                session_id: "has space".into(),
+                after: None,
+                limit: None,
+                tail: false,
+            })
+            .unwrap_err(),
+            AdapterError::InvalidQuery("invalid session_id")
+        );
+        assert_eq!(
+            encode_query(&RunRecordsQuery::Sessions {
+                run_id: None,
+                after: Some(String::new()),
+                limit: None,
+            })
+            .unwrap_err(),
+            AdapterError::InvalidQuery("empty cursor")
+        );
+        assert_eq!(
+            SessionListState::new(identity("machine-a"), Some("short".into())).unwrap_err(),
+            AdapterError::InvalidQuery("invalid run_id")
+        );
+    }
+
+    #[test]
+    fn unknown_fields_and_variants_are_json_refusals() {
+        let id = identity("machine-a");
+        let mut extra = serde_json::to_value(sessions_page(&id, vec![], None, false)).unwrap();
+        extra["surprise"] = json!(1);
+        assert!(matches!(
+            decode_sessions_reply(&bytes(&extra)).unwrap_err(),
+            AdapterError::Json(_)
+        ));
+
+        let mut unknown_status = serde_json::to_value(sessions_page(
+            &id,
+            vec![summary(&id, "session-a")],
+            None,
+            false,
+        ))
+        .unwrap();
+        unknown_status["sessions"][0]["status"] = json!("paused");
+        assert!(matches!(
+            decode_sessions_reply(&bytes(&unknown_status)).unwrap_err(),
+            AdapterError::Json(_)
+        ));
+
+        let wrong_kind = json!({
+            "kind": "events",
+            "identity": {"machine_id": "machine-a", "network_id": "network-a"},
+            "sessions": [],
+            "next_cursor": null,
+            "has_more": false
+        });
+        assert_eq!(
+            decode_sessions_reply(&bytes(&wrong_kind)).unwrap_err(),
+            AdapterError::MalformedReply("wrong reply kind")
+        );
+    }
+
+    #[test]
+    fn a_host_refusal_stays_typed_and_never_reaches_a_decoder() {
+        let refusal = host::Refusal::new("unauthorized", "only the requester");
+        assert_eq!(
+            reply_bytes(Err(refusal)).unwrap_err(),
+            AdapterError::Refused {
+                reason: "unauthorized".into(),
+                sentence: "only the requester".into(),
+            }
+        );
+        let id = identity("machine-a");
+        let page = bytes(&sessions_page(&id, vec![], None, false));
+        assert_eq!(reply_bytes(Ok(page.clone())).unwrap(), page);
     }
 
     #[test]
@@ -835,45 +1330,158 @@ mod tests {
         let summary = summary(&id, "provider-session");
         let mut state = SessionEventsState::new(id.clone(), &summary).unwrap();
 
+        let ask = state.history_query().unwrap().unwrap();
         state
-            .fold_history(events_page(
-                &id,
-                "provider-session",
-                vec![event(1, "event-1", Some(RUN_ID)), event(2, "event-2", None)],
-                "history-cursor",
-                true,
-            ))
+            .fold_history(
+                ask.request_generation,
+                &bytes(&events_page(
+                    &id,
+                    "provider-session",
+                    vec![event(1, "event-1", Some(RUN_ID)), event(2, "event-2", None)],
+                    "history-cursor",
+                    true,
+                )),
+            )
             .unwrap();
+        let ask = state.history_query().unwrap().unwrap();
         assert!(matches!(
-            state.history_query().unwrap(),
-            Some(RunRecordsQuery::Events { after: Some(cursor), tail: false, .. }) if cursor == "history-cursor"
+            ask.query,
+            RunRecordsQuery::Events { after: Some(cursor), tail: false, .. } if cursor == "history-cursor"
         ));
         state
-            .fold_history(events_page(
-                &id,
-                "provider-session",
-                vec![event(3, "event-3", Some(RUN_ID))],
-                "history-done",
-                false,
-            ))
+            .fold_history(
+                ask.request_generation,
+                &bytes(&events_page(
+                    &id,
+                    "provider-session",
+                    vec![event(3, "event-3", Some(RUN_ID))],
+                    "history-done",
+                    false,
+                )),
+            )
             .unwrap();
         assert!(state.history_query().unwrap().is_none());
 
+        let ask = state.recent_tail_query().unwrap();
         state
-            .fold_recent_tail(events_page(
-                &id,
-                "provider-session",
-                vec![event(4, "event-4", Some(RUN_ID))],
-                "tail-high-water",
-                true,
-            ))
+            .fold_recent_tail(
+                ask.request_generation,
+                &bytes(&events_page(
+                    &id,
+                    "provider-session",
+                    vec![event(4, "event-4", Some(RUN_ID))],
+                    "tail-high-water",
+                    true,
+                )),
+            )
             .unwrap();
         assert!(state.recent_tail.older_omitted);
+        let ask = state.recent_tail_query().unwrap();
         assert!(matches!(
-            state.recent_tail_query().unwrap(),
+            ask.query,
             RunRecordsQuery::Events { after: Some(cursor), tail: true, .. } if cursor == "tail-high-water"
         ));
         assert!(!state.controls_enabled());
+    }
+
+    #[test]
+    fn history_and_tail_generations_are_independent() {
+        let id = identity("machine-a");
+        let summary = summary(&id, "provider-session");
+        let mut state = SessionEventsState::new(id.clone(), &summary).unwrap();
+        let history = state.history_query().unwrap().unwrap();
+        let tail = state.recent_tail_query().unwrap();
+        assert_ne!(history.request_generation, tail.request_generation);
+
+        let page = bytes(&events_page(
+            &id,
+            "provider-session",
+            vec![event(1, "event-1", None)],
+            "cursor-1",
+            false,
+        ));
+        assert!(matches!(
+            state
+                .fold_history(tail.request_generation, &page)
+                .unwrap_err(),
+            AdapterError::StaleGeneration { .. }
+        ));
+        assert!(matches!(
+            state
+                .fold_recent_tail(history.request_generation, &page)
+                .unwrap_err(),
+            AdapterError::StaleGeneration { .. }
+        ));
+        // Minting a new tail poll leaves the history ask current.
+        let _later_tail = state.recent_tail_query().unwrap();
+        state
+            .fold_history(history.request_generation, &page)
+            .unwrap();
+        assert!(matches!(
+            state
+                .fold_recent_tail(tail.request_generation, &page)
+                .unwrap_err(),
+            AdapterError::StaleGeneration { .. }
+        ));
+        assert!(state.recent_tail.events.is_empty());
+        assert!(!state.controls_enabled());
+    }
+
+    #[test]
+    fn events_reset_makes_both_in_flight_replies_stale() {
+        let id = identity("machine-a");
+        let summary = summary(&id, "provider-session");
+        let mut state = SessionEventsState::new(id.clone(), &summary).unwrap();
+        let history = state.history_query().unwrap().unwrap();
+        let tail = state.recent_tail_query().unwrap();
+        let page = bytes(&events_page(
+            &id,
+            "provider-session",
+            vec![],
+            "cursor",
+            false,
+        ));
+        state.reset();
+        assert!(matches!(
+            state
+                .fold_history(history.request_generation, &page)
+                .unwrap_err(),
+            AdapterError::StaleGeneration { .. }
+        ));
+        assert!(matches!(
+            state
+                .fold_recent_tail(tail.request_generation, &page)
+                .unwrap_err(),
+            AdapterError::StaleGeneration { .. }
+        ));
+        assert!(state.recent_tail.high_water.is_none());
+        assert_eq!(state.history.retained_bytes(), 0);
+    }
+
+    #[test]
+    fn events_refuse_a_generation_minted_by_another_state_for_the_same_session() {
+        let id = identity("machine-a");
+        let summary = summary(&id, "provider-session");
+        let mut source = SessionEventsState::new(id.clone(), &summary).unwrap();
+        let mut other = SessionEventsState::new(id.clone(), &summary).unwrap();
+        let from_source = source.history_query().unwrap().unwrap();
+        let from_other = other.history_query().unwrap().unwrap();
+        let page = bytes(&events_page(
+            &id,
+            "provider-session",
+            vec![],
+            "cursor",
+            false,
+        ));
+        assert!(matches!(
+            other
+                .fold_history(from_source.request_generation, &page)
+                .unwrap_err(),
+            AdapterError::StaleGeneration { .. }
+        ));
+        other
+            .fold_history(from_other.request_generation, &page)
+            .unwrap();
     }
 
     #[test]
@@ -881,17 +1489,230 @@ mod tests {
         let id = identity("machine-a");
         let summary = summary(&id, "provider-session");
         let mut state = SessionEventsState::new(id.clone(), &summary).unwrap();
+        let ask = state.history_query().unwrap().unwrap();
         let wrong_id = events_page(&id, "another-session", vec![], "cursor", false);
         assert_eq!(
-            state.fold_history(wrong_id).unwrap_err(),
+            state
+                .fold_history(ask.request_generation, &bytes(&wrong_id))
+                .unwrap_err(),
             AdapterError::SessionMismatch
         );
 
         let wrong_run = event(1, "event-1", Some(&"f".repeat(64)));
         let page = events_page(&id, "provider-session", vec![wrong_run], "cursor", false);
         assert_eq!(
-            state.fold_history(page).unwrap_err(),
+            state
+                .fold_history(ask.request_generation, &bytes(&page))
+                .unwrap_err(),
             AdapterError::RunMismatch
         );
+
+        let wrong_store = events_page(
+            &identity("machine-b"),
+            "provider-session",
+            vec![],
+            "c",
+            false,
+        );
+        assert_eq!(
+            state
+                .fold_history(ask.request_generation, &bytes(&wrong_store))
+                .unwrap_err(),
+            AdapterError::IdentityMismatch
+        );
+    }
+
+    #[test]
+    fn history_decodes_empty_and_ascending_pages_and_refuses_a_cursor_that_stalls() {
+        let id = identity("machine-a");
+        let summary = summary(&id, "provider-session");
+        let mut state = SessionEventsState::new(id.clone(), &summary).unwrap();
+
+        let ask = state.history_query().unwrap().unwrap();
+        let ascending = events_page(
+            &id,
+            "provider-session",
+            vec![event(1, "event-1", None), event(2, "event-2", None)],
+            "cursor-2",
+            true,
+        );
+        state
+            .fold_history(ask.request_generation, &bytes(&ascending))
+            .unwrap();
+        assert_eq!(state.history.retained_bytes(), bytes(&ascending).len());
+
+        let ask = state.history_query().unwrap().unwrap();
+        let stalled = events_page(
+            &id,
+            "provider-session",
+            vec![event(3, "event-3", None)],
+            "cursor-2",
+            true,
+        );
+        assert_eq!(
+            state
+                .fold_history(ask.request_generation, &bytes(&stalled))
+                .unwrap_err(),
+            AdapterError::CursorDidNotAdvance
+        );
+
+        let empty_done = events_page(&id, "provider-session", vec![], "cursor-end", false);
+        state
+            .fold_history(ask.request_generation, &bytes(&empty_done))
+            .unwrap();
+        assert!(!state.history.has_more);
+        assert!(state.history_query().unwrap().is_none());
+
+        let empty_more = json!({
+            "kind": "events",
+            "identity": {"machine_id": "machine-a", "network_id": "network-a"},
+            "session_id": "provider-session",
+            "events": [],
+            "end_cursor": "cursor-x",
+            "has_more": true
+        });
+        assert_eq!(
+            decode_events_reply(&bytes(&empty_more)).unwrap_err(),
+            AdapterError::MalformedReply("empty event page marked has_more")
+        );
+
+        let descending = events_page(
+            &id,
+            "provider-session",
+            vec![event(2, "event-2", None), event(1, "event-1", None)],
+            "cursor",
+            false,
+        );
+        assert_eq!(
+            decode_events_reply(&bytes(&descending)).unwrap_err(),
+            AdapterError::MalformedReply("events are not ordered")
+        );
+    }
+
+    #[test]
+    fn history_refuses_the_page_that_would_exceed_the_retained_budget() {
+        let id = identity("machine-a");
+        let summary = summary(&id, "provider-session");
+        let mut state = SessionEventsState::new(id.clone(), &summary).unwrap();
+        let mut seq = 0;
+        loop {
+            let ask = state.history_query().unwrap().unwrap();
+            seq += 1;
+            let mut big = event(seq, &format!("event-{seq}"), None);
+            big.payload = json!({"blob": "b".repeat(MAX_REPLY_BYTES / 2)});
+            let page = bytes(&events_page(
+                &id,
+                "provider-session",
+                vec![big],
+                &format!("c{seq}"),
+                true,
+            ));
+            let before = state.history.retained_bytes();
+            match state.fold_history(ask.request_generation, &page) {
+                Ok(()) => assert!(seq < MAX_HISTORY_PAGES as u64, "budget never tripped"),
+                Err(AdapterError::RetainedBudgetExceeded { limit }) => {
+                    assert_eq!(limit, MAX_HISTORY_BYTES);
+                    assert_eq!(state.history.retained_bytes(), before);
+                    assert_eq!(state.history.events.len() as u64, seq - 1);
+                    break;
+                }
+                Err(other) => panic!("unexpected refusal {other}"),
+            }
+        }
+    }
+
+    #[test]
+    fn tail_keeps_has_more_display_only_and_refuses_a_page_over_its_budget() {
+        let id = identity("machine-a");
+        let summary = summary(&id, "provider-session");
+        let mut state = SessionEventsState::new(id.clone(), &summary).unwrap();
+
+        let ask = state.recent_tail_query().unwrap();
+        let quiet = events_page(
+            &id,
+            "provider-session",
+            vec![event(1, "event-1", None)],
+            "hw-1",
+            false,
+        );
+        state
+            .fold_recent_tail(ask.request_generation, &bytes(&quiet))
+            .unwrap();
+        assert!(!state.recent_tail.older_omitted);
+        assert_eq!(state.recent_tail.high_water.as_deref(), Some("hw-1"));
+        assert_eq!(
+            state.recent_tail.retained_bytes(),
+            bytes(&state.recent_tail.events).len()
+        );
+
+        let ask = state.recent_tail_query().unwrap();
+        let truncated = events_page(
+            &id,
+            "provider-session",
+            vec![event(2, "event-2", None)],
+            "hw-2",
+            true,
+        );
+        state
+            .fold_recent_tail(ask.request_generation, &bytes(&truncated))
+            .unwrap();
+        assert!(
+            state.recent_tail.older_omitted,
+            "has_more is shown, never followed"
+        );
+        assert!(matches!(
+            state.recent_tail_query().unwrap().query,
+            RunRecordsQuery::Events { after: Some(cursor), tail: true, .. } if cursor == "hw-2"
+        ));
+        assert!(
+            state.history_query().unwrap().is_some(),
+            "the history lane is untouched"
+        );
+        assert!(state.history.events.is_empty());
+
+        // Two heavy polls: the first fits, the second would push the retained
+        // tail past its budget and is refused whole.
+        let heavy = |seq: u64| {
+            let mut heavy = event(seq, &format!("event-{seq}"), None);
+            heavy.payload = json!({"blob": "b".repeat(MAX_RECENT_TAIL_BYTES / 2 + 1024)});
+            heavy
+        };
+        let ask = state.recent_tail_query().unwrap();
+        let first = events_page(&id, "provider-session", vec![heavy(3)], "hw-3", false);
+        state
+            .fold_recent_tail(ask.request_generation, &bytes(&first))
+            .unwrap();
+        let ask = state.recent_tail_query().unwrap();
+        let over = events_page(&id, "provider-session", vec![heavy(4)], "hw-4", false);
+        assert_eq!(
+            state
+                .fold_recent_tail(ask.request_generation, &bytes(&over))
+                .unwrap_err(),
+            AdapterError::RetainedBudgetExceeded {
+                limit: MAX_RECENT_TAIL_BYTES
+            }
+        );
+        assert_eq!(state.recent_tail.events.len(), 3, "refusal keeps the tail");
+        assert_eq!(state.recent_tail.high_water.as_deref(), Some("hw-3"));
+        assert!(!state.controls_enabled());
+    }
+
+    #[test]
+    fn tail_count_eviction_flags_older_omitted_and_stays_within_budget() {
+        let id = identity("machine-a");
+        let summary = summary(&id, "provider-session");
+        let mut state = SessionEventsState::new(id.clone(), &summary).unwrap();
+        let ask = state.recent_tail_query().unwrap();
+        let events: Vec<_> = (1..=MAX_RECENT_EVENTS as u64 + 1)
+            .map(|seq| event(seq, &format!("event-{seq}"), None))
+            .collect();
+        let page = events_page(&id, "provider-session", events, "hw", false);
+        state
+            .fold_recent_tail(ask.request_generation, &bytes(&page))
+            .unwrap();
+        assert_eq!(state.recent_tail.events.len(), MAX_RECENT_EVENTS);
+        assert_eq!(state.recent_tail.events[0].seq, 2);
+        assert!(state.recent_tail.older_omitted);
+        assert!(state.recent_tail.retained_bytes() <= MAX_RECENT_TAIL_BYTES);
     }
 }
