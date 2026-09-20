@@ -23,11 +23,11 @@ use std::task::{Context, Poll, Waker};
 
 use duck_address::chat::MessageAddress;
 use duck_address::forge::{ForgeLocator, ForgeRepoAddress, ForgeTarget};
+use duck_address::pages::PageAddress;
 use duck_address::runs::RunAddress;
 use duck_address::{Address, ChainId, Refused};
 use ducktape_view_guest::host;
 use futures::{Stream, StreamExt, stream};
-use pages_wire::PageAddress;
 use serde::{Deserialize, Serialize};
 
 /// The planes the register follows: `runs` carries every model record and

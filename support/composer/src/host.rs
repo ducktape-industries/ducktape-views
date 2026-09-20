@@ -76,7 +76,7 @@ pub async fn submit(id: String, send: &Send, target: &Target) -> Result<(), host
             "Message must contain between 1 byte and 16 KiB",
         ));
     }
-    let blocks = chat_message::parse_message(&body);
+    let blocks = super::message::parse_message(&body);
     let payload = match target {
         Target::Post { channel, thread } => {
             serde_json::json!({"post_message": {"channel_id":channel, "message_id":id, "blocks":blocks, "thread":thread}})

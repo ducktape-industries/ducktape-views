@@ -21,6 +21,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 
+use duck_address::pages::PageAddress;
 use ducktape_view_guest::host;
 use futures::{Stream, StreamExt, stream};
 use serde::{Deserialize, Serialize};
@@ -2141,13 +2142,13 @@ pub fn page_address(page_id: &str, chain: &str) -> String {
     let Ok(chain) = chain.parse::<duck_address::ChainId>() else {
         return String::new();
     };
-    let page = pages_wire::PageAddress {
+    PageAddress {
         page: page_id.to_owned(),
         block: None,
-    };
-    page.address(chain)
-        .map(|address| address.to_string())
-        .unwrap_or_default()
+    }
+    .address(chain)
+    .map(|address| address.to_string())
+    .unwrap_or_default()
 }
 
 /// The title the sidebar shows for a page, or the one already on screen when
@@ -2769,6 +2770,16 @@ pub fn measured_card_height(current: f64, measured: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn page_address_fixture_matches_the_producer_spelling() {
+        let expected: Value =
+            serde_json::from_str(include_str!("../tests/fixtures/page-address.json")).unwrap();
+        assert_eq!(
+            page_address("p-1", "testnet#0a1b2c3d"),
+            expected["page_uri"].as_str().unwrap()
+        );
+    }
     use crate::CommentsMode;
 
     /// The document names its pictures once each, by the duckfs path behind

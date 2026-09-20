@@ -2,7 +2,7 @@
 use crate::host::{
     ChatChannel, Names, author_display, dm_channel_id, hex_encode, message_body, names_at, view,
 };
-use chat_message::{Block, Mark, Party};
+use ducktape_view_composer::message::{Block, Mark, Party, resolve_assigned_mentions};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -99,7 +99,7 @@ fn chat_arrival(
     let stamp = assigned?.get("posted")?;
     let actor: Party = serde_json::from_value(stamp["actor"].clone()).ok()?;
     let mentions: Vec<u64> = serde_json::from_value(stamp["key_mentions"].clone()).ok()?;
-    let blocks = chat_message::resolve_assigned_mentions(
+    let blocks = resolve_assigned_mentions(
         serde_json::from_value(post["blocks"].clone()).ok()?,
         &mentions,
     )

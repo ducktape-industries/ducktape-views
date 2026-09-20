@@ -11,7 +11,6 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 duck-address = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "duck-address" }
-pages-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "pages-wire" }
 refusal-class = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "refusal-class" }
 futures.workspace = true
 serde.workspace = true
@@ -22,5 +21,3 @@ ducktape-view-guest.workspace = true
 # the snapshot tag is a digest of this view's own state layout; the tracer
 # that derives it is host-only and never reaches the built component
 view-wire = { workspace = true, features = ["schema"] }
-runs-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "runs-wire" }
-agent-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "agent-wire" }

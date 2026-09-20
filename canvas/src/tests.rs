@@ -1,4 +1,25 @@
 use super::*;
+use crate::boards::{Change, Operation, Reply};
+
+#[test]
+fn board_fixtures_decode_and_emit_the_producer_json() {
+    let fixture = include_str!("../tests/fixtures/boards/reply-planning.json");
+    let reply: Reply = serde_json::from_str(fixture).expect("producer board reply fixture");
+    let expected: serde_json::Value = serde_json::from_str(fixture).unwrap();
+    assert_eq!(serde_json::to_value(reply).unwrap(), expected);
+
+    let operation = Operation::Edit {
+        board: "room".into(),
+        change: Change::Move {
+            id: "card".into(),
+            x: 12,
+            y: -4,
+        },
+    };
+    let expected: serde_json::Value =
+        serde_json::from_str(include_str!("../tests/fixtures/boards/operation-edit.json")).unwrap();
+    assert_eq!(serde_json::to_value(operation).unwrap(), expected);
+}
 fn view() -> BoardsView {
     let (mut view, _) = BoardsView::boot();
     view.current = "room".into();
@@ -45,15 +66,15 @@ fn read(board: Board) -> Result<host::Reading, String> {
 /// An end bound to a card at its middle — what dropping an arrow anywhere near
 /// the middle of one comes to, and the only anchor a test needs unless it is
 /// about anchors.
-fn on(card: &str) -> Option<boards_wire::Bond> {
-    Some(boards_wire::Bond {
+fn on(card: &str) -> Option<crate::boards::Bond> {
+    Some(crate::boards::Bond {
         card: card.into(),
-        at: [boards_wire::ANCHOR_SPAN / 2; 2],
+        at: [crate::boards::ANCHOR_SPAN / 2; 2],
     })
 }
 /// Which card an end holds, for the assertions that only care about that.
-fn holds(end: &Option<boards_wire::Bond>) -> Option<&str> {
-    boards_wire::held(end)
+fn holds(end: &Option<crate::boards::Bond>) -> Option<&str> {
+    crate::boards::held(end)
 }
 fn segment(kind: Kind) -> Shape {
     Shape {
@@ -191,7 +212,7 @@ fn undo_delete_restores_attached_arrows_and_snapshot_keeps_pending_work() {
 fn native_wire_tree_uses_canvas_and_text_input_within_frame_budget() {
     let mut view = view();
     let mut board = view.confirmed.take().unwrap();
-    for i in 0..boards_wire::MAX_SHAPES {
+    for i in 0..crate::boards::MAX_SHAPES {
         board = board
             .changed(&Change::Create {
                 id: format!("card-{i}"),
@@ -544,7 +565,7 @@ fn the_pen_thins_a_run_to_the_boards_budget_and_a_tap_leaves_a_dot() {
         .collect();
     let stroke = view.sketched_shape(&wavy).unwrap();
     assert_eq!(stroke.kind, Kind::Draw);
-    assert!(stroke.points.len() <= boards_wire::MAX_POINTS);
+    assert!(stroke.points.len() <= crate::boards::MAX_POINTS);
     assert!(stroke.points.len() > 8, "a wavy run keeps its shape");
     assert!(
         stroke.points.iter().flatten().all(|value| *value >= 0),
@@ -568,7 +589,7 @@ fn a_run_wider_than_a_shape_may_be_is_fitted_whole_rather_than_clipped() {
         .map(|i| [i as f32 * 100., (i % 2) as f32 * 40.])
         .collect();
     let stroke = view.sketched_shape(&long).unwrap();
-    assert!(stroke.width <= boards_wire::MAX_SIZE);
+    assert!(stroke.width <= crate::boards::MAX_SIZE);
     assert_eq!(
         stroke.points.last().unwrap()[0],
         stroke.width,
@@ -618,7 +639,7 @@ fn one_eraser_sweep_is_one_undo_step() {
 fn a_board_of_strokes_stays_inside_the_hosts_geometry_budget() {
     let mut view = view();
     let mut board = view.confirmed.take().unwrap();
-    for i in 0..boards_wire::MAX_SHAPES {
+    for i in 0..crate::boards::MAX_SHAPES {
         board = board
             .changed(&Change::Create {
                 id: format!("stroke-{i}"),
@@ -628,7 +649,7 @@ fn a_board_of_strokes_stays_inside_the_hosts_geometry_budget() {
                     y: (i as i32 / 16) * 35,
                     width: 40,
                     height: 30,
-                    points: (0..boards_wire::MAX_POINTS)
+                    points: (0..crate::boards::MAX_POINTS)
                         .map(|p| [(p % 40) as i32, (p * 7 % 30) as i32])
                         .collect(),
                     ..Default::default()
@@ -919,7 +940,7 @@ fn an_arrow_leaves_a_card_from_the_spot_it_was_dropped_on_and_not_from_its_middl
     let edge = &board.shapes["edge"].shape;
     assert_eq!(
         edge.to,
-        Some(boards_wire::Bond {
+        Some(crate::boards::Bond {
             card: "c".into(),
             at: [100, 143],
         }),
@@ -1663,7 +1684,7 @@ fn a_card_paints_every_word_its_editor_holds_and_the_marks_keep_their_own_room()
                 shape: Shape {
                     x: (i % 4) * 260,
                     y: (i / 4) * 200,
-                    text: "가".repeat(boards_wire::MAX_TEXT / 3),
+                    text: "가".repeat(crate::boards::MAX_TEXT / 3),
                     ..Default::default()
                 },
             })
@@ -1674,7 +1695,7 @@ fn a_card_paints_every_word_its_editor_holds_and_the_marks_keep_their_own_room()
     let json = serde_json::to_string(&view.view()).unwrap();
     let painted = json.matches("가").count();
     assert!(
-        painted >= 12 * (boards_wire::MAX_TEXT / 3),
+        painted >= 12 * (crate::boards::MAX_TEXT / 3),
         "every card paints the whole of what its editor would hold, not a prefix of it: {painted}"
     );
     // And the selection is still drawn over all of it — the marks are taken
@@ -2116,14 +2137,14 @@ fn a_card_too_long_to_save_can_still_be_left() {
     });
     view.selected = ["a".into()].into();
     view.begin_text();
-    let overlong = "x".repeat(boards_wire::MAX_TEXT + 10);
+    let overlong = "x".repeat(crate::boards::MAX_TEXT + 10);
     view.inline.as_mut().unwrap().document = Editor::new(overlong);
     // Done keeps the words and says what is wrong, by how much, and the way out
     view.finish_text();
     assert!(view.inline.is_some(), "Done must not lose what you wrote");
     assert!(
         view.error
-            .contains(&format!("{}", boards_wire::MAX_TEXT + 10))
+            .contains(&format!("{}", crate::boards::MAX_TEXT + 10))
     );
     assert!(view.error.contains("Escape"));
     // and Escape is that way out: the card goes back to what it held
@@ -2866,7 +2887,7 @@ fn removed_board_words_survive_reopen_and_can_be_put_on_another_board() {
 /// words, while the view must keep the complete draft and stay Not saved.
 #[test]
 fn a_queued_editor_commit_after_board_refusal_stays_recoverable() {
-    use boards_wire::Reply;
+    use crate::boards::Reply;
     use ducktape_view_guest::testing::{answer, edit};
     use ducktape_view_guest::wire::{Event, Frame, Request};
 
@@ -3269,7 +3290,7 @@ fn every_way_out_of_a_card_keeps_what_you_wrote() {
     // ends in the same save and that save refuses, so Escape has to leave
     // anyway or the writer is shut inside an editor that answers nothing.
     view.begin_text();
-    view.inline.as_mut().unwrap().document = Editor::new("x".repeat(boards_wire::MAX_TEXT + 10));
+    view.inline.as_mut().unwrap().document = Editor::new("x".repeat(crate::boards::MAX_TEXT + 10));
     view.finish_text();
     assert!(view.inline.is_some(), "the board refuses text this long");
     view.on_cancel();
@@ -3506,7 +3527,7 @@ fn a_card_that_already_holds_its_words_is_left_alone_and_a_refused_one_gives_the
     // its old sentence in a box sized for one it never kept is a card that
     // remembers a draft nobody saved.
     view.begin_text();
-    view.inline.as_mut().unwrap().document = Editor::new("x".repeat(boards_wire::MAX_TEXT + 10));
+    view.inline.as_mut().unwrap().document = Editor::new("x".repeat(crate::boards::MAX_TEXT + 10));
     view.on_measured(view.zoom, 200., 500.);
     assert_eq!(view.visible().unwrap().shapes["a"].shape.height, 500);
     view.finish_text();
@@ -6402,7 +6423,7 @@ fn the_chord_chains_out_of_a_sticky_and_out_of_nothing_else() {
     // and the caret's place with it.
     view.selected = ["note".into()].into();
     view.begin_text();
-    view.inline.as_mut().unwrap().document = Editor::new("x".repeat(boards_wire::MAX_TEXT + 10));
+    view.inline.as_mut().unwrap().document = Editor::new("x".repeat(crate::boards::MAX_TEXT + 10));
     view.finish_note();
     assert!(
         view.inline.is_some(),

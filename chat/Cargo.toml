@@ -12,15 +12,14 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 duck-address = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "duck-address" }
-files-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "files-wire" }
 base64.workspace = true
 futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 ducktape-view-guest.workspace = true
 ducktape-view-composer.workspace = true
+ducktape-view-files.workspace = true
 sha2 = "0.10"
-chat-message = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "chat-message" }
 
 [dev-dependencies]
 # The snapshot tag is a digest of this view's own state layout; the tracer

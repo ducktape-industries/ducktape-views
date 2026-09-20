@@ -760,13 +760,16 @@ impl BoardsView {
                             // Past the limit the count stops being background
                             // information and becomes the only thing that
                             // matters, so it says what to do about it.
-                            if length > boards_wire::MAX_TEXT {
+                            if length > crate::boards::MAX_TEXT {
                                 format!(
                                     "{} too long · shorten it, or Escape to leave it behind",
-                                    length - boards_wire::MAX_TEXT
+                                    length - crate::boards::MAX_TEXT
                                 )
                             } else {
-                                format!("Enter for a new line · {length}/{}", boards_wire::MAX_TEXT)
+                                format!(
+                                    "Enter for a new line · {length}/{}",
+                                    crate::boards::MAX_TEXT
+                                )
                             },
                         )),
                         kit::spacer(),
@@ -1887,7 +1890,7 @@ impl BoardsView {
         let hugged = words + margin(&letters) / self.zoom;
         hugged
             .ceil()
-            .clamp(MIN_CARD[0] as f32, boards_wire::MAX_SIZE as f32) as i32
+            .clamp(MIN_CARD[0] as f32, crate::boards::MAX_SIZE as f32) as i32
     }
     /// A shape's words, pinned over its body and clipped to it.
     fn label(
@@ -2231,7 +2234,7 @@ impl BoardsView {
                     weight: self.pen.weight,
                     heads: self.pen.heads,
                 };
-                self.paint_stroke(Kind::Draw, &screen, ink, boards_wire::MAX_POINTS, out);
+                self.paint_stroke(Kind::Draw, &screen, ink, crate::boards::MAX_POINTS, out);
             }
             // Only an end reaches for a card; a bend crossing one binds nothing
             // and must not say that it would.
@@ -2515,7 +2518,7 @@ pub(super) fn column(kind: Kind, room: f32, letters: &Lettering, zoom: f32) -> f
         // box would make the box the column, and a box that is its own column
         // walks itself shut — each measurement narrower than the one that sized
         // the box it was measured in.
-        Kind::Text => boards_wire::MAX_SIZE as f32 * zoom,
+        Kind::Text => crate::boards::MAX_SIZE as f32 * zoom,
         Kind::Note | Kind::Rectangle | Kind::Ellipse | Kind::Diamond => {
             (room - margin(letters)).max(40. + 2. * letters.inset)
         }

@@ -25,11 +25,11 @@ use std::fmt::Write as _;
 
 use duck_address::chat::MessageAddress;
 use duck_address::forge::{ForgeLocator, ForgeRepoAddress, ForgeTarget};
+use duck_address::pages::PageAddress;
 use duck_address::runs::RunAddress;
 use duck_address::{Address, ChainId, Refused};
 use ducktape_view_guest::host;
 use futures::{Stream, StreamExt, stream};
-use pages_wire::PageAddress;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 

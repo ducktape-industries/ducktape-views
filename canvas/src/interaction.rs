@@ -70,15 +70,17 @@ impl BoardsView {
         least: [f32; 2],
     ) -> [f32; 4] {
         let mut size = [
-            (bounds[2] + delta[0] * corner[0] as f32).clamp(least[0], boards_wire::MAX_SIZE as f32),
-            (bounds[3] + delta[1] * corner[1] as f32).clamp(least[1], boards_wire::MAX_SIZE as f32),
+            (bounds[2] + delta[0] * corner[0] as f32)
+                .clamp(least[0], crate::boards::MAX_SIZE as f32),
+            (bounds[3] + delta[1] * corner[1] as f32)
+                .clamp(least[1], crate::boards::MAX_SIZE as f32),
         ];
         if self.modifiers.shift && bounds[2] > 0. && bounds[3] > 0. {
             let ratio = bounds[2] / bounds[3];
             size[0] = size[0]
                 .max(size[1] * ratio)
-                .min(boards_wire::MAX_SIZE as f32);
-            size[1] = (size[0] / ratio).clamp(least[1], boards_wire::MAX_SIZE as f32);
+                .min(crate::boards::MAX_SIZE as f32);
+            size[1] = (size[0] / ratio).clamp(least[1], crate::boards::MAX_SIZE as f32);
         }
         [
             bounds[0]
@@ -923,22 +925,22 @@ impl BoardsView {
         end: usize,
         point: [f32; 2],
         shape: &Shape,
-        held: Option<boards_wire::Bond>,
+        held: Option<crate::boards::Bond>,
     ) -> Option<Change> {
         let mut run = path_points(shape);
         let last = run.len().checked_sub(1)?;
         let sample = run.get_mut(end)?;
         *sample = point;
         let run = self.straightened(run);
-        let carried = |mine: bool, kept: &Option<boards_wire::Bond>| {
+        let carried = |mine: bool, kept: &Option<crate::boards::Bond>| {
             if mine { held.clone() } else { kept.clone() }
         };
         let from = carried(end == 0, &shape.from);
         let to = carried(end == last, &shape.to);
         // both ends on one card is a loop the board cannot draw, so the end in
         // hand stands on its own point rather than stealing the other's card
-        let looped = boards_wire::held(&from).is_some()
-            && boards_wire::held(&from) == boards_wire::held(&to);
+        let looped = crate::boards::held(&from).is_some()
+            && crate::boards::held(&from) == crate::boards::held(&to);
         let from = if looped && end == 0 { None } else { from };
         let to = if looped && end != 0 { None } else { to };
         let next = self.path_shape(shape.kind, &standing(board, &run, &from, &to));
@@ -1017,13 +1019,15 @@ impl BoardsView {
                     [40., 32.]
                 };
                 let mut width = (shape.width as f32 + delta[0] * corner[0] as f32)
-                    .clamp(least[0], boards_wire::MAX_SIZE as f32);
+                    .clamp(least[0], crate::boards::MAX_SIZE as f32);
                 let mut height = (shape.height as f32 + delta[1] * corner[1] as f32)
-                    .clamp(least[1], boards_wire::MAX_SIZE as f32);
+                    .clamp(least[1], crate::boards::MAX_SIZE as f32);
                 if self.modifiers.shift && shape.width > 0 && shape.height > 0 {
                     let ratio = shape.width as f32 / shape.height as f32;
-                    width = width.max(height * ratio).min(boards_wire::MAX_SIZE as f32);
-                    height = (width / ratio).clamp(least[1], boards_wire::MAX_SIZE as f32);
+                    width = width
+                        .max(height * ratio)
+                        .min(crate::boards::MAX_SIZE as f32);
+                    height = (width / ratio).clamp(least[1], crate::boards::MAX_SIZE as f32);
                 }
                 let x = shape.x
                     + if corner[0] < 0 {
@@ -1146,7 +1150,7 @@ impl BoardsView {
             });
         // A run drawn wider than a shape may be is fitted whole rather than
         // clipped: scaling keeps the drawing, truncating loses its tail.
-        let limit = boards_wire::MAX_SIZE as f32;
+        let limit = crate::boards::MAX_SIZE as f32;
         let fit = (limit / (b[2] - b[0]).max(limit)).min(limit / (b[3] - b[1]).max(limit));
         let size = |span: f32| (span * fit).round().clamp(0., limit);
         Shape {
@@ -1170,8 +1174,8 @@ impl BoardsView {
         let card = |p| self.holding(&board, shape.kind, p);
         shape.from = card(start);
         shape.to = card(end);
-        let one_card = boards_wire::held(&shape.from).is_some()
-            && boards_wire::held(&shape.from) == boards_wire::held(&shape.to);
+        let one_card = crate::boards::held(&shape.from).is_some()
+            && crate::boards::held(&shape.from) == crate::boards::held(&shape.to);
         if one_card {
             shape.from = None;
             shape.to = None;
@@ -1263,7 +1267,7 @@ impl BoardsView {
         board: &Board,
         kind: Kind,
         point: [f32; 2],
-    ) -> Option<boards_wire::Bond> {
+    ) -> Option<crate::boards::Bond> {
         if kind != Kind::Arrow {
             return None;
         }
@@ -1420,7 +1424,7 @@ impl BoardsView {
         // flight is NOT that: it clears on its own, so it keeps the words and
         // asks for a retry.
         if let Some(inline) = self.inline.as_ref() {
-            let refused_outright = inline.document.text().len() > boards_wire::MAX_TEXT;
+            let refused_outright = inline.document.text().len() > crate::boards::MAX_TEXT;
             if !refused_outright {
                 return self.finish_text();
             }
@@ -1681,7 +1685,7 @@ impl BoardsView {
             return Task::none();
         };
         let text = inline.document.text();
-        if text.len() > boards_wire::MAX_TEXT {
+        if text.len() > crate::boards::MAX_TEXT {
             // Say by how much, and say the way out. Every door out of the
             // editor ends here and this one refuses, so a reader who is not
             // told that Escape leaves anyway is shut in against a number
@@ -1689,7 +1693,7 @@ impl BoardsView {
             self.error = format!(
                 "This card holds {} bytes and there are {}. Shorten it, or press Escape to \
                  leave it behind.",
-                boards_wire::MAX_TEXT,
+                crate::boards::MAX_TEXT,
                 text.len()
             );
             self.inline = Some(inline);
@@ -1956,7 +1960,7 @@ impl BoardsView {
             let fitted = |side: i32, floor: i32| {
                 (side as f32 * ratio)
                     .ceil()
-                    .clamp(floor as f32, boards_wire::MAX_SIZE as f32) as i32
+                    .clamp(floor as f32, crate::boards::MAX_SIZE as f32) as i32
             };
             changes.push(Change::Resize {
                 id: id.clone(),
@@ -2135,7 +2139,7 @@ impl BoardsView {
         let Some(board) = self.visible() else {
             return Task::none();
         };
-        if board.shapes.len() + shapes.len() > boards_wire::MAX_SHAPES {
+        if board.shapes.len() + shapes.len() > crate::boards::MAX_SHAPES {
             self.error = "Not enough room on this board for that many shapes.".into();
             return Task::none();
         }
@@ -2200,8 +2204,8 @@ impl BoardsView {
                 // same places on them: an arrow planted beside its own cards
                 // that still reached back to the originals would be a copy of
                 // the picture with one line left behind in it.
-                let replanted = |bond: boards_wire::Bond| {
-                    mapping.get(&bond.card).map(|card| boards_wire::Bond {
+                let replanted = |bond: crate::boards::Bond| {
+                    mapping.get(&bond.card).map(|card| crate::boards::Bond {
                         card: card.clone(),
                         at: bond.at,
                     })
@@ -2851,7 +2855,7 @@ pub(super) fn path_points(s: &Shape) -> Vec<[f32; 2]> {
 /// which is the whole reason the bond stores a share of the box rather than a
 /// point on the board.
 pub(super) fn anchor_point(card: &Shape, at: [i32; 2]) -> [f32; 2] {
-    let span = boards_wire::ANCHOR_SPAN as f32;
+    let span = crate::boards::ANCHOR_SPAN as f32;
     [
         card.x as f32 + card.width as f32 * at[0] as f32 / span,
         card.y as f32 + card.height as f32 * at[1] as f32 / span,
@@ -2861,15 +2865,15 @@ pub(super) fn anchor_point(card: &Shape, at: [i32; 2]) -> [f32; 2] {
 /// a share of the card's box. Dropped near the middle it comes out near the
 /// middle, which is what an arrow usually means — so "remember where I put it"
 /// costs nothing at the one place people do not care about it.
-fn bond_at(card_id: &str, card: &Shape, point: [f32; 2]) -> boards_wire::Bond {
-    let span = boards_wire::ANCHOR_SPAN as f32;
+fn bond_at(card_id: &str, card: &Shape, point: [f32; 2]) -> crate::boards::Bond {
+    let span = crate::boards::ANCHOR_SPAN as f32;
     let share = |value: f32, origin: i32, size: i32| {
         let size = (size as f32).max(1.);
         ((value - origin as f32) / size * span)
             .round()
             .clamp(0., span) as i32
     };
-    boards_wire::Bond {
+    crate::boards::Bond {
         card: card_id.to_owned(),
         at: [
             share(point[0], card.x, card.width),
@@ -2889,14 +2893,14 @@ fn bond_at(card_id: &str, card: &Shape, point: [f32; 2]) -> boards_wire::Bond {
 pub(super) fn standing(
     board: &Board,
     run: &[[f32; 2]],
-    from: &Option<boards_wire::Bond>,
-    to: &Option<boards_wire::Bond>,
+    from: &Option<crate::boards::Bond>,
+    to: &Option<crate::boards::Bond>,
 ) -> Vec<[f32; 2]> {
     let mut run = run.to_vec();
     let Some(last) = run.len().checked_sub(1) else {
         return run;
     };
-    let at = |end: &Option<boards_wire::Bond>| {
+    let at = |end: &Option<crate::boards::Bond>| {
         let bond = end.as_ref()?;
         let card = &board.shapes.get(&bond.card)?.shape;
         Some(anchor_point(card, bond.at))
@@ -2938,7 +2942,7 @@ pub(super) fn stroke(board: &Board, s: &Shape) -> Vec<[f32; 2]> {
     if path.len() < 2 {
         return Vec::new();
     }
-    let held = |end: &Option<boards_wire::Bond>| {
+    let held = |end: &Option<crate::boards::Bond>| {
         let bond = end.as_ref()?;
         let card = board.shapes.get(&bond.card)?.shape.clone();
         Some((card, bond.at))
@@ -3037,7 +3041,7 @@ fn simplify(points: &[[f32; 2]], tolerance: f32) -> Vec<[f32; 2]> {
     let mut tolerance = tolerance.max(0.01);
     loop {
         let kept = thin(points, tolerance);
-        if kept.len() <= boards_wire::MAX_POINTS {
+        if kept.len() <= crate::boards::MAX_POINTS {
             return kept;
         }
         tolerance *= 2.;

@@ -2,7 +2,6 @@
 use base64::Engine as _;
 use duck_address::{Address, ChainId, Refused};
 use ducktape_view_guest::host;
-use files_wire::FileAddress;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -23,8 +22,21 @@ async fn submit_bytes(target: &str, bytes: Vec<u8>) -> Result<(), host::Refusal>
 
 /// The duckfs path a `duck://<chain>/files/<path…>` address names.
 pub fn address_path(address: &str) -> Result<String, Refused> {
-    let file = FileAddress::try_from(&Address::parse(address)?)?;
-    Ok(format!("/{}", file.path.join("/")))
+    let address = Address::parse(address)?;
+    if address.module != "files" || address.path.is_empty() {
+        return Err(Refused::new(
+            "invalid_input",
+            "A file address must name at least one path segment.",
+        ));
+    }
+    let path = format!("/{}", address.path.join("/"));
+    duckfs_core::paths::canonical(&path).map_err(|why| {
+        Refused::new(
+            "invalid_input",
+            format!("A file address names a duckfs path, and `{path}` is not one: {why}."),
+        )
+    })?;
+    Ok(path)
 }
 
 /// The address of the duckfs `path` on `chain`, the view's `<label>#<salt>`:
@@ -32,10 +44,19 @@ pub fn address_path(address: &str) -> Result<String, Refused> {
 pub fn file_address(chain: &str, path: &str) -> Result<String, Refused> {
     let chain: ChainId = chain.parse()?;
     let path = path.strip_prefix('/').unwrap_or(path);
-    let file = FileAddress {
-        path: path.split('/').map(str::to_owned).collect(),
-    };
-    Ok(file.address(chain)?.to_string())
+    let path = format!("/{path}");
+    duckfs_core::paths::canonical(&path).map_err(|why| {
+        Refused::new(
+            "invalid_input",
+            format!("A file address names a duckfs path, and `{path}` is not one: {why}."),
+        )
+    })?;
+    Ok(Address::new(
+        chain,
+        "files",
+        path[1..].split('/').map(str::to_owned).collect(),
+    )?
+    .to_string())
 }
 
 /// Commit the picked `file` at the duckfs `path`; its address is the
@@ -134,6 +155,15 @@ mod tests {
             "duck://testnet-0a1b2c3d/files/shared/%EB%B3%B4%EA%B3%A0%EC%84%9C%20Final.pdf"
         );
         assert_eq!(address_path(&address).unwrap(), "/shared/보고서 Final.pdf");
+    }
+
+    #[test]
+    fn file_address_fixture_matches_the_producer_spelling() {
+        let expected: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/file-address.json")).unwrap();
+        let uri = file_address("testnet#0a1b2c3d", "/shared/notes.txt").unwrap();
+        assert_eq!(uri, expected["uri"]);
+        assert_eq!(address_path(&uri).unwrap(), "/shared/notes.txt");
     }
 
     #[test]

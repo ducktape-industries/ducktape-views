@@ -1,0 +1,12 @@
+{
+  "edit": {
+    "board": "room",
+    "change": {
+      "move": {
+        "id": "card",
+        "x": 12,
+        "y": -4
+      }
+    }
+  }
+}
