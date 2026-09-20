@@ -574,13 +574,19 @@ macro_rules! export_app {
             DRIVER.with(|driver| driver.borrow_mut().as_mut().expect("boot first").tick(events))
         }
 
+        // `runtime_path` is a string, so it cannot say `$crate`: the runtime is
+        // re-exported at the view's root under a fixed name and reached by
+        // `crate::`, which names no crate. This macro is invoked at the root.
+        #[cfg(target_arch = "wasm32")]
+        use $crate::wit_bindgen as __ducktape_view_wit_bindgen;
+
         #[cfg(target_arch = "wasm32")]
         mod wasm_exports {
             macro_rules! bindings {
                 ($wit:literal) => {
                     $crate::wit_bindgen::generate!({
                         inline: $wit,
-                        runtime_path: "::ducktape_view_guest::wit_bindgen::rt",
+                        runtime_path: "crate::__ducktape_view_wit_bindgen::rt",
                     });
                 };
             }
