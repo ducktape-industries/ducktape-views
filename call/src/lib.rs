@@ -1,4 +1,5 @@
 //! Deployed call protocol over generic media devices and Gateway streams.
+mod call_wire;
 mod composer;
 mod panel;
 mod protocol;
@@ -324,7 +325,10 @@ mod tests {
         /// What a congested writer does to a control frame: the host's stream
         /// send queue is one frame deep and refuses rather than blocking.
         refuse_beacon: bool,
-        refuse_route: bool,
+        /// The hub's reason token when the huddle is refused at the join.
+        refuse_hub: Option<&'static str>,
+        /// The room's committed huddle roster, as node keys.
+        roster: Vec<String>,
     }
 
     impl Host {
@@ -334,7 +338,8 @@ mod tests {
                 streams: BTreeMap::new(),
                 effects: Vec::new(),
                 refuse_beacon: false,
-                refuse_route: false,
+                refuse_hub: None,
+                roster: Vec::new(),
             }
         }
         fn response(id: u64, value: Value, done: bool) -> wire::Event {
@@ -350,38 +355,40 @@ mod tests {
                 events = Vec::new();
                 for request in frame.requests {
                     match request.kind.as_str() {
-                        "call.props" | "media.audio" | "media.video" | "clock.ticks" => {
+                        "call.props" | "media.audio" | "media.video" | "clock.ticks"
+                        | "rpc.live" => {
                             self.streams.insert(request.kind, request.id);
                         }
-                        "rpc.query" => {
+                        "rpc.view" => {
                             let query: Value = serde_json::from_slice(&request.payload).unwrap();
+                            assert_eq!(query["target"], "chat");
                             assert_eq!(query["query"]["channel"]["channel_id"], "room");
+                            let seats: Vec<Value> = self
+                                .roster
+                                .iter()
+                                .map(|node| json!({"party": "acct:1", "node": node}))
+                                .collect();
                             events.push(Self::response(
                                 request.id,
-                                json!({"channel": {"owner": {"account": 7}}}),
+                                json!({"channel": {"name": "room", "huddle": seats}}),
                                 true,
                             ));
                         }
-                        "net.stream" => {
-                            let route: Value = serde_json::from_slice(&request.payload).unwrap();
-                            assert_eq!(route["account"], 7);
-                            assert_eq!(route["route"], "media");
-                            assert_eq!(route["path"], "/?channel=room");
+                        "voice.hub" => {
+                            let hub: Value = serde_json::from_slice(&request.payload).unwrap();
+                            assert_eq!(hub, json!({"channel": "room"}));
                             self.streams.insert(request.kind, request.id);
-                            if self.refuse_route {
+                            if let Some(reason) = self.refuse_hub {
                                 events.push(wire::Event::Response {
                                     id: request.id,
-                                    result: Err(wire::Refusal::new(
-                                        "route_unpublished",
-                                        "application route is not published",
-                                    )),
+                                    result: Err(wire::Refusal::new(reason, "the hub's own words")),
                                     done: true,
                                 });
                                 continue;
                             }
                             events.push(Self::response(
                                 request.id,
-                                json!({"text": r#"{"type":"ready","peers":[]}"#}),
+                                json!({"text": r#"{"type":"ready"}"#}),
                                 false,
                             ));
                         }
@@ -423,42 +430,167 @@ mod tests {
         fn item(&mut self, stream: &str, value: Value) {
             self.step(vec![Self::response(self.streams[stream], value, false)]);
         }
+        fn control(&mut self, value: Value) {
+            self.item("voice.hub", json!({"text": value.to_string()}));
+        }
+        /// Every control frame handed to the hub, in order, as JSON.
+        fn sent(&self) -> Vec<Value> {
+            self.effects
+                .iter()
+                .filter(|(kind, _)| kind == "net.send")
+                .filter_map(|(_, body)| body["frame"]["text"].as_str())
+                .map(|text| serde_json::from_str(text).unwrap())
+                .collect()
+        }
+        fn errors(&self) -> Vec<String> {
+            self.effects
+                .iter()
+                .filter(|(kind, body)| kind == "host.emit" && body["kind"] == "error")
+                .map(|(_, body)| body["status"].as_str().unwrap().to_owned())
+                .collect()
+        }
+    }
+
+    /// The join is one subscription on the member's own node — no owner
+    /// lookup, no gateway leg — and the hub is steered with the room's
+    /// committed roster the moment it is ready, and again whenever it moves.
+    #[test]
+    fn the_huddle_is_joined_over_the_nodes_voice_hub_and_steered_by_the_roster() {
+        let mut host = Host::new();
+        let (a, b) = ("0a".repeat(32), "0b".repeat(32));
+        host.roster = vec![a.clone(), b.clone()];
+        host.step(Vec::new());
+        host.item(
+            "call.props",
+            json!({"channel": "room", "muted": false, "source": "off"}),
+        );
+        assert!(host.streams.contains_key("voice.hub"));
+        assert!(host.streams.contains_key("rpc.live"));
+        assert!(host.errors().is_empty());
+        let recipients: Vec<Value> = host
+            .sent()
+            .into_iter()
+            .filter(|text| text["type"] == "recipients")
+            .collect();
+        assert_eq!(
+            recipients,
+            [json!({"type": "recipients", "peers": [a.clone(), b.clone()]})]
+        );
+        assert!(
+            host.sent().iter().any(|text| text["type"] == "beacon"),
+            "joining publishes this side's state"
+        );
+
+        // a `ready` with peers on it is tolerated and says nothing
+        host.control(json!({"type": "ready", "peers": [{"peer": a}]}));
+        // the chat plane moves: the roster is re-read and the hub re-steered
+        host.roster = vec![b.clone()];
+        host.item("rpc.live", json!({"block": 9}));
+        assert_eq!(
+            host.sent().last().unwrap(),
+            &json!({"type": "recipients", "peers": [b]})
+        );
+        assert!(host.errors().is_empty());
     }
 
     #[test]
-    fn real_guest_contract_routes_media_and_changes_sources_without_native_call_protocol() {
+    fn a_refused_huddle_is_told_as_a_fact_and_ends_the_session() {
+        let sentences = [
+            (
+                "key_without_account",
+                "To join a huddle, create or join an account in Settings → Account.",
+            ),
+            ("not_in_huddle", "You are not in this huddle."),
+            (
+                "no_call_hub",
+                "Voice is not on in this network: the node runs no call hub.",
+            ),
+            ("node_unreachable", "Your node did not answer."),
+            ("some_new_reason", "the hub's own words"),
+        ];
+        for (reason, sentence) in sentences {
+            let mut host = Host::new();
+            host.refuse_hub = Some(reason);
+            host.step(Vec::new());
+            host.item(
+                "call.props",
+                json!({"channel": "room", "muted": false, "source": "off"}),
+            );
+            assert_eq!(host.errors(), [sentence], "{reason}");
+            assert!(
+                host.effects.iter().any(|(kind, _)| kind == "host.finish"),
+                "{reason}: the session finishes instead of waiting on a hub that refused"
+            );
+            assert!(
+                !host.effects.iter().any(|(kind, _)| kind == "rpc.view"),
+                "{reason}: no roster is read for a huddle the node refused"
+            );
+        }
+    }
+
+    /// The hub's own control frames are read for what they carry; a request
+    /// for a keyframe is met by construction (every captured image stands
+    /// alone) and a rate hint has no knob here, so neither moves anything.
+    #[test]
+    fn hub_controls_are_understood_and_an_unknown_one_ends_the_call() {
+        let mut host = Host::new();
+        host.step(Vec::new());
+        host.item("call.props", json!({"channel": "room", "source": "off"}));
+        let peer = "02".repeat(32);
+        host.control(json!({"type": "peer_beacon", "peer": peer, "muted": true, "camera_on": false, "sharing": false, "speaking": true}));
+        let shown = host
+            .effects
+            .iter()
+            .rev()
+            .find(|(kind, body)| kind == "host.emit" && body["kind"] == "presentation")
+            .unwrap()
+            .1["peers"]
+            .clone();
+        assert_eq!(shown[0]["peer"], peer);
+        assert_eq!(shown[0]["muted"], true);
+        assert_eq!(shown[0]["speaking"], true);
+        host.control(json!({"type": "keyframe_request"}));
+        host.control(json!({"type": "rate_hint", "max_kbps": 300}));
+        assert!(host.errors().is_empty());
+        host.control(json!({"type": "peer_left", "peer": peer}));
+        assert_eq!(host.errors(), ["unknown call control"]);
+    }
+
+    #[test]
+    fn real_guest_contract_moves_hub_frames_and_changes_sources_without_native_call_protocol() {
         let mut host = Host::new();
         host.step(Vec::new());
         host.item(
             "call.props",
             json!({"channel": "room", "muted": false, "source": "off"}),
         );
-        assert!(host.streams.contains_key("net.stream"));
+        assert!(host.streams.contains_key("voice.hub"));
         host.item(
             "media.audio",
             json!({"frame": vec![7u8; 80], "sound": true}),
         );
+        let mut audio_up = vec![1];
+        audio_up.extend_from_slice(&[7u8; 80]);
         assert!(
-            host.effects
-                .iter()
-                .any(|(kind, body)| kind == "net.send" && body["frame"]["binary"][0] == 1)
+            host.effects.iter().any(
+                |(kind, body)| kind == "net.send" && body["frame"]["binary"] == json!(audio_up)
+            )
         );
 
         let peer = "02".repeat(32);
-        host.item("net.stream", json!({"text": json!({"type":"peer_beacon","account":43,"peer":peer,"muted":false,"camera_on":true,"sharing":false,"speaking":true}).to_string()}));
-        let mut audio = vec![4];
-        audio.extend_from_slice(&43u64.to_be_bytes());
-        audio.extend_from_slice(&[2; 32]);
+        host.control(json!({"type":"peer_beacon","peer":peer,"muted":false,"camera_on":true,"sharing":false,"speaking":true}));
+        // the hub's mixed playout names no peer
+        let mut audio = vec![1];
         audio.extend_from_slice(&[5u8; 80]);
-        host.item("net.stream", json!({"binary": audio}));
+        host.item("voice.hub", json!({"binary": audio}));
         host.step(vec![wire::Event::Response {
             id: host.streams["clock.ticks"],
             result: Ok(Vec::new()),
             done: false,
         }]);
         assert!(host.effects.iter().any(|(kind, body)| kind == "media.play"
-            && body["frames"][0]["peer"] == peer
-            && body["frames"][0]["frame"][0] == 5));
+            && body["frames"][0]["peer"] == protocol::HUB
+            && body["frames"][0]["frame"] == json!(vec![5u8; 80])));
 
         host.item(
             "call.props",
@@ -484,12 +616,10 @@ mod tests {
         let mut video = vec![3, 1, 0, 0, 0, 7];
         video.extend_from_slice(&[2; 32]);
         video.push(9);
-        host.item("net.stream", json!({"binary": video}));
-        assert!(
-            host.effects
-                .iter()
-                .any(|(kind, body)| kind == "media.put" && body["image"] == 99)
-        );
+        host.item("voice.hub", json!({"binary": video}));
+        assert!(host.effects.iter().any(|(kind, body)| kind == "media.put"
+            && body["image"] == 99
+            && body["jpeg"] == json!([9])));
         assert!(
             host.effects
                 .iter()
@@ -497,31 +627,6 @@ mod tests {
                     && body["peers"][0]["image"] == "opaque-image")
         );
     }
-    #[test]
-    fn an_unpublished_media_route_is_told_as_a_fact_about_the_room() {
-        let mut host = Host::new();
-        host.refuse_route = true;
-        host.step(Vec::new());
-        host.item(
-            "call.props",
-            json!({"channel": "room", "muted": false, "source": "off"}),
-        );
-        let status = host
-            .effects
-            .iter()
-            .find(|(kind, body)| kind == "host.emit" && body["kind"] == "error")
-            .map(|(_, body)| body["status"].as_str().unwrap().to_owned())
-            .expect("the refused route ends the session with a status");
-        assert_eq!(
-            status,
-            "Voice is not on in this room: the room owner's node is not serving it."
-        );
-        assert!(
-            host.effects.iter().any(|(kind, _)| kind == "host.finish"),
-            "the session finishes instead of waiting on a route nobody serves"
-        );
-    }
-
     /// A congested writer refuses a queued frame; the host's stream send queue
     /// is one frame deep, so a beacon lands on that refusal whenever the
     /// socket is behind. Losing the room over it would turn every impaired
@@ -530,9 +635,9 @@ mod tests {
     #[test]
     fn a_refused_beacon_is_retried_and_does_not_end_the_call() {
         fn beacons(host: &Host) -> usize {
-            host.effects
+            host.sent()
                 .iter()
-                .filter(|(kind, body)| kind == "net.send" && body["frame"]["text"].is_string())
+                .filter(|text| text["type"] == "beacon")
                 .count()
         }
         let mut host = Host::new();
@@ -621,10 +726,8 @@ mod tests {
         assert_eq!(shown(&host)["tiles"], json!([]));
         assert_eq!(shown(&host)["video_live"], true);
         let peer = "02".repeat(32);
-        host.item(
-            "net.stream",
-            json!({"text":json!({"type":"peer_beacon", "peer":peer, "sharing":true}).to_string()}),
-        );
+        host.roster = vec![peer.clone()];
+        host.control(json!({"type":"peer_beacon", "peer":peer, "sharing":true}));
         assert_eq!(
             shown(&host)["stage"],
             "local-preview",
@@ -633,7 +736,7 @@ mod tests {
         let mut video = vec![3, 1, 0, 0, 0, 7];
         video.extend_from_slice(&[2; 32]);
         video.push(9);
-        host.item("net.stream", json!({"binary":video}));
+        host.item("voice.hub", json!({"binary":video}));
         assert_eq!(
             shown(&host)["stage"],
             "opaque-image",
@@ -656,10 +759,9 @@ mod tests {
                 .count(),
             before
         );
-        host.item(
-            "net.stream",
-            json!({"text":json!({"type":"peer_left", "peer":peer}).to_string()}),
-        );
+        // the peer leaves the committed roster: the hub sends no leave
+        host.roster.clear();
+        host.item("rpc.live", json!({"block": 2}));
         assert_eq!(shown(&host)["stage"], "local-preview");
         assert_eq!(shown(&host)["tiles"], json!([]));
         host.item("call.props", json!({"channel":"room", "source":"camera"}));
@@ -697,7 +799,9 @@ mod tests {
         assert_eq!(peers(&host), json!([]));
         let peer = "02".repeat(32);
         for muted in [true, false] {
-            host.item("net.stream", json!({"text":json!({"type":"peer_beacon", "peer":peer, "muted":muted, "speaking":true}).to_string()}));
+            host.control(
+                json!({"type":"peer_beacon", "peer":peer, "muted":muted, "speaking":true}),
+            );
             let list = peers(&host);
             assert_eq!(list.as_array().unwrap().len(), 1);
             assert_eq!(list[0]["peer"], peer);
@@ -705,16 +809,13 @@ mod tests {
             assert_eq!(list[0]["speaking"], true);
         }
         let before = host.effects.len();
-        host.item("net.stream", json!({"text":json!({"type":"peer_beacon", "peer":peer, "muted":false, "speaking":true}).to_string()}));
+        host.control(json!({"type":"peer_beacon", "peer":peer, "muted":false, "speaking":true}));
         assert!(
             !host.effects[before..]
                 .iter()
                 .any(|(_, body)| body["kind"] == "presentation")
         );
-        host.item(
-            "net.stream",
-            json!({"text":json!({"type":"peer_left", "peer":peer}).to_string()}),
-        );
+        host.item("rpc.live", json!({"block": 2}));
         assert_eq!(peers(&host), json!([]));
     }
 }
