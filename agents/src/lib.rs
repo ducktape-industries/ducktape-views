@@ -910,7 +910,7 @@ impl AgentsView {
                     ),
                     action(
                         format!("agents/approval/{id}/deny"),
-                        "Decline",
+                        "Deny",
                         (!sending).then(|| Message::ControlApprove(id.clone(), false)),
                     ),
                 ],
@@ -1716,6 +1716,8 @@ pub struct AgentsView {
     registration_serial: u64,
     pub(crate) connected: bool,
     pub(crate) connection_serial: i64,
+    #[serde(skip)]
+    pub(crate) live_subscription_generation: u64,
     pub(crate) answered: bool,
     pub(crate) host_error: String,
     pub(crate) selected: String,
@@ -1818,6 +1820,7 @@ impl AgentsView {
             registration_serial: 0,
             connected: false,
             connection_serial: 0,
+            live_subscription_generation: 0,
             answered: false,
             host_error: "".to_owned(),
             selected: "".to_owned(),
@@ -1843,7 +1846,7 @@ impl AgentsView {
     pub(crate) const PREFERRED_WINDOW_SIZE: &'static str = "none";
     /// This state's layout, digested — `snapshot_schema` holds it here.
     pub(crate) const SNAPSHOT_SCHEMA: &'static str =
-        "14b6a413af6f2949a94eae1d28dae8032790e5c6d40306f52a38efc2b6b19d24";
+        "23ebad7bdef93c572988332cb106e8738dd83cc977c851a2213795f07c3e708e";
     pub(crate) fn snapshot(&self) -> Result<Vec<u8>, String> {
         self.validate_snapshot()?;
         wire::Snapshot {
@@ -1862,6 +1865,7 @@ impl AgentsView {
             return Err("invalid Agents snapshot".into());
         };
         let mut state: Self = wire::decode(&state)?;
+        state.live.control = None;
         if matches!(state.control_state, host::ControlState::Sending) {
             state.control_state = host::ControlState::Idle;
             state.control_serial = state.control_serial.wrapping_add(1);
@@ -1896,8 +1900,12 @@ impl AgentsView {
                 ::ducktape_view_guest::Subscription::none()
             },
             if run_open {
-                host::live_run(self.open_run.to_owned(), self.connection_serial)
-                    .map(Message::LiveArrived)
+                host::live_run(
+                    self.open_run.to_owned(),
+                    self.connection_serial,
+                    self.live_subscription_generation,
+                )
+                .map(Message::LiveArrived)
             } else {
                 ::ducktape_view_guest::Subscription::none()
             },
@@ -2025,6 +2033,66 @@ mod tests {
         );
         assert_eq!(view.control_draft, "new draft");
         assert!(matches!(view.control_state, host::ControlState::Sending));
+    }
+
+    #[test]
+    fn a_late_live_reading_from_another_selection_is_ignored() {
+        let (mut view, _) = AgentsView::boot();
+        view.open_run = "new-session".into();
+        view.live.answer = "current answer".into();
+        let _ = view.on_live_arrived(host::LiveRun {
+            dispatch_id: "old-session".into(),
+            answer: "stale answer".into(),
+            ..Default::default()
+        });
+        assert_eq!(view.live.answer, "current answer");
+    }
+
+    #[test]
+    fn a_late_reading_from_an_earlier_a_subscription_is_ignored_after_a_b_a() {
+        let (mut view, _) = AgentsView::boot();
+        view.open_run = "session-a".into();
+        view.live_subscription_generation = 3;
+        view.live.answer = "current answer".into();
+        let _ = view.on_live_arrived(host::LiveRun {
+            dispatch_id: "session-a".into(),
+            subscription_generation: 1,
+            answer: "stale answer".into(),
+            ..Default::default()
+        });
+        assert_eq!(view.live.answer, "current answer");
+    }
+
+    #[test]
+    fn reconnecting_the_same_dispatch_fences_the_previous_subscription() {
+        let (mut view, _) = AgentsView::boot();
+        view.open_run = "session-a".into();
+        view.live_subscription_generation = 4;
+        view.live.answer = "current answer".into();
+        let _ = view.on_retry_trace();
+        let _ = view.on_live_arrived(host::LiveRun {
+            dispatch_id: "session-a".into(),
+            subscription_generation: 4,
+            answer: "stale answer".into(),
+            ..Default::default()
+        });
+        assert_eq!(view.live.answer, "");
+    }
+
+    #[test]
+    fn restored_transcript_keeps_text_but_requires_fresh_control_state() {
+        let (mut view, _) = AgentsView::boot();
+        view.live.answer = "retained transcript".into();
+        view.live.control_snapshot_received = true;
+        view.live.control = Some(host::RunControl {
+            turn: "old-turn".into(),
+            steers: true,
+            approvals: vec![("old-approval".into(), "Read".into())],
+        });
+        let restored = AgentsView::restore(&view.snapshot().unwrap()).unwrap();
+        assert_eq!(restored.live.answer, "retained transcript");
+        assert!(restored.live.control.is_none());
+        assert!(!restored.live.control_snapshot_received);
     }
 
     #[test]
@@ -2423,6 +2491,7 @@ impl AgentsView {
     fn on_retry_trace(&mut self) -> ducktape_view_guest::Task<Message> {
         self.live = host::LiveRun::default();
         self.connection_serial = self.connection_serial.wrapping_add(1);
+        self.live_subscription_generation = self.live_subscription_generation.wrapping_add(1);
         ducktape_view_guest::Task::none()
     }
 
@@ -2507,6 +2576,8 @@ impl AgentsView {
                 if accept_navigation {
                     self.control_state = host::ControlState::Idle;
                     self.control_serial = self.control_serial.wrapping_add(1);
+                    self.live_subscription_generation =
+                        self.live_subscription_generation.wrapping_add(1);
                     self.control_draft.clear();
                     self.live = host::LiveRun::default();
                     self.trace_open = false;
@@ -2667,6 +2738,11 @@ impl AgentsView {
         item: crate::host::LiveRun,
     ) -> ::ducktape_view_guest::Task<Message> {
         {
+            if item.dispatch_id != self.open_run
+                || item.subscription_generation != self.live_subscription_generation
+            {
+                return ::ducktape_view_guest::Task::none();
+            }
             {
                 let closed = self.live.control.is_some() && item.control.is_none();
                 if closed {
@@ -2812,6 +2888,8 @@ impl AgentsView {
                 self.expanded_receipt = "".to_owned();
                 self.control_state = host::ControlState::Idle;
                 self.control_serial = self.control_serial.wrapping_add(1);
+                self.live_subscription_generation =
+                    self.live_subscription_generation.wrapping_add(1);
                 self.control_draft.clear();
             }
             {
@@ -2852,6 +2930,8 @@ impl AgentsView {
             }
             {
                 self.open_run = "".to_owned();
+                self.live_subscription_generation =
+                    self.live_subscription_generation.wrapping_add(1);
             }
             {
                 self.open_row = crate::host::empty_run();
