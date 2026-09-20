@@ -324,6 +324,24 @@ fn a_connected_view_reads_the_node_for_itself() {
     );
 }
 
+/// A connected session may be viewing a remote node; its `node.props` path is
+/// still local app state, so the overview must not present it as node data.
+#[test]
+fn a_remote_connection_does_not_claim_the_local_app_directory_for_the_node() {
+    let (frame, _) = connected();
+    assert!(
+        has_text(&frame, "Local app data directory"),
+        "{:?}",
+        texts(&frame)
+    );
+    assert!(!has_text(&frame, "Data directory"), "{:?}", texts(&frame));
+    assert!(
+        has_text(&frame, "/var/ducktape/demo"),
+        "{:?}",
+        texts(&frame)
+    );
+}
+
 /// The node key leaves as the one intent the app still hears — the
 /// clipboard is an OS door, not a write.
 #[test]
@@ -520,7 +538,7 @@ fn the_activity_tab_streams_the_node_log_ring() {
     let asked: Value = serde_json::from_slice(&stream.payload).expect("the ask decodes");
     assert_eq!(asked["topic"], "logs");
     assert!(
-        has_text(&frame, "Waiting for the node's log ring…"),
+        has_text(&frame, "Waiting for log messages from the node…"),
         "{:?}",
         texts(&frame)
     );
@@ -741,7 +759,7 @@ fn every_row_cell_keeps_one_line() {
     wrapping.sort_unstable();
     wrapping.dedup();
     // Three families, sorted together: the readings a copy control sits
-    // beside (a workspace path, a node key, a root hash, a module's two
+    // beside (a local app path, a node key, a root hash, a module's two
     // digests — read in full, so the row grows instead of clipping), the
     // console's message column, and the sentences under the standing and
     // the retune.

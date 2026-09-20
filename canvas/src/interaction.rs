@@ -1541,6 +1541,7 @@ impl BoardsView {
         if self.inline.is_some() {
             return Task::none();
         }
+        self.closed_inline = None;
         let text = record.shape.text.clone();
         self.gesture = Gesture::Idle;
         let mut document = Editor::new(text.clone());
@@ -1631,18 +1632,46 @@ impl BoardsView {
         &mut self,
         transaction: ducktape_view_guest::EditorTransaction<Message>,
     ) -> Task<Message> {
-        let Some(inline) = &mut self.inline else {
-            return Task::none();
-        };
-        transaction
-            .apply(&mut inline.document)
-            .map_or_else(Task::none, Task::done)
+        if let Some(inline) = &mut self.inline {
+            return transaction
+                .apply(&mut inline.document)
+                .map_or_else(Task::none, Task::done);
+        }
+        if let Some(inline) = &mut self.closed_inline {
+            let _ = transaction.apply(&mut inline.document);
+            let text = inline.document.text();
+            if self.lost.is_none()
+                && self.current.is_empty()
+                && !self.error.is_empty()
+                && !text.trim().is_empty()
+            {
+                let middle = self.world([self.viewport[0] / 2., self.viewport[1] / 2.]);
+                self.lost = Some(Shape {
+                    text: text.clone(),
+                    ..self.creation_shape(Kind::Note, middle, middle)
+                });
+            }
+            if let Some(lost) = &mut self.lost {
+                lost.text = text;
+                self.error = match quoted(&lost.text) {
+                    Some(words) => format!(
+                        "Somebody else removed this board, so what you wrote was not saved — {words}."
+                    ),
+                    None => {
+                        "Somebody else removed this board, so that change was not saved.".into()
+                    }
+                };
+            }
+        }
+        Task::none()
     }
     pub(super) fn on_text_document(
         &mut self,
         document: ducktape_view_guest::EditorDocumentUpdate,
     ) -> Task<Message> {
         if let Some(inline) = &mut self.inline {
+            document.apply(&mut inline.document);
+        } else if let Some(inline) = &mut self.closed_inline {
             document.apply(&mut inline.document);
         }
         Task::none()

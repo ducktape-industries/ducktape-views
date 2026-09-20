@@ -106,7 +106,7 @@ impl PaletteView {
             return Some(kit::empty_state(
                 "palette/searching",
                 "Searching…",
-                "Messages and pages are asked together.",
+                "Looking for matching messages and pages.",
             ));
         }
         if !self.error.is_empty() {
@@ -122,7 +122,7 @@ impl PaletteView {
             kit::empty_state(
                 "palette/empty",
                 "Nothing matched",
-                "No messages or pages matched this search.",
+                "No messages or pages matched. Try fewer or different words.",
             )
         })
     }

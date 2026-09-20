@@ -127,7 +127,7 @@ impl FilesView {
                     native::empty_state(
                         format!("{key}/empty"),
                         "Empty folder",
-                        "Nothing is committed under this path. New folder and New file add to it; a file dropped on the window uploads here.",
+                        "This folder is empty. Choose New folder or New file, or drop a file here to upload it.",
                     ),
                 ),
                 Some(wire::Length::Fill),

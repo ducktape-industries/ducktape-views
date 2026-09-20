@@ -294,7 +294,10 @@ fn a_seat_without_an_account_is_not_given_the_nodes_standing() {
     let (frame, _, _) = connected(&session, 0);
     let frame = tick_native(press(&frame, "Account"));
     assert!(
-        has_text(&frame, "This device holds a key but no account yet."),
+        has_text(
+            &frame,
+            "Create an account below, or join your existing account from another device."
+        ),
         "{:?}",
         texts(&frame)
     );
@@ -935,7 +938,7 @@ fn the_updates_group_reads_the_facts_and_each_control_is_one_intent() {
     assert!(
         has_text(
             &frame,
-            "Updates unavailable: not installed through the launcher."
+            "Automatic updates are unavailable in this copy of Ducktape. Open the installed app to check for updates."
         ),
         "{:?}",
         texts(&frame)
@@ -1022,7 +1025,12 @@ fn a_refused_staged_release_offers_a_discard_and_no_restart() {
         ..facts()
     };
     let (frame, props, _) = connected(&staged, 2);
-    for expected in ["Refused", "2026.09.2+abc1234", "qualify_exit_3"] {
+    for expected in [
+        "Update cannot be installed",
+        "2026.09.2+abc1234",
+        "qualify_exit_3",
+        "Keep using your current version. Choose Check now to look for a newer update, or Discard to remove this download.",
+    ] {
         assert!(
             has_text(&frame, expected),
             "missing {expected:?} in {:?}",

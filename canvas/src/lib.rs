@@ -267,6 +267,11 @@ pub struct BoardsView {
     /// put them back down where the card stood, and so the chip cannot call an
     /// edit that reached nothing saved.
     lost: Option<Shape>,
+    /// A board-removal response can precede queued editor input. Keep its
+    /// document until that input settles; accepted words live in `lost`.
+    /// Pending host callbacks never survive an instance replacement.
+    #[serde(skip)]
+    closed_inline: Option<Inline>,
     title: String,
     /// The open board's name while it is being edited in the picker. Seeded
     /// from the board every time the picker opens, so what you see in the box
@@ -420,6 +425,7 @@ impl BoardsView {
                 delivery: Delivery::Idle,
                 error: String::new(),
                 lost: None,
+                closed_inline: None,
                 title: String::new(),
                 rename: String::new(),
                 selected: BTreeSet::new(),
@@ -575,6 +581,7 @@ impl BoardsView {
                 return Task::none();
             }
             self.epoch += 1;
+            self.closed_inline = None;
             self.current.clear();
             self.catalog.clear();
             self.confirmed = None;
@@ -843,6 +850,7 @@ impl BoardsView {
         // board. Its whole existence is the Create standing in that queue,
         // so once the queue goes the words in it have no place to be looked
         // up by and are dropped in silence. Read here, against `before`.
+        let closed_inline = self.inline.clone();
         let writing = self.inline.as_ref().and_then(|inline| {
             let text = inline.document.text();
             (text != inline.original).then(|| (inline.id.clone(), text))
@@ -876,6 +884,7 @@ impl BoardsView {
         // call an edit that reached a board that is gone saved.
         self.lost = kept;
         self.leave_the_open_board();
+        self.closed_inline = closed_inline;
         Task::none()
     }
     fn pump(&mut self) -> Task<Message> {
@@ -905,6 +914,7 @@ impl BoardsView {
         }
         self.pending.clear();
         self.inline = None;
+        self.closed_inline = None;
         self.gesture = Gesture::Idle;
         self.confirmed = None;
         self.say_nothing();
@@ -1177,6 +1187,7 @@ impl BoardsView {
         let Some(card) = self.lost.clone() else {
             return Task::none();
         };
+        self.closed_inline = None;
         // A connector's ends named cards that may well have gone with it.
         self.mint_shape(Shape {
             from: None,
@@ -1226,6 +1237,7 @@ impl BoardsView {
             }
         };
         self.current = id.clone();
+        self.closed_inline = None;
         self.confirmed = Some(board);
         self.selected.clear();
         self.catalog.insert(id.clone(), title.clone());
@@ -1334,11 +1346,14 @@ impl BoardsView {
             .insert(self.current.clone(), (self.camera, self.zoom));
         (self.camera, self.zoom) = self.cameras.get(&id).copied().unwrap_or(([80., 80.], 1.));
         self.current = id;
+        self.closed_inline = None;
         self.board_picker = false;
         self.confirmed = None;
         self.name_the_board_we_are_on();
         self.selected.clear();
-        self.say_nothing();
+        if self.lost.is_none() {
+            self.say_nothing();
+        }
 
         self.gesture = Gesture::Idle;
         self.undo.clear();
