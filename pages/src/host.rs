@@ -82,9 +82,9 @@ pub struct PageComment {
     pub text: String,
 }
 
-/// One comment thread on the open page, WITH its whole conversation: the node
-/// answers threads and comments in one query, so the card draws every thread
-/// expanded and never asks per thread.
+/// One bounded comment-thread page on the open page. The opener is separate
+/// from the reply page, and `replies_after` remains opaque until the reader
+/// explicitly asks for the next reply page.
 #[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
 pub struct PageCommentThread {
     pub id: String,
@@ -94,6 +94,8 @@ pub struct PageCommentThread {
     pub resolved: bool,
     pub comment_count: i64,
     pub comments: Vec<PageComment>,
+    pub replies_has_more: bool,
+    pub replies_after: Option<String>,
 }
 
 /// A thread with the label of the block it anchors on.
@@ -111,6 +113,15 @@ pub struct PageCommentGroup {
     pub target: String,
     pub anchor: String,
     pub threads: Vec<PageCommentThread>,
+}
+
+/// The opaque continuation for one target's thread list. It belongs to the
+/// target, not to the last visible thread.
+#[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
+pub struct ThreadTargetPage {
+    pub target: String,
+    pub has_more: bool,
+    pub next_after: Option<String>,
 }
 
 // ---------- the session ----------
@@ -261,6 +272,8 @@ fn bounded(text: &str, field: &str, limit: usize) -> Result<String, String> {
 /// it, or why not.
 #[derive(Clone, Debug, Default, Hash, PartialEq)]
 pub struct RegisterItem {
+    pub requested_page: String,
+    pub serial: i64,
     pub pages: Vec<PageItem>,
     pub active_page: String,
     pub active_page_title: String,
@@ -272,6 +285,7 @@ pub struct RegisterItem {
     /// plan is diffed against.
     pub document: String,
     pub comment_rows: Vec<PageCommentThreadRow>,
+    pub target_pages: Vec<ThreadTargetPage>,
     /// The page's OUTSTANDING threads — what the header chip counts. A
     /// resolved thread is filed away, so it is not what the page carries.
     pub thread_total: i64,
@@ -282,6 +296,49 @@ pub struct RegisterItem {
     /// The active agents "Ask AI" can address: each one's display name and
     /// program account.
     pub agents: Vec<(String, u64)>,
+    pub error: String,
+}
+
+#[derive(Clone, Debug, Default, Hash, PartialEq)]
+pub struct TargetContinuation {
+    pub page: String,
+    pub serial: i64,
+    pub generation: i64,
+    pub target: String,
+    pub after: Option<String>,
+    pub blocks: Vec<PageBlock>,
+}
+
+#[derive(Clone, Debug, Default, Hash, PartialEq)]
+pub struct TargetPageItem {
+    pub page: String,
+    pub serial: i64,
+    pub generation: i64,
+    pub target: String,
+    pub after: Option<String>,
+    pub rows: Vec<PageCommentThreadRow>,
+    pub has_more: bool,
+    pub next_after: Option<String>,
+    pub error: String,
+}
+
+#[derive(Clone, Debug, Default, Hash, PartialEq)]
+pub struct ReplyContinuation {
+    pub page: String,
+    pub serial: i64,
+    pub generation: i64,
+    pub thread_id: String,
+    pub after: String,
+}
+
+#[derive(Clone, Debug, Default, Hash, PartialEq)]
+pub struct ReplyPageItem {
+    pub page: String,
+    pub serial: i64,
+    pub generation: i64,
+    pub thread_id: String,
+    pub after: String,
+    pub thread: Option<PageCommentThread>,
     pub error: String,
 }
 
@@ -318,23 +375,26 @@ async fn read_agents() -> Vec<(String, u64)> {
 pub fn register(page: String, serial: i64) -> ducktape_view_guest::Subscription<RegisterItem> {
     ducktape_view_guest::Subscription::run_with((page, serial), |key| {
         let page = key.0.clone();
+        let serial = key.1;
         let live = host::subscribe("rpc.live", b"pages");
-        let first = load_register(page.clone());
-        stream::once(first).chain(live.then(move |_| load_register(page.clone())))
+        let first = load_register(page.clone(), serial);
+        stream::once(first).chain(live.then(move |_| load_register(page.clone(), serial)))
     })
 }
 
-async fn load_register(page: String) -> RegisterItem {
-    match read_register(&page).await {
+async fn load_register(page: String, serial: i64) -> RegisterItem {
+    match read_register(&page, serial).await {
         Ok(item) => item,
         Err(error) => RegisterItem {
+            requested_page: page,
+            serial,
             error,
             ..RegisterItem::default()
         },
     }
 }
 
-async fn read_register(requested: &str) -> Result<RegisterItem, String> {
+async fn read_register(requested: &str, serial: i64) -> Result<RegisterItem, String> {
     let pages = read_page_index().await?;
     // A REQUESTED PAGE THE INDEX DOES NOT HOLD IS NOT THE PAGE: it was
     // deleted, or it never existed. Falling back to the first page is what
@@ -353,6 +413,8 @@ async fn read_register(requested: &str) -> Result<RegisterItem, String> {
         .unwrap_or_default();
     if active_page.is_empty() {
         return Ok(RegisterItem {
+            requested_page: requested.to_owned(),
+            serial,
             pages,
             active_page_parent,
             ..RegisterItem::default()
@@ -372,23 +434,15 @@ async fn read_register(requested: &str) -> Result<RegisterItem, String> {
     // One grouped read, so the surface knows its comment story — the header
     // count and the commented-line washes — the moment the page opens, not
     // only once the rail is.
-    let threads = read_threads(&active_page, &blocks).await?;
+    let (threads, target_pages) = read_threads(&active_page, &blocks).await?;
     let commented_hits = commented_targets(&active_page, &threads);
     // The directory names comment authors AND fills the `@` picker, so it is
     // read whether or not the page has threads.
     let names = read_names().await;
-    let comment_rows: Vec<PageCommentThreadRow> = threads
-        .iter()
-        .map(|thread| PageCommentThreadRow {
-            anchor: document_sync::comment_anchor_label(
-                &blocks,
-                &text_of(&thread["target"]),
-                &active_page,
-            ),
-            thread: comment_thread(thread, &names),
-        })
-        .collect();
+    let comment_rows = comment_rows(&threads, &blocks, &active_page, &names);
     Ok(RegisterItem {
+        requested_page: requested.to_owned(),
+        serial,
         thread_total: open_thread_count(&comment_rows),
         pages,
         active_page,
@@ -398,6 +452,7 @@ async fn read_register(requested: &str) -> Result<RegisterItem, String> {
         subpages,
         document,
         comment_rows,
+        target_pages,
         commented_hits,
         names: names.members(),
         agents: read_agents().await,
@@ -417,14 +472,16 @@ async fn read_page_index() -> Result<Vec<PageItem>, String> {
         }
         wire.extend(rows(&listed["pages"]));
         let next = listed["next_after"].as_str().map(str::to_owned);
-        let done =
-            !listed["has_more"].as_bool().unwrap_or(false) || next.is_none() || next == after;
-        if done {
+        let has_more = listed["has_more"].as_bool().unwrap_or(false);
+        if has_more && (next.is_none() || next == after) {
+            return Err("page list cursor did not advance".into());
+        }
+        if !has_more {
             return Ok(page_items(&wire));
         }
         after = next;
     }
-    Ok(page_items(&wire))
+    Err("page list exceeds the view bound".into())
 }
 
 /// Every block of one page in PREORDER, cursor-paged. The page's own record
@@ -441,28 +498,204 @@ async fn read_page_blocks(page_id: &str) -> Result<Vec<WireBlock>, String> {
         }
         blocks.extend(rows(&page["blocks"]).iter().map(wire_block));
         let next = page["next_after"].as_str().map(str::to_owned);
-        let done = next.is_none() || next == after;
-        if done {
+        if next == after && next.is_some() {
+            return Err("page blocks cursor did not advance".into());
+        }
+        if next.is_none() {
             return Ok(blocks);
         }
         after = next;
     }
-    Ok(blocks)
+    Err("page blocks exceed the view bound".into())
 }
 
-/// Every thread anchored to the page or any of its blocks, one grouped read.
-async fn read_threads(page_id: &str, blocks: &[PageBlock]) -> Result<Vec<Value>, String> {
-    let mut targets = vec![Value::from(page_id)];
-    targets.extend(blocks.iter().map(|block| Value::from(block.id.as_str())));
-    let reply = view(json!({ "threads_for_targets": { "targets": targets } })).await?;
-    let groups = reply["threads"].as_array().cloned();
-    let Some(groups) = groups else {
-        return Err("the node returned an invalid comment thread list".into());
-    };
-    Ok(groups
+/// One bounded thread page for every distinct page/block target. Each target
+/// keeps its own opaque continuation for an explicit UI action.
+async fn read_threads(
+    page_id: &str,
+    blocks: &[PageBlock],
+) -> Result<(Vec<Value>, Vec<ThreadTargetPage>), String> {
+    let mut targets = vec![page_id.to_owned()];
+    targets.extend(blocks.iter().map(|block| block.id.clone()));
+    targets.dedup();
+    let mut threads = Vec::new();
+    let mut seen_thread_ids = BTreeSet::new();
+    let mut target_pages = Vec::new();
+    for target in targets {
+        let (incoming, page) = read_target_page(&target, None).await?;
+        for thread in incoming {
+            let thread_id = text_of(&thread["thread"]["id"]);
+            if seen_thread_ids.insert(thread_id) {
+                threads.push(thread);
+            }
+        }
+        target_pages.push(page);
+    }
+    Ok((threads, target_pages))
+}
+
+async fn read_target_page(
+    target: &str,
+    after: Option<String>,
+) -> Result<(Vec<Value>, ThreadTargetPage), String> {
+    let reply = view(json!({ "threads_for_targets": {
+        "targets": [{"target": target, "after": after.clone()}],
+        "thread_limit": 16,
+        "comment_limit": 16,
+    }}))
+    .await?;
+    let group = reply["threads"]
+        .as_array()
+        .and_then(|groups| groups.first())
+        .ok_or("the node returned an invalid comment thread list")?;
+    if text_of(&group["target"]) != target {
+        return Err("the node returned the wrong comment target".into());
+    }
+    let previous = after.as_deref();
+    let next = advance_cursor(
+        previous,
+        group["has_more"].as_bool().unwrap_or(false),
+        group["next_after"].as_str().map(str::to_owned),
+        "comment target",
+    )?;
+    Ok((
+        rows(&group["threads"]),
+        ThreadTargetPage {
+            target: target.to_owned(),
+            has_more: next.is_some(),
+            next_after: next,
+        },
+    ))
+}
+
+fn comment_rows(
+    threads: &[Value],
+    blocks: &[PageBlock],
+    active_page: &str,
+    names: &Names,
+) -> Vec<PageCommentThreadRow> {
+    threads
         .iter()
-        .flat_map(|group| rows(&group["threads"]))
-        .collect())
+        .map(|thread| PageCommentThreadRow {
+            anchor: document_sync::comment_anchor_label(
+                blocks,
+                &text_of(&thread["thread"]["target"]),
+                active_page,
+            ),
+            thread: comment_thread(thread, names),
+        })
+        .collect()
+}
+
+/// One explicit continuation of a target's thread list. The request carries
+/// the page/generation so the UI can reject a result after navigation or a
+/// newer live register replaced the cursor.
+pub async fn load_more_target(request: TargetContinuation) -> TargetPageItem {
+    let result = read_target_page(&request.target, request.after.clone()).await;
+    let (threads, page) = match result {
+        Ok(result) => result,
+        Err(error) => {
+            return TargetPageItem {
+                page: request.page,
+                serial: request.serial,
+                generation: request.generation,
+                target: request.target,
+                after: request.after,
+                error,
+                ..TargetPageItem::default()
+            };
+        }
+    };
+    let names = read_names().await;
+    let page_id = request.page.clone();
+    TargetPageItem {
+        page: request.page,
+        serial: request.serial,
+        generation: request.generation,
+        target: request.target,
+        after: request.after,
+        rows: comment_rows(&threads, &request.blocks, &page_id, &names),
+        has_more: page.has_more,
+        next_after: page.next_after,
+        error: String::new(),
+    }
+}
+
+/// One explicit continuation of one thread's reply list. A missing thread is
+/// an error rather than an empty page, while an empty comments page with an
+/// advancing cursor remains a valid tombstone-only advancement.
+pub async fn load_more_replies(request: ReplyContinuation) -> ReplyPageItem {
+    let reply = view(json!({ "get_thread": {
+        "thread_id": request.thread_id,
+        "after": request.after.clone(),
+        "limit": 16,
+    }}))
+    .await;
+    let reply = match reply {
+        Ok(reply) => reply,
+        Err(error) => {
+            return ReplyPageItem {
+                page: request.page,
+                serial: request.serial,
+                generation: request.generation,
+                thread_id: request.thread_id,
+                after: request.after,
+                error,
+                ..ReplyPageItem::default()
+            };
+        }
+    };
+    let page = &reply["thread"];
+    if page.is_null() {
+        return ReplyPageItem {
+            page: request.page,
+            serial: request.serial,
+            generation: request.generation,
+            thread_id: request.thread_id,
+            after: request.after,
+            error: "the comment thread was not found".into(),
+            ..ReplyPageItem::default()
+        };
+    }
+    if text_of(&page["thread"]["id"]) != request.thread_id {
+        return ReplyPageItem {
+            page: request.page,
+            serial: request.serial,
+            generation: request.generation,
+            thread_id: request.thread_id,
+            after: request.after,
+            error: "the node returned the wrong comment thread".into(),
+            ..ReplyPageItem::default()
+        };
+    }
+    let names = read_names().await;
+    ReplyPageItem {
+        page: request.page,
+        serial: request.serial,
+        generation: request.generation,
+        thread_id: request.thread_id,
+        after: request.after,
+        thread: Some(comment_thread(page, &names)),
+        error: String::new(),
+    }
+}
+
+fn advance_cursor(
+    previous: Option<&str>,
+    has_more: bool,
+    next: Option<String>,
+    label: &str,
+) -> Result<Option<String>, String> {
+    if !has_more {
+        return Ok(None);
+    }
+    let Some(next) = next else {
+        return Err(format!("the node returned an incomplete {label} cursor"));
+    };
+    if previous == Some(next.as_str()) {
+        return Err(format!("the {label} cursor did not advance"));
+    }
+    Ok(Some(next))
 }
 
 /// One block of the page as the module holds it — the shape a save's own
@@ -583,40 +816,63 @@ fn page_items(wire: &[Value]) -> Vec<PageItem> {
 fn commented_targets(page_id: &str, threads: &[Value]) -> Vec<String> {
     let mut targets: Vec<String> = threads
         .iter()
-        .filter(|thread| !thread["resolved"].as_bool().unwrap_or(false))
-        .map(|thread| text_of(&thread["target"]))
+        .filter(|thread| !thread["thread"]["resolved"].as_bool().unwrap_or(false))
+        .map(|thread| text_of(&thread["thread"]["target"]))
         .filter(|target| target != page_id)
         .collect();
     targets.sort();
     targets
 }
 
-/// THE GROUPED READ ALREADY ANSWERED THE WHOLE CONVERSATION, so a thread
-/// carries its own comments and the card never asks per thread: every open
-/// thread is drawn expanded off this one read.
-fn comment_thread(thread: &Value, names: &Names) -> PageCommentThread {
-    let comments: Vec<PageComment> = rows(&thread["comments"])
+/// Recompute comment marks after an explicit target continuation has added
+/// rows to the already-rendered register.
+pub fn commented_targets_from_rows(page_id: &str, rows: &[PageCommentThreadRow]) -> Vec<String> {
+    let mut targets: Vec<String> = rows
         .iter()
-        .filter(|comment| !comment["deleted"].as_bool().unwrap_or(false))
-        .enumerate()
-        .map(|(index, comment)| page_comment(index + 1, comment, names))
+        .filter(|row| !row.thread.resolved)
+        .map(|row| row.thread.target.clone())
+        .filter(|target| target != page_id)
         .collect();
-    let comment_count = count_i64(comments.len());
+    targets.sort();
+    targets.dedup();
+    targets
+}
+
+/// One bounded thread page carries the opener separately and the server's
+/// live count. Its opaque reply cursor stays with the row until the reader
+/// explicitly asks for the next page.
+fn comment_thread(thread: &Value, names: &Names) -> PageCommentThread {
+    let opener = page_comment(1, &thread["opener"], names);
+    let mut comments = vec![opener];
+    comments.extend(
+        rows(&thread["comments"])
+            .iter()
+            .filter(|comment| !comment["deleted"].as_bool().unwrap_or(false))
+            .enumerate()
+            .map(|(index, comment)| page_comment(index + 2, comment, names)),
+    );
+    let comment_count = thread["comment_count"]
+        .as_u64()
+        .and_then(|count| i64::try_from(count).ok())
+        .unwrap_or_default();
     let count_label = match comment_count {
         1 => "1 comment".to_string(),
         count => format!("{count} comments"),
     };
     // A settled thread sits under the card's own "Resolved" fold and offers
     // "Reopen": its caption need not say so a third time.
-    let resolved = thread["resolved"].as_bool().unwrap_or(false);
+    let metadata = &thread["thread"];
+    let resolved = metadata["resolved"].as_bool().unwrap_or(false);
     PageCommentThread {
-        id: text_of(&thread["id"]),
-        target: text_of(&thread["target"]),
-        author: names.display(&text_of(&thread["opener"])),
+        id: text_of(&metadata["id"]),
+        target: text_of(&metadata["target"]),
+        author: names.display(&text_of(&thread["opener"]["author"])),
         meta: count_label,
         resolved,
         comment_count,
         comments,
+        replies_has_more: thread["has_more"].as_bool().unwrap_or(false),
+        replies_after: thread["next_after"].as_str().map(str::to_owned),
     }
 }
 
@@ -746,6 +1002,7 @@ fn page_comment(ordinal: usize, comment: &Value, names: &Names) -> PageComment {
 pub struct SearchItem {
     pub query: String,
     pub hits: Vec<PageSearchHit>,
+    pub capped: bool,
     pub error: String,
 }
 
@@ -758,30 +1015,36 @@ pub fn search(query: String, serial: i64) -> ducktape_view_guest::Subscription<S
 
 async fn run_search(query: String) -> SearchItem {
     match read_search(&query, None).await {
-        Ok(mut hits) => {
+        Ok((mut hits, capped)) => {
             for hit in &mut hits {
                 hit.text = excerpt(&hit.text, &query);
             }
             SearchItem {
                 query,
                 hits,
+                capped,
                 error: String::new(),
             }
         }
         Err(error) => SearchItem {
             query,
             hits: Vec::new(),
+            capped: false,
             error,
         },
     }
 }
 
-async fn read_search(query: &str, page: Option<&str>) -> Result<Vec<PageSearchHit>, String> {
+async fn read_search(
+    query: &str,
+    page: Option<&str>,
+) -> Result<(Vec<PageSearchHit>, bool), String> {
     let ask = json!({ "search": { "text": query, "page_id": page, "limit": SEARCH_HITS } });
     let reply = view(ask).await?;
-    let found = rows(&reply["hits"]);
+    let found = rows(&reply["hits"]["hits"]);
+    let capped = reply["hits"]["capped"].as_bool().unwrap_or(false);
     if found.is_empty() {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), capped));
     }
     // A LABEL IS DECORATION AND MUST NEVER DESTROY THE PAYLOAD: a page list
     // that fails leaves every hit on the same "Untitled" fallback an unknown
@@ -793,23 +1056,26 @@ async fn read_search(query: &str, page: Option<&str>) -> Result<Vec<PageSearchHi
         .into_iter()
         .map(|page| (page.id, page.title))
         .collect();
-    Ok(found
-        .iter()
-        .map(|hit| {
-            let page_id = text_of(&hit["page_id"]);
-            PageSearchHit {
-                page_title: titles
-                    .get(&page_id)
-                    .filter(|title| !title.is_empty())
-                    .cloned()
-                    .unwrap_or_else(|| UNTITLED.into()),
-                block_id: text_of(&hit["block_id"]),
-                kind: block_kind_name(&text_of(&hit["kind"])).into(),
-                text: text_of(&hit["text"]),
-                page_id,
-            }
-        })
-        .collect())
+    Ok((
+        found
+            .iter()
+            .map(|hit| {
+                let page_id = text_of(&hit["page_id"]);
+                PageSearchHit {
+                    page_title: titles
+                        .get(&page_id)
+                        .filter(|title| !title.is_empty())
+                        .cloned()
+                        .unwrap_or_else(|| UNTITLED.into()),
+                    block_id: text_of(&hit["block_id"]),
+                    kind: block_kind_name(&text_of(&hit["kind"])).into(),
+                    text: text_of(&hit["text"]),
+                    page_id,
+                }
+            })
+            .collect(),
+        capped,
+    ))
 }
 
 pub async fn background_search(request: SearchRequest) {
@@ -825,7 +1091,7 @@ pub async fn background_search(request: SearchRequest) {
         .await
     };
     let output = match result {
-        Ok(hits) => json!({"hits":hits}),
+        Ok((hits, capped)) => json!({"hits":hits, "capped":capped}),
         Err(error) => json!({"error":error}),
     };
     host::finish_response(&serde_json::to_vec(&output).expect("search response encodes"));
@@ -1953,6 +2219,18 @@ pub fn compose_hint_of(blocks: &[PageBlock], scope: &str, page_id: &str) -> Stri
     document_sync::comment_compose_hint(blocks, scope, page_id)
 }
 
+pub fn comment_target_label(blocks: &[PageBlock], target: &str, page_id: &str) -> String {
+    if target == page_id || target.is_empty() {
+        return "This page".into();
+    }
+    let anchor = document_sync::comment_anchor_label(blocks, target, page_id);
+    if anchor.is_empty() {
+        "This block".into()
+    } else {
+        anchor
+    }
+}
+
 /// The card's own title, naming the scope it is showing.
 pub fn comment_scope_label(
     blocks: &[PageBlock],
@@ -2201,7 +2479,11 @@ const VISIBLE_REPLIES: usize = 3;
 /// author, above the replies. A thread whose every comment was deleted keeps
 /// its row and says so rather than drawing a blank card.
 pub fn opener_text(thread: &PageCommentThread) -> String {
-    match thread.comments.first() {
+    match thread
+        .comments
+        .first()
+        .filter(|opener| !opener.text.is_empty())
+    {
         Some(opener) => opener.text.clone(),
         None => "This comment was deleted.".into(),
     }
@@ -2232,6 +2514,35 @@ pub fn thread_replies(thread: &PageCommentThread, expanded: bool) -> Vec<PageCom
         true => replies.cloned().collect(),
         false => replies.take(VISIBLE_REPLIES).cloned().collect(),
     }
+}
+
+/// Merge one bounded page into a visible thread. The opener is repeated by the
+/// SDK on every page, so replace it in place; replies append by id and never
+/// render twice even if a cursor page overlaps.
+pub fn merge_thread_row(
+    current: &PageCommentThreadRow,
+    incoming: &PageCommentThreadRow,
+) -> PageCommentThreadRow {
+    let mut merged = current.clone();
+    merged.thread.comment_count = incoming.thread.comment_count;
+    merged.thread.meta = incoming.thread.meta.clone();
+    merged.thread.resolved = incoming.thread.resolved;
+    merged.thread.author = incoming.thread.author.clone();
+    merged.thread.replies_has_more = incoming.thread.replies_has_more;
+    merged.thread.replies_after = incoming.thread.replies_after.clone();
+    for comment in &incoming.thread.comments {
+        if let Some(existing) = merged
+            .thread
+            .comments
+            .iter_mut()
+            .find(|existing| existing.id == comment.id)
+        {
+            *existing = comment.clone();
+        } else {
+            merged.thread.comments.push(comment.clone());
+        }
+    }
+    merged
 }
 
 /// What the fold's own button says, or `""` when there is nothing to fold.
@@ -2704,6 +3015,56 @@ mod tests {
         // A match past the end still answers the head, bounded.
         let tail = excerpt(&"x ".repeat(400), "missing");
         assert!(!tail.starts_with('…') && tail.ends_with('…'), "{tail}");
+    }
+
+    #[test]
+    fn comment_continuations_advance_empty_pages_deduplicate_and_bound() {
+        assert_eq!(
+            advance_cursor(None, true, Some("tombstone".into()), "comment target"),
+            Ok(Some("tombstone".into()))
+        );
+        assert_eq!(
+            advance_cursor(Some("tombstone"), false, None, "comment target"),
+            Ok(None)
+        );
+        assert!(advance_cursor(Some("same"), true, Some("same".into()), "comment target").is_err());
+        assert!(advance_cursor(None, true, None, "comment thread").is_err());
+
+        let comment = |id: &str| PageComment {
+            id: id.into(),
+            ..PageComment::default()
+        };
+        let current = PageCommentThreadRow {
+            thread: PageCommentThread {
+                id: "thread".into(),
+                comments: vec![comment("opener"), comment("reply")],
+                comment_count: 2,
+                replies_has_more: true,
+                replies_after: Some("cursor-1".into()),
+                ..PageCommentThread::default()
+            },
+            ..PageCommentThreadRow::default()
+        };
+        let incoming = PageCommentThreadRow {
+            thread: PageCommentThread {
+                id: "thread".into(),
+                comments: vec![comment("opener"), comment("reply"), comment("tail")],
+                comment_count: 3,
+                replies_after: None,
+                ..PageCommentThread::default()
+            },
+            ..PageCommentThreadRow::default()
+        };
+        let merged = merge_thread_row(&current, &incoming);
+        let ids: Vec<&str> = merged
+            .thread
+            .comments
+            .iter()
+            .map(|comment| comment.id.as_str())
+            .collect();
+        assert_eq!(ids, ["opener", "reply", "tail"]);
+        assert_eq!(merged.thread.comment_count, 3);
+        assert!(!merged.thread.replies_has_more);
     }
 
     #[test]

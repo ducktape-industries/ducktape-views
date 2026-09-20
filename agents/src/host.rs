@@ -916,11 +916,15 @@ impl Chips {
     async fn thread_target(&self, thread_id: &str) -> Option<String> {
         let reply = view(
             "pages",
-            serde_json::json!({ "get_thread": { "thread_id": thread_id } }),
+            serde_json::json!({ "get_thread": {
+                "thread_id": thread_id, "after": null, "limit": 16
+            } }),
         )
         .await
         .ok()?;
-        reply["thread"]["target"].as_str().map(str::to_owned)
+        reply["thread"]["thread"]["target"]
+            .as_str()
+            .map(str::to_owned)
     }
 
     async fn task_label(&self, task_id: &str) -> String {
@@ -972,7 +976,8 @@ impl Chips {
         let reply = view(
             "chat",
             serde_json::json!({
-                "messages_around": { "channel_id": channel, "seq": seq, "limit": 1 }
+                "messages_around": { "channel_id": channel, "seq": seq,
+                    "viewer_handles": [], "limit": 1 }
             }),
         )
         .await
@@ -1011,7 +1016,9 @@ impl Chips {
     async fn message(&self, channel: String, thread: Option<u64>, id: String) -> RunLink {
         let found = view(
             "chat",
-            serde_json::json!({ "message": { "message_id": id } }),
+            serde_json::json!({ "message": {
+                "message_id": id, "viewer_handles": []
+            } }),
         )
         .await
         .ok()

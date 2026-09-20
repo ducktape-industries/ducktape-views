@@ -114,6 +114,7 @@ pub struct ChatView {
     pub(crate) land_seq: i64,
     pub(crate) connection_serial: i64,
     pub(crate) room_serial: i64,
+    pub(crate) reaction_order: i64,
     pub(crate) history_pages: i64,
     pub(crate) room_key: crate::host::RoomKey,
     pub(crate) room_channel: String,
@@ -143,6 +144,10 @@ pub struct ChatView {
     pub(crate) search_phase: SearchPhase,
     pub(crate) search_query: String,
     pub(crate) search_hits: Vec<crate::host::ChatSearchHit>,
+    pub(crate) search_capped: bool,
+    pub(crate) search_has_more: bool,
+    pub(crate) search_next_after: Option<String>,
+    pub(crate) search_loading: bool,
     pub(crate) history_view: bool,
     pub(crate) at_live_tail: bool,
     pub(crate) history_loading: bool,
@@ -228,6 +233,7 @@ pub enum Message {
     SearchArrived(crate::host::SearchItem),
     ActDone(crate::host::ActItem),
     SearchChatSubmit,
+    LoadMoreSearch,
     ClearChatSearch,
     OpenChatSearchHit(String, i64, i64),
     ToggleChannelCreate,
@@ -349,6 +355,7 @@ impl ChatView {
             land_seq: 0,
             connection_serial: 0,
             room_serial: 0,
+            reaction_order: 0,
             history_pages: 0,
             room_key: crate::host::room_key(0, 0, ::std::convert::AsRef::as_ref(&("")), 0, 0),
             room_channel: "".to_owned(),
@@ -380,10 +387,14 @@ impl ChatView {
             thread_has_more: false,
             thread_next_reply_seq: 0,
             thread_loading: false,
-            search_key: crate::host::search_key(0, 0, ::std::convert::AsRef::as_ref(&(""))),
+            search_key: crate::host::search_key(0, 0, ::std::convert::AsRef::as_ref(&("")), None),
             search_phase: SearchPhase::Idle,
             search_query: "".to_owned(),
             search_hits: Vec::new(),
+            search_capped: false,
+            search_has_more: false,
+            search_next_after: None,
+            search_loading: false,
             history_view: false,
             at_live_tail: true,
             history_loading: false,
@@ -429,7 +440,7 @@ impl ChatView {
     pub(crate) const PREFERRED_WINDOW_SIZE: &'static str = "none";
     /// This state's layout, digested — `snapshot_schema` holds it here.
     pub(crate) const SNAPSHOT_SCHEMA: &'static str =
-        "a72de312cd2b8e3bf6a58fe2b2bef413109994463f41e62e2842160ac66b3b06";
+        "3b0fe415bef383753bbdd111e9e4c7d50f3895e3a101ce601e993b4422424daf";
     pub(crate) fn snapshot(&self) -> Result<Vec<u8>, String> {
         self.validate_snapshot()?;
         wire::Snapshot {
@@ -624,6 +635,100 @@ mod tests {
         let _ = state.update(Message::ChatScrolled(0.0, 0.0, 0.0, f64::NAN));
         assert!(state.at_live_tail, "content that fits is at the tail");
     }
+
+    #[test]
+    fn reaction_refreshes_are_ordered_and_reject_old_channel_or_identity() {
+        let mut state = ChatView::state();
+        state.connected = true;
+        state.active_channel = "channel-a".into();
+        state.connection_serial = 1;
+        state.room_serial = 1;
+        state.names_serial = 4;
+        state.room_key = crate::host::room_key(2, 4, "channel-a", 0, 0);
+        state.room_messages = vec![crate::host::ChatMessage {
+            seq: 3,
+            body: "later edit".into(),
+            ..Default::default()
+        }];
+        state.messages = state.room_messages.clone();
+        crate::host::seat_reader("acct:7", "aa");
+        let handles = crate::host::viewer_handles();
+
+        let _ = state.update(Message::ActDone(crate::host::ActItem {
+            channel: "channel-a".into(),
+            viewer_handles: handles.clone(),
+            refresh_seq: 3,
+            order: 1,
+            tracked: true,
+            ..Default::default()
+        }));
+        let refresh_serial = state.room_key.serial;
+        assert_eq!(state.room_key.refresh_seq, 3);
+        assert_eq!(state.reaction_order, 1);
+
+        let _ = state.update(Message::ActDone(crate::host::ActItem {
+            channel: "channel-a".into(),
+            viewer_handles: handles.clone(),
+            refresh_seq: 3,
+            order: 2,
+            tracked: true,
+            ..Default::default()
+        }));
+        let newest_serial = state.room_key.serial;
+        assert_eq!(state.reaction_order, 2);
+        let _ = state.update(Message::ActDone(crate::host::ActItem {
+            channel: "channel-a".into(),
+            viewer_handles: handles.clone(),
+            refresh_seq: 3,
+            order: 1,
+            tracked: true,
+            ..Default::default()
+        }));
+        assert_eq!(state.room_key.serial, newest_serial);
+
+        let _ = state.update(Message::ActDone(crate::host::ActItem {
+            ..Default::default()
+        }));
+        assert!(state.room_key.serial > refresh_serial);
+        let _ = state.update(Message::RoomArrived(crate::host::RoomItem {
+            serial: refresh_serial,
+            names: 4,
+            refresh_seq: 3,
+            channel: "channel-a".into(),
+            messages: vec![crate::host::ChatMessage {
+                seq: 3,
+                body: "stale reaction snapshot".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }));
+        assert_eq!(state.room_messages[0].body, "later edit");
+
+        state.active_channel = "channel-b".into();
+        state.room_key = crate::host::room_key(state.room_key.serial, 4, "channel-b", 0, 0);
+        let channel_key = state.room_key.clone();
+        let _ = state.update(Message::ActDone(crate::host::ActItem {
+            channel: "channel-a".into(),
+            viewer_handles: handles,
+            refresh_seq: 3,
+            order: 1,
+            tracked: true,
+            ..Default::default()
+        }));
+        assert_eq!(state.room_key, channel_key);
+
+        crate::host::seat_reader("acct:8", "bb");
+        let identity_key = state.room_key.clone();
+        let _ = state.update(Message::ActDone(crate::host::ActItem {
+            channel: "channel-b".into(),
+            viewer_handles: vec!["user:aa".into(), "acct:7".into()],
+            refresh_seq: 3,
+            order: 3,
+            tracked: true,
+            ..Default::default()
+        }));
+        assert_eq!(state.room_key, identity_key);
+    }
     #[test]
     fn hiding_a_pending_dm_retires_navigation_and_restores_the_loaded_room() {
         let mut state = ChatView::state();
@@ -651,6 +756,7 @@ mod tests {
             7,
             crate::host::ActItem {
                 error: "refused".into(),
+                ..Default::default()
             },
         ));
         assert!(state.host_error.contains("refused"));
@@ -664,6 +770,7 @@ mod tests {
             7,
             crate::host::ActItem {
                 error: "old refusal".into(),
+                ..Default::default()
             },
         ));
         assert!(state.host_error.is_empty());
@@ -1731,7 +1838,7 @@ mod tests {
         state.search_phase = SearchPhase::Searching;
         state.room_key = crate::host::room_key(7, 8, "room", 12, 2);
         state.thread_key = crate::host::thread_key(7, 8, "room", 12, 1, 0);
-        state.search_key = crate::host::search_key(7, 8, "query");
+        state.search_key = crate::host::search_key(7, 8, "query", None);
         state.sidebar_width = 278.5;
         let bytes = state.snapshot().unwrap();
         let restored = ChatView::restore(&bytes).unwrap();

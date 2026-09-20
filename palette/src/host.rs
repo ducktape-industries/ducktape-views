@@ -100,6 +100,7 @@ pub struct SearchItem {
     pub query: String,
     pub chat: Vec<ChatHit>,
     pub pages: Vec<PageHit>,
+    pub capped: bool,
     /// both lanes refused; one lane refusing is silence, not an error
     pub error: String,
 }
@@ -128,23 +129,38 @@ async fn read(query: String) -> SearchItem {
             query,
             chat: Vec::new(),
             pages: Vec::new(),
+            capped: false,
             error: "Search did not reach the node. Retry in a moment.".into(),
         };
     }
+    let (chat, chat_capped) = chat.unwrap_or_default();
+    let (pages, pages_capped) = pages.unwrap_or_default();
     SearchItem {
         query,
-        chat: chat.unwrap_or_default(),
-        pages: pages.unwrap_or_default(),
+        chat,
+        pages,
+        capped: chat_capped || pages_capped,
         error: String::new(),
     }
 }
 
-async fn read_chat(query: &str) -> Result<Vec<ChatHit>, String> {
-    let ask = serde_json::json!({
-        "search": { "text": query, "channel_id": null, "limit": HITS },
-    });
+async fn read_chat(query: &str) -> Result<(Vec<ChatHit>, bool), String> {
+    let ask = match query.strip_prefix('#').filter(|tag| !tag.is_empty()) {
+        Some(tag) => serde_json::json!({
+            "tag_search": { "tag": tag.to_lowercase(), "channel_id": null,
+                "viewer_handles": [], "after": null, "limit": HITS },
+        }),
+        None => serde_json::json!({
+            "search": { "text": query, "channel_id": null, "viewer_handles": [], "limit": HITS },
+        }),
+    };
     let reply = view("chat", ask).await?;
-    Ok(reply["hits"]
+    let tag = query
+        .strip_prefix('#')
+        .filter(|tag| !tag.is_empty())
+        .is_some();
+    let payload = &reply[if tag { "tag_hits" } else { "hits" }];
+    let hits = payload["hits"]
         .as_array()
         .into_iter()
         .flatten()
@@ -154,15 +170,21 @@ async fn read_chat(query: &str) -> Result<Vec<ChatHit>, String> {
             author: text(&hit["author"]),
             text: text(&hit["text"]),
         })
-        .collect())
+        .collect();
+    Ok((
+        hits,
+        payload["capped"].as_bool().unwrap_or(false)
+            || payload["has_more"].as_bool().unwrap_or(false),
+    ))
 }
 
-async fn read_pages(query: &str) -> Result<Vec<PageHit>, String> {
+async fn read_pages(query: &str) -> Result<(Vec<PageHit>, bool), String> {
     let ask = serde_json::json!({
         "search": { "text": query, "page_id": null, "limit": HITS },
     });
     let reply = view("pages", ask).await?;
-    let hits: Vec<_> = reply["hits"]
+    let capped = reply["hits"]["capped"].as_bool().unwrap_or(false);
+    let hits: Vec<_> = reply["hits"]["hits"]
         .as_array()
         .into_iter()
         .flatten()
@@ -174,23 +196,25 @@ async fn read_pages(query: &str) -> Result<Vec<PageHit>, String> {
         })
         .collect();
     if hits.is_empty() {
-        return Ok(hits);
+        return Ok((hits, capped));
     }
     // A TITLE IS DECORATION AND MUST NOT DESTROY THE PAYLOAD: an index that
     // refuses leaves every hit on the fallback an unknown page already
     // takes, rather than throwing away a search the node answered.
     let titles = page_titles().await.unwrap_or_default();
-    Ok(hits
-        .into_iter()
-        .map(|mut hit| {
-            hit.title = titles
-                .get(&hit.page_id)
-                .cloned()
-                .filter(|title| !title.is_empty())
-                .unwrap_or_else(|| "Untitled".into());
-            hit
-        })
-        .collect())
+    Ok((
+        hits.into_iter()
+            .map(|mut hit| {
+                hit.title = titles
+                    .get(&hit.page_id)
+                    .cloned()
+                    .filter(|title| !title.is_empty())
+                    .unwrap_or_else(|| "Untitled".into());
+                hit
+            })
+            .collect(),
+        capped,
+    ))
 }
 
 async fn page_titles() -> Result<std::collections::BTreeMap<String, String>, String> {

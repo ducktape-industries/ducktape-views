@@ -51,6 +51,10 @@ impl PagesView {
             }
             Message::SelectReplyThread(id) => self.on_select_reply_thread(id),
             Message::ToggleThreadReplies(id) => self.on_toggle_thread_replies(id),
+            Message::LoadMoreTarget(target) => self.on_load_more_target(target),
+            Message::LoadMoreReplies(thread) => self.on_load_more_replies(thread),
+            Message::TargetPageArrived(item) => self.on_target_page_arrived(item),
+            Message::ReplyPageArrived(item) => self.on_reply_page_arrived(item),
             Message::ToggleResolvedComments => self.on_toggle_resolved_comments(),
             Message::PostThreadReply(id) => self.on_post_thread_reply(id),
             Message::PostBlockCommentSubmit => self.on_post_block_comment_submit(),
@@ -140,6 +144,9 @@ impl PagesView {
         Task::none()
     }
     fn on_register_arrived(&mut self, item: crate::host::RegisterItem) -> Task<Message> {
+        if item.serial != self.register_serial || item.requested_page != self.active_page {
+            return Task::none();
+        }
         self.host_error = item.error.to_owned();
         self.loading = false;
         if !(item.error).is_empty() {
@@ -180,6 +187,8 @@ impl PagesView {
         self.active_page_parent = item.active_page_parent.to_owned();
         self.thread_total = item.thread_total;
         self.comment_rows = item.comment_rows.clone();
+        self.target_pages = item.target_pages.clone();
+        self.comment_generation = self.comment_generation.wrapping_add(1);
         let answered = crate::host::comment_total(&(item.comment_rows)) > self.awaiting_comments;
         if answered {
             self.awaiting_agent = String::new();
@@ -289,12 +298,13 @@ impl PagesView {
         Task::none()
     }
     fn on_search_arrived(&mut self, item: crate::host::SearchItem) -> Task<Message> {
-        self.host_error = item.error.to_owned();
-        self.page_searching = false;
         if item.query != self.page_search_query {
             return Task::none();
         }
+        self.host_error = item.error.to_owned();
+        self.page_searching = false;
         self.page_search_hits = item.hits.clone();
+        self.page_search_capped = item.capped;
         Task::none()
     }
     fn on_act_done(&mut self, item: crate::host::ActItem) -> Task<Message> {
@@ -537,6 +547,7 @@ impl PagesView {
         }
         self.page_searching = true;
         self.page_search_hits = Vec::new();
+        self.page_search_capped = false;
         self.page_search_query = (self.page_search_draft).trim().to_owned();
         self.page_search_serial += 1;
         Task::none()
@@ -546,6 +557,7 @@ impl PagesView {
         self.page_search_hits = Vec::new();
         self.page_searching = false;
         self.page_search_query = "".to_owned();
+        self.page_search_capped = false;
         Task::none()
     }
     fn on_open_page_search_hit(&mut self, page_id: String, _block_id: String) -> Task<Message> {
@@ -730,6 +742,151 @@ impl PagesView {
     fn on_toggle_thread_replies(&mut self, id: String) -> Task<Message> {
         self.expanded_threads =
             crate::host::toggled(::std::mem::take(&mut self.expanded_threads), &(id));
+        Task::none()
+    }
+    fn on_load_more_target(&mut self, target: String) -> Task<Message> {
+        if !(self.host_error).is_empty()
+            || self.loading
+            || self.busy
+            || self.threads_loading
+            || target.is_empty()
+        {
+            return Task::none();
+        }
+        let Some(after) = self
+            .target_pages
+            .iter()
+            .find(|page| page.target == target && page.has_more)
+            .and_then(|page| page.next_after.clone())
+        else {
+            return Task::none();
+        };
+        self.threads_loading = true;
+        Task::perform(
+            crate::host::load_more_target(crate::host::TargetContinuation {
+                page: self.active_page.clone(),
+                serial: self.register_serial,
+                generation: self.comment_generation,
+                target,
+                after: Some(after),
+                blocks: self.blocks.clone(),
+            }),
+            Message::TargetPageArrived,
+        )
+    }
+    fn on_target_page_arrived(&mut self, item: crate::host::TargetPageItem) -> Task<Message> {
+        let current = item.serial == self.register_serial
+            && item.page == self.active_page
+            && item.generation == self.comment_generation
+            && self
+                .target_pages
+                .iter()
+                .any(|page| page.target == item.target && page.next_after == item.after);
+        if !current {
+            return Task::none();
+        }
+        self.threads_loading = false;
+        self.host_error = item.error.clone();
+        if !item.error.is_empty() {
+            return Task::none();
+        }
+        if let Some(page) = self
+            .target_pages
+            .iter_mut()
+            .find(|page| page.target == item.target)
+        {
+            page.has_more = item.has_more;
+            page.next_after = item.next_after;
+        }
+        for incoming in item.rows {
+            if let Some(index) = self
+                .comment_rows
+                .iter()
+                .position(|row| row.thread.id == incoming.thread.id)
+            {
+                let merged =
+                    crate::host::merge_thread_row(&self.comment_rows[index], &incoming);
+                self.comment_rows[index] = merged;
+            } else {
+                self.comment_rows.push(incoming);
+            }
+        }
+        self.thread_total = crate::host::open_thread_count(&self.comment_rows);
+        self.commented_hits = crate::host::commented_targets_from_rows(
+            &self.active_page,
+            &self.comment_rows,
+        );
+        self.document_commented =
+            crate::host::commented_lines(&self.blocks, &self.commented_hits);
+        self.document_marks = crate::host::comment_marks(&self.blocks, &self.commented_hits);
+        Task::none()
+    }
+    fn on_load_more_replies(&mut self, thread_id: String) -> Task<Message> {
+        if !(self.host_error).is_empty()
+            || self.loading
+            || self.busy
+            || self.threads_loading
+            || thread_id.is_empty()
+        {
+            return Task::none();
+        }
+        let Some(after) = self
+            .comment_rows
+            .iter()
+            .find(|row| row.thread.id == thread_id)
+            .and_then(|row| row.thread.replies_after.clone())
+        else {
+            return Task::none();
+        };
+        self.threads_loading = true;
+        Task::perform(
+            crate::host::load_more_replies(crate::host::ReplyContinuation {
+                page: self.active_page.clone(),
+                serial: self.register_serial,
+                generation: self.comment_generation,
+                thread_id,
+                after,
+            }),
+            Message::ReplyPageArrived,
+        )
+    }
+    fn on_reply_page_arrived(&mut self, item: crate::host::ReplyPageItem) -> Task<Message> {
+        let current = item.serial == self.register_serial
+            && item.page == self.active_page
+            && item.generation == self.comment_generation
+            && self.comment_rows.iter().any(|row| {
+                row.thread.id == item.thread_id
+                    && row.thread.replies_after.as_deref() == Some(item.after.as_str())
+            });
+        if !current {
+            return Task::none();
+        }
+        self.threads_loading = false;
+        self.host_error = item.error.clone();
+        if !item.error.is_empty() {
+            return Task::none();
+        }
+        let Some(incoming) = item.thread else {
+            self.host_error = "the node returned no comment page".into();
+            return Task::none();
+        };
+        let incoming = crate::host::PageCommentThreadRow {
+            anchor: self
+                .comment_rows
+                .iter()
+                .find(|row| row.thread.id == item.thread_id)
+                .map(|row| row.anchor.clone())
+                .unwrap_or_default(),
+            thread: incoming,
+        };
+        if let Some(index) = self
+            .comment_rows
+            .iter()
+            .position(|row| row.thread.id == item.thread_id)
+        {
+            let merged = crate::host::merge_thread_row(&self.comment_rows[index], &incoming);
+            self.comment_rows[index] = merged;
+        }
         Task::none()
     }
     fn on_toggle_resolved_comments(&mut self) -> Task<Message> {

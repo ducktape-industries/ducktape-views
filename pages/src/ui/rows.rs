@@ -436,6 +436,23 @@ impl PagesView {
                 },
             ));
         }
+        if thread.replies_has_more {
+            rows.push(kit::padded(
+                action(
+                    format!("{key}/load-more-replies"),
+                    "Load more replies",
+                    Message::LoadMoreReplies(thread.id.clone()),
+                    !disabled,
+                    ButtonPreset::Text,
+                ),
+                wire::Edges {
+                    top: 0.,
+                    right: 0.,
+                    bottom: 0.,
+                    left: COMMENT_REPLY_INSET,
+                },
+            ));
+        }
         let toggle = crate::host::reply_toggle_label(thread, expanded);
         if !toggle.is_empty() {
             rows.push(kit::padded(

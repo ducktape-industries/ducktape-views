@@ -590,7 +590,11 @@ impl ChatView {
                 vec![native::empty_state(
                     format!("{key}/empty"),
                     "No messages match",
-                    "Try other words, or clear the search to see the room again.",
+                    if self.search_capped {
+                        "Results capped; narrow your search for more."
+                    } else {
+                        "Try other words, or clear the search to see the room again."
+                    },
                 )]
             }
             SearchPhase::Done => {
@@ -600,7 +604,12 @@ impl ChatView {
                         format!("{key}/summary-box"),
                         native::label(
                             format!("{key}/summary"),
-                            crate::host::search_summary(self.search_hits.len(), &self.search_query),
+                            crate::host::search_summary(
+                                self.search_hits.len(),
+                                &self.search_query,
+                                self.search_capped,
+                                self.search_has_more,
+                            ),
                         ),
                     ),
                     wire::Edges {
@@ -617,6 +626,21 @@ impl ChatView {
                         hit.clone(),
                     )
                 }));
+                if self.search_has_more {
+                    rows.push(native::padded(
+                        subtle(
+                            format!("{key}/load-more"),
+                            if self.search_loading {
+                                "Loading more results…"
+                            } else {
+                                "Load more results"
+                            },
+                            Message::LoadMoreSearch,
+                            self.search_loading,
+                        ),
+                        wire::Edges::all(native::spacing::SM as f32),
+                    ));
+                }
                 rows
             }
             SearchPhase::Idle => Vec::new(),
