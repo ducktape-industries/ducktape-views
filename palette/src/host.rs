@@ -10,9 +10,7 @@
 //! Nothing here links a module crate: every request and every reply is
 //! spelled as the JSON the module's wire already is.
 
-use duck_address::chat::MessageAddress;
-use duck_address::pages::PageAddress;
-use duck_address::{Address, ChainId, Refused};
+use duck_address::{Address, ChainId};
 use ducktape_view_guest::host;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -267,13 +265,41 @@ pub fn page_link(hit: &PageHit, chain: &str) -> String {
 
 /// `address` on `chain` (`<label>#<salt>`) as a `duck://` link, or "" when
 /// there is none to give: no chain known, or a tail its module refuses.
-fn minted(chain: &str, address: impl FnOnce(ChainId) -> Result<Address, Refused>) -> String {
+fn minted(chain: &str, address: impl FnOnce(ChainId) -> Option<Address>) -> String {
     chain
         .parse()
         .ok()
-        .and_then(|chain| address(chain).ok())
+        .and_then(address)
         .map(|address| address.to_string())
         .unwrap_or_default()
+}
+
+struct MessageAddress {
+    channel: String,
+    seq: Option<u64>,
+}
+
+impl MessageAddress {
+    fn address(self, chain: ChainId) -> Option<Address> {
+        let mut path = vec![self.channel];
+        path.extend(self.seq.map(|seq| seq.to_string()));
+        Address::new(chain, "chat", path).ok()
+    }
+}
+
+struct PageAddress {
+    page: String,
+    block: Option<String>,
+}
+
+impl PageAddress {
+    fn address(self, chain: ChainId) -> Option<Address> {
+        let mut path = vec![self.page];
+        if let Some(block) = self.block {
+            path.extend(["block".to_owned(), block]);
+        }
+        Address::new(chain, "pages", path).ok()
+    }
 }
 
 /// The address of a hit, handed to the kernel's ONE open door, which routes

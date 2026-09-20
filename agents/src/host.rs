@@ -21,11 +21,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 
-use duck_address::chat::MessageAddress;
-use duck_address::forge::{ForgeLocator, ForgeRepoAddress, ForgeTarget};
-use duck_address::pages::PageAddress;
-use duck_address::runs::RunAddress;
-use duck_address::{Address, ChainId, Refused};
+use duck_address::{Address, ChainId};
 use ducktape_view_guest::host;
 use futures::{Stream, StreamExt, stream};
 use serde::{Deserialize, Serialize};
@@ -2859,27 +2855,110 @@ fn height_label_short(height: i64) -> String {
 
 /// `address` on `chain` (`<label>#<salt>`) as a `duck://` link, or "" when
 /// there is none to give: no chain known, or a tail its module refuses.
-fn minted(chain: &str, address: impl FnOnce(ChainId) -> Result<Address, Refused>) -> String {
+fn minted(chain: &str, address: impl FnOnce(ChainId) -> Option<Address>) -> String {
     chain
         .parse()
         .ok()
-        .and_then(|chain| address(chain).ok())
+        .and_then(address)
         .map(|address| address.to_string())
         .unwrap_or_default()
+}
+
+struct MessageAddress {
+    channel: String,
+    seq: Option<u64>,
+}
+
+impl MessageAddress {
+    fn address(self, chain: ChainId) -> Option<Address> {
+        let mut path = vec![self.channel];
+        path.extend(self.seq.map(|seq| seq.to_string()));
+        Address::new(chain, "chat", path).ok()
+    }
+}
+
+struct PageAddress {
+    page: String,
+    block: Option<String>,
+}
+
+impl PageAddress {
+    fn address(self, chain: ChainId) -> Option<Address> {
+        let mut path = vec![self.page];
+        if let Some(block) = self.block {
+            path.extend(["block".to_owned(), block]);
+        }
+        Address::new(chain, "pages", path).ok()
+    }
+}
+
+struct RunAddress {
+    digest: String,
+}
+
+impl RunAddress {
+    fn address(self, chain: ChainId) -> Option<Address> {
+        let valid = self.digest.len() == 64
+            && self
+                .digest
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'));
+        valid.then(|| Address::new(chain, "runs", vec![self.digest]).ok())?
+    }
+}
+
+struct ForgeRepoAddress {
+    owner: String,
+    repo: String,
+}
+
+impl ForgeRepoAddress {
+    fn from_name(name: &str) -> Option<Self> {
+        let (owner, repo) = name.split_once('/')?;
+        (!repo.contains('/') && !repo.ends_with(".git")).then_some(Self {
+            owner: forge_name(owner)?,
+            repo: forge_name(repo)?,
+        })
+    }
+
+    fn address(self, chain: ChainId) -> Option<Address> {
+        Address::new(chain, "forge", vec![self.owner, self.repo]).ok()
+    }
+}
+
+struct ForgeLocator {
+    repo: ForgeRepoAddress,
+    number: u64,
+}
+
+impl ForgeLocator {
+    fn address(self, chain: ChainId) -> Option<Address> {
+        Address::new(
+            chain,
+            "forge",
+            vec![self.repo.owner, self.repo.repo, self.number.to_string()],
+        )
+        .ok()
+    }
+}
+
+fn forge_name(name: &str) -> Option<String> {
+    (matches!(name.len(), 1..=64)
+        && !name.starts_with('.')
+        && name
+            .bytes()
+            .all(|byte| matches!(byte, b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'-')))
+    .then(|| name.to_owned())
 }
 
 /// A forge repo, or an item in it. The forge's namespace is flat today: a
 /// name that carries no `<owner>/` has no address.
 fn forge_link(repo: &str, number: Option<u64>, chain: &str) -> String {
-    let Ok(repo) = ForgeRepoAddress::from_name(repo) else {
+    let Some(repo) = ForgeRepoAddress::from_name(repo) else {
         return String::new();
     };
     minted(chain, |chain| match number {
-        Some(number) => ForgeLocator {
-            repo,
-            target: ForgeTarget::Item { number },
-        }
-        .address(chain),
+        Some(number) => ForgeLocator { repo, number }.address(chain),
         None => repo.address(chain),
     })
 }
