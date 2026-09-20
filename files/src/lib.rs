@@ -14,6 +14,7 @@
 //! a link the reader activates and a file dropped on the window are the app's
 //! doors, and those two alone still cross as intents.
 
+pub mod file_policy;
 pub mod host;
 
 #[path = "ui/app.rs"]
