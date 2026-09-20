@@ -96,7 +96,6 @@ dependencies = [
 name = "call-view"
 version = "0.1.0"
 dependencies = [
- "ducktape-view-composer",
  "ducktape-view-guest",
  "futures",
  "serde",
@@ -569,11 +568,13 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "duck-address",
- "ducktape-view-composer",
  "ducktape-view-guest",
  "futures",
  "serde",
  "serde_json",
+ "sha2",
+ "unicode-normalization",
+ "unicode-segmentation",
  "view-wire",
 ]
 

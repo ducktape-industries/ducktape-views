@@ -638,7 +638,7 @@ impl ForgeView {
                 discussion.push(self.composer(
                     "forge/note-composer".into(),
                     host::composer_scope(&self.connected_rpc, &self.forge_item_channel),
-                    ducktape_view_composer::host::Target::Post {
+                    crate::composer::host::Target::Post {
                         channel: self.forge_item_channel.clone(),
                         thread: None,
                     },
