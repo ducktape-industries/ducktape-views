@@ -401,10 +401,16 @@ impl BoardsView {
     }
     pub(super) fn on_position(&mut self, x: f32, y: f32) -> Task<Message> {
         self.cursor = [x, y];
-        Task::none()
+        // PressArea reports its position after the child MouseArea has
+        // delivered `Begin`. Start from the position event so a native press
+        // cannot begin a drag from the cursor's previous location.
+        self.on_press(x, y)
     }
     pub(super) fn on_begin(&mut self) -> Task<Message> {
-        self.on_press(self.cursor[0], self.cursor[1])
+        // The paired `Position` event carries the press coordinates. The
+        // child press arrives first on the native path, so there is no safe
+        // cursor value to use here.
+        Task::none()
     }
     pub(super) fn on_middle_down(&mut self) -> Task<Message> {
         self.gesture = Gesture::Pan {

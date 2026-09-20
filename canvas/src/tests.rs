@@ -244,6 +244,68 @@ fn native_wire_tree_uses_canvas_and_text_input_within_frame_budget() {
 }
 
 #[test]
+fn native_press_position_move_release_selects_and_submits_the_drag() {
+    let mut view = view();
+    view.session.connected = true;
+    view.confirmed = Some(
+        view.confirmed
+            .take()
+            .unwrap()
+            .changed(&Change::Create {
+                id: "a".into(),
+                shape: Shape::default(),
+            })
+            .unwrap(),
+    );
+    let mut driver =
+        ducktape_view_guest::Driver::<BoardsView>::from_snapshot(&view.snapshot().unwrap(), false)
+            .unwrap();
+    let frame = driver.tick(Vec::new());
+    let wire::Node::MouseArea {
+        on_press: Some(press),
+        on_press_at: Some(position),
+        on_move: Some(movement),
+        on_release: Some(release),
+        ..
+    } = ducktape_view_guest::testing::find(&frame, "boards/canvas").unwrap()
+    else {
+        panic!("canvas mouse area");
+    };
+
+    // The native host reports the child press before PressArea's position
+    // observer. This is the real event order, not the convenient order used
+    // by the old test helper.
+    driver.tick(vec![
+        wire::Event::Message(*press),
+        wire::Event::Pointer {
+            handler: *position,
+            x: 100.,
+            y: 100.,
+        },
+    ]);
+    driver.tick(vec![wire::Event::Pointer {
+        handler: *movement,
+        x: 150.,
+        y: 130.,
+    }]);
+
+    let state = BoardsView::restore(&driver.snapshot().unwrap()).unwrap();
+    assert_eq!(state.selected, ["a".to_owned()].into());
+
+    let frame = driver.tick(vec![wire::Event::Message(*release)]);
+    let request = frame
+        .requests
+        .iter()
+        .find(|request| request.kind == "op.submit")
+        .expect("drag release submitted an operation");
+    let payload: serde_json::Value = serde_json::from_slice(&request.payload).unwrap();
+    assert_eq!(
+        payload["payload"]["batch"]["changes"][0]["move"],
+        serde_json::json!({"id": "a", "x": 50, "y": 30})
+    );
+}
+
+#[test]
 fn reconnect_keeps_an_inflight_receipt_in_the_same_network() {
     let mut view = view();
     view.session.chain = "network".into();
