@@ -669,7 +669,7 @@ impl AgentsView {
                     ),
                     action(
                         format!("agents/approval/{id}/deny"),
-                        "Decline",
+                        "Deny",
                         (!sending).then(|| Message::ControlApprove(id.clone(), false)),
                     ),
                 ],
@@ -1599,7 +1599,7 @@ impl AgentsView {
     pub(crate) const PREFERRED_WINDOW_SIZE: &'static str = "none";
     /// This state's layout, digested — `snapshot_schema` holds it here.
     pub(crate) const SNAPSHOT_SCHEMA: &'static str =
-        "db839e7472373284f8d555195220d0f64449d110b06dd35b4fa6c1b86ec14dfa";
+        "692c8b23f0d8c7240e2f5ff5e847fa7365f438a49497a0a086359feea4f68c66";
     pub(crate) fn snapshot(&self) -> Result<Vec<u8>, String> {
         self.validate_snapshot()?;
         wire::Snapshot {
@@ -1781,6 +1781,19 @@ mod tests {
         );
         assert_eq!(view.control_draft, "new draft");
         assert!(matches!(view.control_state, host::ControlState::Sending));
+    }
+
+    #[test]
+    fn a_late_live_reading_from_another_selection_is_ignored() {
+        let (mut view, _) = AgentsView::boot();
+        view.open_run = "new-session".into();
+        view.live.answer = "current answer".into();
+        let _ = view.on_live_arrived(host::LiveRun {
+            dispatch_id: "old-session".into(),
+            answer: "stale answer".into(),
+            ..Default::default()
+        });
+        assert_eq!(view.live.answer, "current answer");
     }
 
     #[test]
@@ -2280,6 +2293,9 @@ impl AgentsView {
         item: crate::host::LiveRun,
     ) -> ::ducktape_view_guest::Task<Message> {
         {
+            if item.dispatch_id != self.open_run {
+                return ::ducktape_view_guest::Task::none();
+            }
             {
                 let closed = self.live.control.is_some() && item.control.is_none();
                 if closed {

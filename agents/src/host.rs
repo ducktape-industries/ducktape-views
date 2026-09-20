@@ -1515,6 +1515,10 @@ pub struct LiveActivity {
 /// errors remain visible so the reader can reconnect after resolving them.
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LiveRun {
+    /// The selected dispatch this reading belongs to. A stream can finish
+    /// after the UI selects another run, so consumers fence late items with
+    /// this identity before replacing their current reading.
+    pub dispatch_id: String,
     pub connection: OutputConnection,
     pub present: bool,
     pub status: String,
@@ -1738,6 +1742,18 @@ fn fold_process(run: &mut LiveRun, event: &serde_json::Value) {
         _ => {}
     }
     match event["type"].as_str() {
+        Some("content_block_delta")
+            if event["delta"]["type"] == "text_delta" && event["delta"]["text"].is_string() =>
+        {
+            run.answer = clip(
+                &format!(
+                    "{}{}",
+                    run.answer,
+                    event["delta"]["text"].as_str().unwrap_or_default()
+                ),
+                MAX_TRACE_EVENT_BYTES,
+            );
+        }
         Some("assistant") => {
             let message = &event["message"];
             let text = message["content"]
@@ -1951,11 +1967,15 @@ pub fn live_run(open_run: String, connection: i64) -> ducktape_view_guest::Subsc
             &serde_json::to_vec(&ask).expect("a request encodes"),
         )
         .chain(stream::once(std::future::ready(Ok(Vec::new()))));
+        let initial = LiveRun {
+            dispatch_id: open_run.clone(),
+            ..LiveRun::default()
+        };
         // the empty reading first: this subscription is keyed on the run, so
         // a door onto another one starts here and the run before it cannot
         // linger under the new name
-        stream::once(std::future::ready(LiveRun::default())).chain(frames.scan(
-            LiveRun::default(),
+        stream::once(std::future::ready(initial.clone())).chain(frames.scan(
+            initial,
             move |run, frame| {
                 fold_output(run, &topic, frame);
                 std::future::ready(Some(run.clone()))
@@ -2102,6 +2122,10 @@ fn fold_output(run: &mut LiveRun, topic: &str, frame: host::Answer) {
             run.status = title;
         }
         Output::Preview(answer) => {
+            let answer = match run.answer.is_empty() {
+                true => answer,
+                false => run.answer.clone(),
+            };
             run.answer_preview = clip(&answer, MAX_LIVE_PREVIEW_BYTES);
             run.status = "Answering".into();
         }
@@ -2148,6 +2172,9 @@ fn provider_output(line: &str) -> Option<Output> {
         _ => {}
     }
     let claude_kind = value["type"].as_str().unwrap_or_default();
+    if claude_kind == "content_block_delta" && value["delta"]["type"] == "text_delta" {
+        return Some(Output::Preview(value["delta"]["text"].as_str()?.into()));
+    }
     if claude_kind == "result" {
         return Some(Output::Preview(value["result"].as_str()?.to_owned()));
     }
@@ -3098,5 +3125,50 @@ mod process_tests {
         );
         assert_eq!(run.answer, "First paragraph.\n\nSecond paragraph.");
         assert!(run.process.is_empty());
+    }
+
+    #[test]
+    fn claude_text_deltas_form_the_streaming_tail() {
+        let mut run = LiveRun::default();
+        output(
+            &mut run,
+            json!({"type":"content_block_delta","delta":{"type":"text_delta","text":"first "}}),
+        );
+        output(
+            &mut run,
+            json!({"type":"content_block_delta","delta":{"type":"text_delta","text":"tail"}}),
+        );
+        assert_eq!(run.answer, "first tail");
+        assert_eq!(run.answer_preview, "first tail");
+        assert_eq!(run.status, "Answering");
+        assert!(run.present);
+    }
+
+    #[test]
+    fn ordered_tools_update_in_place_and_keep_their_collapsed_detail() {
+        let mut run = LiveRun::default();
+        output(
+            &mut run,
+            json!({"type":"assistant","message":{"content":[
+                {"type":"thinking","thinking":"Plan"},
+                {"type":"tool_use","id":"tool-1","name":"Read","input":{"path":"a.rs"}}
+            ]}}),
+        );
+        output(
+            &mut run,
+            json!({"type":"user","message":{"content":[
+                {"type":"tool_result","tool_use_id":"tool-1","content":"source","is_error":false}
+            ]}}),
+        );
+        assert_eq!(
+            run.process
+                .iter()
+                .map(|step| step.title.as_str())
+                .collect::<Vec<_>>(),
+            ["Thinking", "Read"]
+        );
+        assert_eq!(run.process[1].state, ProcessState::Completed);
+        assert!(run.process[1].body.contains("a.rs"));
+        assert!(run.process[1].body.contains("source"));
     }
 }

@@ -1027,6 +1027,65 @@ fn a_running_run_sends_steering_to_its_current_turn_and_preserves_new_typing() {
     assert_eq!(next["payload"]["input"]["text"], "Also inspect trace");
 }
 
+#[test]
+fn a_running_run_submits_interrupt_and_both_approval_decisions() {
+    let (_frame, left) = connect(booted(), "7", "dispatch-live", 1);
+    let stream = left
+        .iter()
+        .find(|request| request.kind == "rpc.stream")
+        .unwrap();
+    let snapshot = |request_id: Option<&str>| {
+        let approvals = request_id
+            .map(|request_id| {
+                json!([{"request_id":request_id,"detail":{"tool":"Read","path":"a.rs"}}])
+            })
+            .unwrap_or_else(|| json!([]));
+        item(
+            stream.id,
+            json!({
+                "type":"run_control_snapshot","topic":"run-output:dispatch-live",
+                "control":{"turn":"turn-a","steers":true,"approvals":approvals}
+            })
+            .to_string()
+            .as_bytes(),
+        )
+    };
+
+    let frame = tick_native(vec![snapshot(Some("approval-deny"))]);
+    let frame = tick_native(press(&frame, "Deny"));
+    let deny = request_payload(&frame, "rpc.admin");
+    assert_eq!(
+        deny,
+        json!({
+            "route":"/v1/run-control",
+            "payload":{"run":"dispatch-live","input":{
+                "action":"approve","expected_turn":"turn-a",
+                "request_id":"approval-deny","allow":false
+            }}
+        })
+    );
+    let _frame = tick_native(vec![answer(request(&frame, "rpc.admin").id, b"{}")]);
+
+    let frame = tick_native(vec![snapshot(Some("approval-allow"))]);
+    let frame = tick_native(press(&frame, "Allow"));
+    let allow = request_payload(&frame, "rpc.admin");
+    assert_eq!(allow["payload"]["input"]["action"], "approve");
+    assert_eq!(allow["payload"]["input"]["request_id"], "approval-allow");
+    assert_eq!(allow["payload"]["input"]["allow"], true);
+    let _frame = tick_native(vec![answer(request(&frame, "rpc.admin").id, b"{}")]);
+
+    let frame = tick_native(vec![snapshot(None)]);
+    let frame = tick_native(press(&frame, "Stop run"));
+    let interrupt = request_payload(&frame, "rpc.admin");
+    assert_eq!(interrupt["route"], "/v1/run-control");
+    assert_eq!(
+        interrupt["payload"]["input"],
+        json!({
+            "action":"interrupt","expected_turn":"turn-a"
+        })
+    );
+}
+
 fn request_payload(frame: &Frame, kind: &str) -> Value {
     serde_json::from_slice(&request(frame, kind).payload).unwrap()
 }
