@@ -607,7 +607,10 @@ fn run_origin(run: &serde_json::Value) -> String {
     if run["delegation_id"].is_string() {
         return "Agent delegation".into();
     }
-    format!("Message {}", run["anchor_seq"].as_i64().unwrap_or(0))
+    let Some(anchor_seq) = run["anchor_seq"].as_i64() else {
+        return "Not reported".into();
+    };
+    format!("Message {anchor_seq}")
 }
 
 fn outcome_word(outcome: &str) -> &'static str {
@@ -1583,7 +1586,7 @@ impl LiveRun {
                 "This output contains no thinking or tool steps. Raw events are available in the Raw tab."
             }
             OutputConnection::Connected if self.control.is_some() => {
-                "Connected to the session. Waiting for its first process details…"
+                "Connected to this run. Waiting for its first process details…"
             }
             OutputConnection::Connected if state == "dispatched" => {
                 "Waiting for a worker to start this run."
@@ -2088,16 +2091,23 @@ fn fold_output(run: &mut LiveRun, topic: &str, frame: host::Answer) {
     run.trace.drain(..overflow);
     if let Ok(event) = serde_json::from_str::<serde_json::Value>(line) {
         fold_process(run, &event);
+        // Replay still describes completed work, but cannot grant control.
+        if event["type"] == "run_control" {
+            match event["state"].as_str() {
+                Some("ready") if run.elapsed_ms.take().is_some() => {
+                    run.process.clear();
+                    run.answer.clear();
+                    run.activity.clear();
+                    run.answer_preview.clear();
+                    run.present = false;
+                }
+                Some("closed") => run.elapsed_ms = event["elapsed_ms"].as_u64(),
+                _ => {}
+            }
+        }
         if run.control_snapshot_received {
             match (event["type"].as_str(), event["state"].as_str()) {
                 (Some("run_control"), Some("ready")) => {
-                    if run.elapsed_ms.take().is_some() {
-                        run.process.clear();
-                        run.answer.clear();
-                        run.activity.clear();
-                        run.answer_preview.clear();
-                        run.present = false;
-                    }
                     run.control = Some(RunControl {
                         turn: event["turn"].as_str().unwrap_or_default().into(),
                         steers: event["steers"].as_bool().unwrap_or(false),
@@ -2121,7 +2131,6 @@ fn fold_output(run: &mut LiveRun, topic: &str, frame: host::Answer) {
                 }
                 (Some("run_control"), Some("closed")) => {
                     run.control = None;
-                    run.elapsed_ms = event["elapsed_ms"].as_u64();
                 }
                 _ => {}
             }
@@ -2912,6 +2921,14 @@ mod process_tests {
     use super::*;
     use serde_json::json;
 
+    #[test]
+    fn a_run_without_origin_is_not_presented_as_a_message() {
+        assert_eq!(
+            run_origin(&json!({"run_id":"run-without-origin"})),
+            "Not reported"
+        );
+    }
+
     fn output(run: &mut LiveRun, event: serde_json::Value) {
         fold_output(
             run,
@@ -3105,7 +3122,6 @@ mod process_tests {
             (u64::MAX, "Worked for 213503982334d 14h 25m 51s"),
         ] {
             let mut run = LiveRun::default();
-            snapshot(&mut run, serde_json::Value::Null);
             output(
                 &mut run,
                 json!({"type":"run_control","state":"closed","elapsed_ms":elapsed_ms}),
@@ -3122,7 +3138,6 @@ mod process_tests {
     fn duration_is_unknown_until_executor_close_and_resets_for_a_new_attempt() {
         let mut run = LiveRun::default();
         assert_eq!(run.process_label(false), "Work details");
-        snapshot(&mut run, serde_json::Value::Null);
         output(
             &mut run,
             json!({"type":"result","result":"first attempt","duration_ms":125000}),
