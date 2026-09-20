@@ -607,7 +607,10 @@ fn run_origin(run: &serde_json::Value) -> String {
     if run["delegation_id"].is_string() {
         return "Agent delegation".into();
     }
-    format!("Message {}", run["anchor_seq"].as_i64().unwrap_or(0))
+    let Some(anchor_seq) = run["anchor_seq"].as_i64() else {
+        return "Not reported".into();
+    };
+    format!("Message {anchor_seq}")
 }
 
 fn outcome_word(outcome: &str) -> &'static str {
@@ -1571,7 +1574,7 @@ impl LiveRun {
                 "This output contains no thinking or tool steps. Raw events are available in the Raw tab."
             }
             OutputConnection::Connected if self.control.is_some() => {
-                "Connected to the session. Waiting for its first process details…"
+                "Connected to this run. Waiting for its first process details…"
             }
             OutputConnection::Connected if state == "dispatched" => {
                 "Waiting for a worker to start this run."
@@ -2855,6 +2858,14 @@ fn message_link(channel: &str, seq: Option<u64>, chain: &str) -> String {
 mod process_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_run_without_origin_is_not_presented_as_a_message() {
+        assert_eq!(
+            run_origin(&json!({"run_id":"run-without-origin"})),
+            "Not reported"
+        );
+    }
 
     fn output(run: &mut LiveRun, event: serde_json::Value) {
         fold_output(

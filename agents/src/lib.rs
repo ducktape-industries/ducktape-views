@@ -231,6 +231,77 @@ fn filler() -> Node {
     kit::space(Some(Length::Fill), None)
 }
 
+fn table_cell(key: impl Into<String>, text: impl Into<String>, width: f32) -> Node {
+    kit::sized(
+        kit::nowrap(kit::secondary(key, text)),
+        Some(Length::Fixed(width)),
+        None,
+    )
+}
+
+fn table_header(key: impl Into<String>, text: impl Into<String>, width: f32) -> Node {
+    kit::sized(
+        kit::nowrap(kit::label(key, text)),
+        Some(Length::Fixed(width)),
+        None,
+    )
+}
+
+const TREE_INDENT: f32 = 28.;
+const KIND_WIDTH: f32 = 150.;
+const EXECUTOR_WIDTH: f32 = 150.;
+const STATUS_WIDTH: f32 = 100.;
+const STARTED_WIDTH: f32 = 130.;
+const ACTIVITY_WIDTH: f32 = 130.;
+const OWNER_WIDTH: f32 = 150.;
+const TREE_KIND_WIDTH: f32 = TREE_INDENT + KIND_WIDTH;
+const RUN_TABLE_WIDTH: f32 = TREE_KIND_WIDTH
+    + EXECUTOR_WIDTH
+    + STATUS_WIDTH
+    + STARTED_WIDTH
+    + ACTIVITY_WIDTH
+    + OWNER_WIDTH
+    + 5. * kit::spacing::SM as f32
+    + 2. * kit::spacing::MD as f32;
+
+fn tree_kind_cell(key: &str, leading: Node, kind: Node) -> Node {
+    let mut row = kit::row(key, [leading, kind]);
+    if let Node::Linear { spacing, .. } = &mut row {
+        *spacing = Some(0.);
+    }
+    kit::sized(row, Some(Length::Fixed(TREE_KIND_WIDTH)), None)
+}
+
+fn both_scroll(key: &str, content: Node) -> Node {
+    Node::Scroll {
+        key: key.into(),
+        content: Box::new(content),
+        direction: wire::ScrollDirection::Both,
+        width: Some(Length::Fill),
+        height: Some(Length::Fill),
+        on_scroll: None,
+        virtual_rows: false,
+        bar_hidden: false,
+        bar_width: None,
+        bar_margin: None,
+        scroller_width: None,
+        bar_spacing: None,
+        anchor_x: Default::default(),
+        anchor_y: Default::default(),
+        auto_scroll: false,
+        background: None,
+        border: None,
+    }
+}
+
+fn reported(value: &str) -> &str {
+    if value.is_empty() {
+        "Not reported"
+    } else {
+        value
+    }
+}
+
 /// Below this pane width a list and its rail cannot both be read side by
 /// side (the editor keeps 320, the run list 200): the rail stacks under
 /// the list, and there is no width to drag.
@@ -514,75 +585,34 @@ impl AgentsView {
         match (self.answered, self.runs.is_empty()) {
             (false, _) => rows.push(kit::empty_state(
                 "agents/runs-loading",
-                "Reading the runs…",
-                "Every dispatch of an agent arrives from the node.",
+                "Reading runs…",
+                "Runs arrive from the node; unavailable details stay marked as Not reported.",
             )),
             (true, true) => rows.push(kit::empty_state(
                 "agents/no-runs",
-                "No runs yet",
-                "Every dispatch of an agent lands here with its journal.",
+                if self.rows.is_empty() {
+                    "No runs yet"
+                } else {
+                    "No runs for these agents yet"
+                },
+                if self.rows.is_empty() {
+                    "Runs appear here when the node reports them."
+                } else {
+                    "Registered agents are listed below; their runs will appear under each agent."
+                },
             )),
             (true, false) => {}
         }
-        for run in &self.runs {
-            let key = format!("agents/run/{}", run.run_id);
-            let summary = kit::spaced(
-                kit::column(
-                    format!("{key}/summary"),
-                    [
-                        kit::spaced(
-                            kit::centered_row(
-                                format!("{key}/heading"),
-                                [
-                                    kit::sized(
-                                        kit::nowrap(kit::strong(
-                                            format!("{key}/agent"),
-                                            &run.agent_name,
-                                        )),
-                                        Some(Length::Fill),
-                                        None,
-                                    ),
-                                    state_badge(format!("{key}/state"), &run.state),
-                                ],
-                            ),
-                            kit::spacing::XS as f32,
-                        ),
-                        kit::sized(
-                            kit::nowrap(kit::secondary(format!("{key}/origin"), &run.origin)),
-                            Some(Length::Fill),
-                            None,
-                        ),
-                        kit::caption(
-                            format!("{key}/dispatched"),
-                            format!("Dispatched at · {}", run.dispatched),
-                        ),
-                    ],
-                ),
-                kit::spacing::XXS as f32,
-            );
-            let mut button = kit::list_row(
-                &key,
-                summary,
-                self.open_run == run.dispatch_id,
-                Some(slots::message(Message::OpenRunRow(run.run_id.clone()))),
-            );
-            if let Node::Button { label, padding, .. } = &mut button {
-                *padding = Some(wire::Edges {
-                    top: kit::spacing::MD as f32,
-                    right: kit::spacing::MD as f32,
-                    bottom: kit::spacing::MD as f32,
-                    left: kit::spacing::MD as f32,
-                });
-                *label = Some(run.run_id.clone());
-            }
-            rows.push(button);
-        }
-        let list = kit::scroll(
+        rows.push(self.run_table_header());
+        rows.extend(self.run_tree_rows());
+        let table = kit::sized(
+            kit::spaced(kit::column("agents/runs", rows), 2.),
+            Some(Length::Fixed(RUN_TABLE_WIDTH)),
+            None,
+        );
+        let list = both_scroll(
             "agents/runs-scroll",
-            kit::padded(
-                kit::spaced(kit::column("agents/runs", rows), 2.),
-                wire::Edges::all(kit::spacing::SM as f32),
-            ),
+            kit::padded(table, wire::Edges::all(kit::spacing::SM as f32)),
         );
         let detail = match self.open_run.is_empty() {
             true => kit::empty_state(
@@ -632,12 +662,223 @@ impl AgentsView {
         )
     }
 
+    fn run_table_header(&self) -> Node {
+        kit::padded(
+            kit::centered_row(
+                "agents/run-table/header",
+                [
+                    tree_kind_cell(
+                        "agents/run-table/header/kind",
+                        kit::space(Some(Length::Fixed(TREE_INDENT)), None),
+                        table_header("agents/run-table/header/kind/label", "Kind", KIND_WIDTH),
+                    ),
+                    table_header(
+                        "agents/run-table/header/executor",
+                        "Model / executor",
+                        EXECUTOR_WIDTH,
+                    ),
+                    table_header("agents/run-table/header/status", "Status", STATUS_WIDTH),
+                    table_header(
+                        "agents/run-table/header/started",
+                        "Started (block)",
+                        STARTED_WIDTH,
+                    ),
+                    table_header(
+                        "agents/run-table/header/activity",
+                        "Last activity",
+                        ACTIVITY_WIDTH,
+                    ),
+                    table_header("agents/run-table/header/owner", "Owner", OWNER_WIDTH),
+                ],
+            ),
+            wire::Edges {
+                top: kit::spacing::SM as f32,
+                right: kit::spacing::MD as f32,
+                bottom: kit::spacing::XS as f32,
+                left: kit::spacing::MD as f32,
+            },
+        )
+    }
+
+    fn run_tree_rows(&self) -> Vec<Node> {
+        let mut rows = Vec::new();
+        let mut matched = std::collections::BTreeSet::new();
+        for agent in &self.rows {
+            let children: Vec<&host::RunRow> = self
+                .runs
+                .iter()
+                .filter(|run| run.agent_id == agent.id)
+                .collect();
+            matched.insert(agent.id.as_str());
+            let key = format!("agents/run-tree/agent/{}", agent.id);
+            let collapsed = self.collapsed_agents.iter().any(|id| id == &agent.id);
+            rows.push(self.agent_tree_row(&key, agent, children.len(), collapsed));
+            if !collapsed {
+                rows.extend(
+                    children.into_iter().map(|run| {
+                        self.selectable_run_row(format!("{key}/run/{}", run.run_id), run)
+                    }),
+                );
+            }
+        }
+        let orphaned: Vec<&host::RunRow> = self
+            .runs
+            .iter()
+            .filter(|run| !matched.contains(run.agent_id.as_str()))
+            .collect();
+        if !orphaned.is_empty() {
+            let key = "agents/run-tree/unmatched";
+            let collapsed = self.collapsed_agents.iter().any(|id| id == key);
+            rows.push(self.unmatched_tree_row(key, orphaned.len(), collapsed));
+            if !collapsed {
+                rows.extend(
+                    orphaned.into_iter().map(|run| {
+                        self.selectable_run_row(format!("{key}/run/{}", run.run_id), run)
+                    }),
+                );
+            }
+        }
+        rows
+    }
+
+    fn agent_tree_row(
+        &self,
+        key: &str,
+        agent: &host::AgentRow,
+        run_count: usize,
+        collapsed: bool,
+    ) -> Node {
+        let toggle_label = if collapsed { "Expand" } else { "Collapse" };
+        let mut toggle = subtle(
+            format!("{key}/toggle"),
+            if collapsed { "▸" } else { "▾" },
+            Some(Message::ToggleAgent(agent.id.clone())),
+        );
+        if let Node::Button { label, .. } = &mut toggle {
+            *label = Some(format!("{toggle_label} {}", agent.name));
+        }
+        let owner = reported(&agent.owner_handle);
+        kit::padded(
+            kit::centered_row(
+                key,
+                [
+                    tree_kind_cell(
+                        &format!("{key}/kind"),
+                        kit::sized(toggle, Some(Length::Fixed(TREE_INDENT)), None),
+                        table_cell(
+                            format!("{key}/kind/label"),
+                            format!("{} · Agent · {run_count}", agent.name),
+                            KIND_WIDTH,
+                        ),
+                    ),
+                    table_cell(
+                        format!("{key}/executor"),
+                        reported(&agent.capability),
+                        EXECUTOR_WIDTH,
+                    ),
+                    kit::sized(
+                        state_badge(format!("{key}/status"), &agent.status),
+                        Some(Length::Fixed(STATUS_WIDTH)),
+                        None,
+                    ),
+                    table_cell(format!("{key}/started"), "Not reported", STARTED_WIDTH),
+                    table_cell(format!("{key}/activity"), "Not reported", ACTIVITY_WIDTH),
+                    table_cell(format!("{key}/owner"), owner, OWNER_WIDTH),
+                ],
+            ),
+            wire::Edges {
+                top: kit::spacing::XS as f32,
+                right: kit::spacing::MD as f32,
+                bottom: kit::spacing::XS as f32,
+                left: kit::spacing::MD as f32,
+            },
+        )
+    }
+
+    fn unmatched_tree_row(&self, key: &str, run_count: usize, collapsed: bool) -> Node {
+        let toggle_label = if collapsed { "Expand" } else { "Collapse" };
+        let mut toggle = subtle(
+            format!("{key}/toggle"),
+            if collapsed { "▸" } else { "▾" },
+            Some(Message::ToggleAgent(key.to_owned())),
+        );
+        if let Node::Button { label, .. } = &mut toggle {
+            *label = Some(format!("{toggle_label} unmatched runs"));
+        }
+        kit::padded(
+            kit::centered_row(
+                key,
+                [
+                    tree_kind_cell(
+                        &format!("{key}/kind"),
+                        kit::sized(toggle, Some(Length::Fixed(TREE_INDENT)), None),
+                        table_cell(
+                            format!("{key}/kind/label"),
+                            format!("Unmatched runs · {run_count}"),
+                            KIND_WIDTH,
+                        ),
+                    ),
+                    table_cell(format!("{key}/executor"), "Not reported", EXECUTOR_WIDTH),
+                    table_cell(format!("{key}/status"), "Not reported", STATUS_WIDTH),
+                    table_cell(format!("{key}/started"), "Not reported", STARTED_WIDTH),
+                    table_cell(format!("{key}/activity"), "Not reported", ACTIVITY_WIDTH),
+                    table_cell(format!("{key}/owner"), "Not reported", OWNER_WIDTH),
+                ],
+            ),
+            wire::Edges {
+                top: kit::spacing::XS as f32,
+                right: kit::spacing::MD as f32,
+                bottom: kit::spacing::XS as f32,
+                left: kit::spacing::MD as f32,
+            },
+        )
+    }
+
+    fn selectable_run_row(&self, key: String, run: &host::RunRow) -> Node {
+        let kind = reported(&run.origin);
+        let executor = "Not reported";
+        let owner = "Not reported";
+        let started = reported(&run.dispatched);
+        let cells = kit::centered_row(
+            format!("{key}/cells"),
+            [
+                tree_kind_cell(
+                    &format!("{key}/kind"),
+                    kit::space(Some(Length::Fixed(TREE_INDENT)), None),
+                    table_cell(format!("{key}/kind/label"), kind, KIND_WIDTH),
+                ),
+                table_cell(format!("{key}/executor"), executor, EXECUTOR_WIDTH),
+                kit::sized(
+                    state_badge(format!("{key}/status"), &run.state),
+                    Some(Length::Fixed(STATUS_WIDTH)),
+                    None,
+                ),
+                table_cell(format!("{key}/started"), started, STARTED_WIDTH),
+                table_cell(format!("{key}/activity"), "Not reported", ACTIVITY_WIDTH),
+                table_cell(format!("{key}/owner"), owner, OWNER_WIDTH),
+            ],
+        );
+        let mut button = kit::list_row(
+            &key,
+            kit::padded(cells, wire::Edges::all(kit::spacing::XS as f32)),
+            self.open_run == run.dispatch_id,
+            Some(slots::message(Message::OpenRunRow(run.run_id.clone()))),
+        );
+        if let Node::Button {
+            label: accessible, ..
+        } = &mut button
+        {
+            *accessible = Some(run.run_id.clone());
+        }
+        button
+    }
+
     fn run_controls(&self) -> Node {
         let Some(control) = &self.live.control else {
             let content = (self.open_row.state == "running").then(|| {
                 kit::wrapping(kit::secondary(
                     "agents/control-unavailable",
-                    "Run controls are unavailable in this session.",
+                    "Run controls are unavailable for this run.",
                 ))
             });
             return kit::column("agents/no-controls", content);
@@ -706,7 +947,7 @@ impl AgentsView {
             }
             host::ControlState::Accepted => content.push(kit::secondary(
                 "agents/control-status",
-                "Received by the session",
+                "Instructions received",
             )),
             host::ControlState::Failed(error) => content.push(kit::wrapping(kit::tone_text(
                 "agents/control-status",
@@ -1478,6 +1719,7 @@ pub struct AgentsView {
     pub(crate) answered: bool,
     pub(crate) host_error: String,
     pub(crate) selected: String,
+    pub(crate) collapsed_agents: Vec<String>,
     pub(crate) creating: bool,
     pub(crate) can_edit: bool,
     pub(crate) selected_status: String,
@@ -1523,6 +1765,7 @@ pub enum Message {
     CloseEditor,
     ChoosePanel(String),
     OpenRunRow(String),
+    ToggleAgent(String),
     CloseRun,
     OpenPlace(String),
     PickCapabilityOption(String),
@@ -1578,6 +1821,7 @@ impl AgentsView {
             answered: false,
             host_error: "".to_owned(),
             selected: "".to_owned(),
+            collapsed_agents: Vec::new(),
             creating: false,
             can_edit: false,
             selected_status: "".to_owned(),
@@ -1599,7 +1843,7 @@ impl AgentsView {
     pub(crate) const PREFERRED_WINDOW_SIZE: &'static str = "none";
     /// This state's layout, digested — `snapshot_schema` holds it here.
     pub(crate) const SNAPSHOT_SCHEMA: &'static str =
-        "db839e7472373284f8d555195220d0f64449d110b06dd35b4fa6c1b86ec14dfa";
+        "14b6a413af6f2949a94eae1d28dae8032790e5c6d40306f52a38efc2b6b19d24";
     pub(crate) fn snapshot(&self) -> Result<Vec<u8>, String> {
         self.validate_snapshot()?;
         wire::Snapshot {
@@ -1834,6 +2078,148 @@ mod tests {
         let _ = app.view();
     }
 
+    fn node_with_key<'a>(node: &'a Node, key: &str) -> Option<&'a Node> {
+        (node.key() == Some(key)).then_some(node).or_else(|| {
+            node.children()
+                .iter()
+                .find_map(|child| node_with_key(child, key))
+        })
+    }
+
+    fn sample_agent() -> host::AgentRow {
+        host::AgentRow {
+            id: "agent".into(),
+            name: "Agent".into(),
+            capability: "codex".into(),
+            status: "active".into(),
+            ..Default::default()
+        }
+    }
+
+    fn sample_run(id: &str, dispatch_id: &str) -> host::RunRow {
+        host::RunRow {
+            run_id: id.into(),
+            dispatch_id: dispatch_id.into(),
+            agent_id: "agent".into(),
+            origin: "Message 1".into(),
+            state: "running".into(),
+            dispatched: "block 1".into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn run_table_keeps_aligned_tracks_and_scrolls_at_narrow_and_wide_sizes() {
+        let (mut view, _) = AgentsView::boot();
+        view.connected = true;
+        view.answered = true;
+        view.panel = "runs".into();
+        view.rows = vec![sample_agent()];
+        view.runs = vec![sample_run("run-a", "dispatch-a")];
+
+        for (width, axis) in [(200., wire::Axis::Column), (1280., wire::Axis::Row)] {
+            view.viewport_width = width;
+            let tree = view.runs_panel();
+            let scroll = node_with_key(&tree, "agents/runs-scroll").expect("run table scroll");
+            assert!(matches!(
+                scroll,
+                Node::Scroll {
+                    direction: wire::ScrollDirection::Both,
+                    width: Some(Length::Fill),
+                    height: Some(Length::Fill),
+                    ..
+                }
+            ));
+            let header_kind =
+                node_with_key(&tree, "agents/run-table/header/kind").expect("kind header track");
+            let run_kind = node_with_key(&tree, "agents/run-tree/agent/agent/run/run-a/kind")
+                .expect("run kind track");
+            for node in [header_kind, run_kind] {
+                assert!(matches!(
+                    node,
+                    Node::Linear {
+                        width: Some(Length::Fixed(width)),
+                        ..
+                    } if *width == TREE_KIND_WIDTH
+                ));
+            }
+            let owner =
+                node_with_key(&tree, "agents/run-table/header/owner").expect("owner header track");
+            assert!(matches!(
+                owner,
+                Node::Text {
+                    width: Some(Length::Fixed(width)),
+                    ..
+                } if *width == OWNER_WIDTH
+            ));
+            let panes = node_with_key(&tree, "agents/run-panes").expect("run panes");
+            assert!(matches!(
+                panes,
+                Node::Linear { axis: actual, .. } if *actual == axis
+            ));
+        }
+    }
+
+    #[test]
+    fn run_refresh_keeps_selected_row_and_dispatch_identity_after_reorder() {
+        let (mut view, _) = AgentsView::boot();
+        view.connected = true;
+        view.answered = true;
+        view.panel = "runs".into();
+        view.rows = vec![sample_agent()];
+        view.runs = vec![
+            sample_run("run-a", "dispatch-a"),
+            sample_run("run-b", "dispatch-b"),
+        ];
+        view.open_run = "dispatch-b".into();
+        view.runs.reverse();
+
+        let tree = view.runs_panel();
+        let row = node_with_key(&tree, "agents/run-tree/agent/agent/run/run-b")
+            .expect("selected run keeps its key");
+        assert!(matches!(
+            row,
+            Node::Button {
+                checked: Some(true),
+                on_press: Some(_),
+                ..
+            }
+        ));
+
+        let _ = view.update(Message::OpenRunRow("run-a".into()));
+        assert_eq!(view.open_row.run_id, "run-a");
+        assert_eq!(view.open_run, "dispatch-a");
+        let _ = view.update(Message::OpenRunRow("run-b".into()));
+        assert_eq!(view.open_row.run_id, "run-b");
+        assert_eq!(view.open_run, "dispatch-b");
+    }
+
+    #[test]
+    fn registered_agents_get_a_truthful_no_runs_state() {
+        let (mut view, _) = AgentsView::boot();
+        view.connected = true;
+        view.answered = true;
+        view.panel = "runs".into();
+        view.rows = vec![sample_agent()];
+        let mut tree = view.view();
+        let mut texts = Vec::new();
+        tree.for_each_mut(&mut |node| {
+            if let Node::Text { content, .. } = node {
+                texts.push(content.clone());
+            }
+        });
+        assert!(
+            texts
+                .iter()
+                .any(|text| text == "No runs for these agents yet")
+        );
+        assert!(texts.iter().any(|text| {
+            text == "Registered agents are listed below; their runs will appear under each agent."
+        }));
+        assert!(!texts.iter().any(|text| text.contains("session")));
+        assert!(!texts.iter().any(|text| text.contains("producer")));
+    }
+
     #[test]
     fn snapshot_preserves_editor_and_journal_state() {
         let (mut app, _) = AgentsView::boot();
@@ -1891,6 +2277,7 @@ impl AgentsView {
             Message::CloseEditor => self.on_close_editor(),
             Message::ChoosePanel(next) => self.on_choose_panel(next),
             Message::OpenRunRow(run_id) => self.on_open_run_row(run_id),
+            Message::ToggleAgent(agent_id) => self.on_toggle_agent(agent_id),
             Message::CloseRun => self.on_close_run(),
             Message::OpenPlace(url) => self.on_open_place(url),
             Message::PickCapabilityOption(value) => self.on_pick_capability_option(value),
@@ -2441,6 +2828,15 @@ impl AgentsView {
             }
             ::ducktape_view_guest::Task::none()
         }
+    }
+
+    fn on_toggle_agent(&mut self, agent_id: String) -> ::ducktape_view_guest::Task<Message> {
+        if let Some(index) = self.collapsed_agents.iter().position(|id| id == &agent_id) {
+            self.collapsed_agents.remove(index);
+        } else {
+            self.collapsed_agents.push(agent_id);
+        }
+        ::ducktape_view_guest::Task::none()
     }
     fn on_close_run(&mut self) -> ::ducktape_view_guest::Task<Message> {
         {
