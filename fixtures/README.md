@@ -2,10 +2,10 @@
 
 These fixtures are public synthetic JSON produced from authoritative SDK
 producer types at locked revision `8c764093d5974b4328c0b90de157d72597540020`
-(the `Cargo.lock` `ducktape-sdk` revision). Reproduce and check the producer
-encodings with `fixtures/generate-producer-fixtures.sh`; its temporary Cargo
-project is outside this workspace's production dependency graph. The exact
-inputs, producer types, and b66 comparison are in `fixtures/provenance.json`.
+(the `Cargo.lock` `ducktape-sdk` revision). The exact inputs, producer types,
+and b66 comparison are in `fixtures/provenance.json`. The historical generator
+is preserved at repository revision `f150990d0943e457adb7765abb70f0a9434e2b6e`;
+it is no longer a dependency of this repository.
 JSON whitespace is not part of the contract, so tests compare parsed JSON
 semantics rather than a local type round-trip.
 
