@@ -8,8 +8,17 @@ use ducktape_view_guest::testing::{
     answer as raw_answer, edit, find, has_text, item, keys, press, refuse, texts, type_into,
 };
 use ducktape_view_guest::wire::{self, Event, Frame, Node, Request, keyboard};
+use files_view::boot_native;
 use files_view::host::Session;
-use files_view::{boot_native, tick_native};
+
+/// Every frame the view paints names and places each control it draws.
+fn tick_native(events: Vec<Event>) -> Frame {
+    let frame = files_view::tick_native(events);
+    if let Some(root) = &frame.root {
+        assert_eq!(wire::accessibility_faults(root), Vec::new());
+    }
+    frame
+}
 
 thread_local! {
     static FILES_REPLIES: std::cell::RefCell<std::collections::BTreeMap<u64, String>> = Default::default();
@@ -99,8 +108,8 @@ fn session(connected: bool) -> Vec<u8> {
     routed_session(connected, "", 0)
 }
 
-/// The session with a `duck://files/...` push on it: the path the shell
-/// resolved, and the serial that says a push happened.
+/// The session with a `duck://<chain>/files/<path…>` push on it: the
+/// address, and the serial that says a push happened.
 fn routed_session(connected: bool, route: &str, route_serial: i64) -> Vec<u8> {
     serde_json::to_vec(&Session {
         connected,
@@ -157,6 +166,14 @@ fn read(text: &str) -> Vec<u8> {
     use base64::Engine as _;
     let b64 = base64::engine::general_purpose::STANDARD.encode(text.as_bytes());
     serde_json::json!({ "b64": b64, "eof": true })
+        .to_string()
+        .into_bytes()
+}
+
+/// The `stat` reply for a path the snapshot holds; a path it does not hold
+/// is `null`.
+fn stat_entry(path: &str) -> Vec<u8> {
+    serde_json::json!({ "path": path, "kind": "file", "size": 1, "object": "aa" })
         .to_string()
         .into_bytes()
 }
@@ -218,6 +235,15 @@ fn node_ending(frame: &Frame, suffix: &str) -> Node {
     }
     find(frame.root.as_ref().unwrap(), suffix)
         .unwrap_or_else(|| panic!("no node ending {suffix:?} in {:?}", keys(frame)))
+}
+
+/// What Get Info's Author row says. Read from the row itself: Size and Object
+/// may say "—" too, so the text alone could not tell whose "—" it is.
+fn author_row(frame: &Frame) -> String {
+    match node_ending(frame, "/author/value") {
+        Node::Text { content, .. } => content,
+        other => panic!("the Author value is not text: {other:?}"),
+    }
 }
 
 /// The events the host sends for a double-click on the row of `path`.
@@ -407,8 +433,8 @@ fn a_click_chooses_and_a_double_click_opens_a_directory() {
     let (frame, _held) = connected_with_listing();
     let frame = tick_native(press(&frame, "Folder docs"));
     assert!(
-        frame.requests.is_empty(),
-        "choosing a folder reads nothing: {:?}",
+        files_gets(&frame, "ls").is_empty(),
+        "choosing a folder lists nothing: {:?}",
         frame.requests
     );
     assert!(has_text(&frame, "/shared/docs"), "{:?}", texts(&frame));
@@ -494,8 +520,8 @@ fn a_sidebar_place_opens_its_directory() {
     assert_eq!(ls_of(&frame, "/home/acct:3").1["path"], "/home/acct:3");
 }
 
-/// A `duck://files/<path>` link is a SESSION fact, not a navigation the app
-/// performs: the shell resolves the address and moves the tab, and the view
+/// A `duck://<chain>/files/<path…>` link is a SESSION fact, not a navigation
+/// the app performs: the shell moves the tab with the address, and the view
 /// lands on the file — its directory listed, the file itself chosen and
 /// read. The serial is what says a push happened, so the SAME path pushed
 /// again navigates again instead of reading as an unchanged value.
@@ -508,7 +534,7 @@ fn a_duck_link_lands_the_view_on_the_file_it_names() {
     // the push: a file in another directory
     let frame = tick_native(vec![item(
         held.session,
-        &routed_session(true, "/shared/docs/plan.md", 1),
+        &routed_session(true, "duck://testnet-0a1b2c3d/files/shared/docs/plan.md", 1),
     )]);
     assert_eq!(
         ls_of(&frame, "/shared/docs").1["path"],
@@ -534,7 +560,7 @@ fn a_duck_link_lands_the_view_on_the_file_it_names() {
     // not moved, so only the generation can make this land a second time
     let frame = tick_native(vec![item(
         held.session,
-        &routed_session(true, "/shared/docs/plan.md", 2),
+        &routed_session(true, "duck://testnet-0a1b2c3d/files/shared/docs/plan.md", 2),
     )]);
     assert_eq!(ls_of(&frame, "/shared/docs").1["path"], "/shared/docs");
     assert_eq!(
@@ -542,6 +568,26 @@ fn a_duck_link_lands_the_view_on_the_file_it_names() {
         serde_json::json!({}),
         "the same address twice reads the file again"
     );
+}
+
+/// An address duckfs could not hold a file at — here a name in decomposed,
+/// not NFC, form — lands nowhere and says why where the reader looks.
+#[test]
+fn a_refused_address_says_why_and_leaves_the_view_where_it_was() {
+    let (frame, held) = connected_with_listing();
+    let _ = with_preview(&frame, "# README");
+    let frame = tick_native(vec![item(
+        held.session,
+        &routed_session(true, "duck://testnet-0a1b2c3d/files/shared/e%CC%81.md", 1),
+    )]);
+    assert!(
+        texts(&frame)
+            .iter()
+            .any(|text| text.contains("not NFC-normalized")),
+        "{:?}",
+        texts(&frame)
+    );
+    assert!(has_text(&frame, "/shared/README.md"), "{:?}", texts(&frame));
 }
 
 /// A files block re-reads the workspace through the one live subscription.
@@ -572,15 +618,21 @@ fn a_chosen_file_reads_the_snapshot_it_will_save_against() {
     assert!(has_text(&frame, "Reading the file…"), "{:?}", texts(&frame));
     let (_, params) = files_get(&frame, "refs");
     assert_eq!(params, serde_json::json!({}));
+    // Get Info's walk, on a history one snapshot deep: the first snapshot
+    // has no parent to diff against, so it is asked whether it HOLDS the path
+    let probe = files_get(&frame, "stat").0.id;
     let head = files_get(&frame, "refs").0.id;
-    let frame = tick_native(vec![answer(head, &refs())]);
+    let frame = tick_native(vec![
+        answer(head, &refs()),
+        answer(probe, &stat_entry("/shared/README.md")),
+    ]);
     let (_, params) = files_get(&frame, "read");
     assert_eq!(params["path"], "/shared/README.md");
     assert_eq!(params["snapshot"], "cc".repeat(32));
     assert_eq!(params["len"], 65_536);
     let page = files_get(&frame, "read").0.id;
     let frame = tick_native(vec![answer(page, &read("# Hello"))]);
-    // the first snapshot has no parent and touched everything it holds
+    // the first snapshot holds it, so it is the modification
     for expected in ["Modified", "h 84,912 (s1)", "Author", "acct:9"] {
         assert!(
             has_text(&frame, expected),
@@ -590,10 +642,39 @@ fn a_chosen_file_reads_the_snapshot_it_will_save_against() {
     }
 }
 
-/// The snapshot that last touched a path is found by diffing each snapshot
-/// against its parent under that prefix, newest first.
-#[test]
-fn get_info_walks_the_history_for_the_last_change() {
+/// Two snapshots: the first commit and one on top of it.
+fn two_snapshots() -> Vec<u8> {
+    serde_json::json!({ "snapshots": [
+        { "id": "s2", "parent": "s1", "author": { "Account": 4 }, "height": 90_000, "message": "later" },
+        { "id": "s1", "parent": null, "author": { "Account": 9 }, "height": 84_912, "message": "first" },
+    ]})
+    .to_string()
+    .into_bytes()
+}
+
+/// Nine snapshots, `s9` newest down to the first, `s1`: one more than the
+/// provenance walk looks through, so a walk that finds nothing stops one
+/// short of the first.
+fn nine_snapshots() -> Vec<u8> {
+    let snapshots: Vec<serde_json::Value> = (1..=9)
+        .rev()
+        .map(|n| {
+            let parent = match n {
+                1 => serde_json::Value::Null,
+                _ => format!("s{}", n - 1).into(),
+            };
+            serde_json::json!({ "id": format!("s{n}"), "parent": parent,
+                "author": { "Account": n }, "height": 90_000 + n, "message": format!("commit {n}") })
+        })
+        .collect();
+    serde_json::json!({ "snapshots": snapshots })
+        .to_string()
+        .into_bytes()
+}
+
+/// Boots onto `/shared` with `snapshots` as the history behind it: the frame
+/// on screen, and the session push the view holds.
+fn connected_with_history(snapshots: &[u8]) -> (Frame, u64) {
     let frame = boot();
     let session_id = request(&frame, "files.props").id;
     let frame = tick_native(vec![item(session_id, &session(true))]);
@@ -601,33 +682,212 @@ fn get_info_walks_the_history_for_the_last_change() {
     let frame = tick_native(vec![answer(ls, &listing())]);
     let home = ls_of(&frame, "/home").0.id;
     let frame = tick_native(vec![answer(home, &homes())]);
-    let snapshots = files_get(&frame, "history").0.id;
-    let frame = tick_native(vec![answer(
-        snapshots,
-        serde_json::json!({ "snapshots": [
-            { "id": "s2", "parent": "s1", "author": { "Account": 4 }, "height": 90_000, "message": "later" },
-            { "id": "s1", "parent": null, "author": { "Account": 9 }, "height": 84_912, "message": "first" },
-        ]})
-        .to_string()
-        .as_bytes(),
-    )]);
+    let history = files_get(&frame, "history").0.id;
+    (tick_native(vec![answer(history, snapshots)]), session_id)
+}
+
+/// Boots onto `/shared` with the two-snapshot history behind it.
+fn connected_with_two_snapshots() -> Frame {
+    connected_with_history(&two_snapshots()).0
+}
+
+/// Answers the walk through [`nine_snapshots`], newest first, each diff with
+/// nothing under `path`: the frame after the last diff the window holds.
+fn walk_nine_touching_nothing(mut frame: Frame, path: &str) -> Frame {
+    for n in (2..=9).rev() {
+        let (walk, params) = files_get(&frame, "diff");
+        assert_eq!(params["to"], format!("s{n}"));
+        assert_eq!(params["prefix"], path);
+        let walk = walk.id;
+        frame = tick_native(vec![answer(
+            walk,
+            serde_json::json!({ "entries": [] }).to_string().as_bytes(),
+        )]);
+    }
+    frame
+}
+
+/// The snapshot that last touched a path is found by diffing each snapshot
+/// against its parent under that prefix, newest first: the newest snapshot
+/// whose diff carries the path is the one Get Info names.
+#[test]
+fn get_info_names_the_snapshot_that_changed_the_path() {
+    let frame = connected_with_two_snapshots();
     let frame = tick_native(press(&frame, "Folder docs"));
     assert!(has_text(&frame, "Looking…"), "{:?}", texts(&frame));
+    assert_eq!(author_row(&frame), "—", "no author named yet");
     let (walk, params) = files_get(&frame, "diff");
     assert_eq!(params["from"], "s1");
     assert_eq!(params["to"], "s2");
     assert_eq!(params["prefix"], "/shared/docs");
     let frame = tick_native(vec![answer(
         walk.id,
-        serde_json::json!({ "entries": [] }).to_string().as_bytes(),
+        serde_json::json!({ "entries": [{ "path": "/shared/docs/plan.md", "kind": "added" }] })
+            .to_string()
+            .as_bytes(),
     )]);
     assert!(
         !has_request(&frame, "rpc.query"),
-        "the first snapshot needs no diff: {:?}",
+        "the walk stops at the snapshot that changed it: {:?}",
         frame.requests
     );
+    assert!(has_text(&frame, "h 90,000 (s2)"), "{:?}", texts(&frame));
+    assert_eq!(author_row(&frame), "acct:4");
+}
+
+/// The first snapshot has no parent to diff against, so the walk asks
+/// whether it HOLDS the path: a path it holds is the first commit's, named
+/// with its author.
+#[test]
+fn get_info_walks_the_history_for_the_last_change() {
+    let frame = connected_with_two_snapshots();
+    let frame = tick_native(press(&frame, "Folder docs"));
+    assert!(has_text(&frame, "Looking…"), "{:?}", texts(&frame));
+    let walk = files_get(&frame, "diff").0.id;
+    let frame = tick_native(vec![answer(
+        walk,
+        serde_json::json!({ "entries": [] }).to_string().as_bytes(),
+    )]);
+    let (probe, params) = files_get(&frame, "stat");
+    assert_eq!(params["path"], "/shared/docs");
+    assert_eq!(
+        params["snapshot"], "s1",
+        "the first snapshot is asked at itself"
+    );
+    let frame = tick_native(vec![answer(probe.id, &stat_entry("/shared/docs"))]);
     assert!(has_text(&frame, "h 84,912 (s1)"), "{:?}", texts(&frame));
     assert!(has_text(&frame, "acct:9"), "{:?}", texts(&frame));
+}
+
+/// A path NO snapshot holds is nobody's change: the first snapshot does not
+/// hold it either, so Get Info says the modification is unknown and names no
+/// author — never the network's first commit and whoever signed it.
+#[test]
+fn get_info_on_a_path_no_snapshot_holds_names_no_snapshot() {
+    let (_frame, held) = connected_with_listing();
+    // a duck:// link onto a path that is not there: the directory refuses,
+    // and the address itself is what the inspector describes
+    let frame = tick_native(vec![item(
+        held.session,
+        &routed_session(
+            true,
+            "duck://testnet-0a1b2c3d/files/shared/nowhere/missing.txt",
+            1,
+        ),
+    )]);
+    let (probe, params) = files_get(&frame, "stat");
+    assert_eq!(params["path"], "/shared/nowhere/missing.txt");
+    assert_eq!(params["snapshot"], "s1");
+    let probe = probe.id;
+    let ls = ls_of(&frame, "/shared/nowhere").0.id;
+    let frame = tick_native(vec![
+        refuse(ls, "files: path not found"),
+        answer(probe, b"null"),
+    ]);
+    assert!(has_text(&frame, "unknown"), "{:?}", texts(&frame));
+    assert!(
+        !has_text(&frame, "h 84,912 (s1)"),
+        "the first snapshot did not modify a path it does not hold: {:?}",
+        texts(&frame)
+    );
+    assert!(
+        !has_text(&frame, "acct:9"),
+        "and nobody authored it: {:?}",
+        texts(&frame)
+    );
+    assert_eq!(
+        author_row(&frame),
+        "—",
+        "no author reads like no size and no object, not as a blank row"
+    );
+}
+
+/// A history deeper than the walk stops it short of the first snapshot, and
+/// "earlier than the last 8 snapshots" is only true of a path that is there.
+/// One stat at the newest snapshot, the head the listing was read at, says
+/// a path the node does not hold is unknown however deep the history goes.
+#[test]
+fn get_info_on_a_path_the_head_does_not_hold_is_unknown_however_deep_the_history() {
+    let (_frame, session_id) = connected_with_history(&nine_snapshots());
+    let frame = tick_native(vec![item(
+        session_id,
+        &routed_session(
+            true,
+            "duck://testnet-0a1b2c3d/files/shared/nowhere/missing.txt",
+            1,
+        ),
+    )]);
+    let ls = ls_of(&frame, "/shared/nowhere").0.id;
+    let frame = walk_nine_touching_nothing(frame, "/shared/nowhere/missing.txt");
+    let probes = files_gets(&frame, "stat");
+    assert_eq!(
+        probes.len(),
+        1,
+        "a walk stopped short of the first snapshot asks once whether the path is there: {:?}",
+        texts(&frame)
+    );
+    let (probe, params) = &probes[0];
+    assert_eq!(params["path"], "/shared/nowhere/missing.txt");
+    assert_eq!(
+        params["snapshot"], "s9",
+        "asked at the head the listing was read at"
+    );
+    let frame = tick_native(vec![
+        refuse(ls, "files: path not found"),
+        answer(probe.id, b"null"),
+    ]);
+    assert!(
+        files_gets(&frame, "stat").is_empty() && files_gets(&frame, "diff").is_empty(),
+        "one stat beyond the walk, and nothing more: {:?}",
+        frame.requests
+    );
+    assert!(has_text(&frame, "unknown"), "{:?}", texts(&frame));
+    assert!(
+        !has_text(&frame, "earlier than the last 8 snapshots"),
+        "a path that is not there was not changed earlier: {:?}",
+        texts(&frame)
+    );
+    assert_eq!(author_row(&frame), "—");
+}
+
+/// A path that IS there and that no snapshot in the window changed was last
+/// changed before the window: Get Info says so, and how far it looked.
+#[test]
+fn get_info_on_a_path_the_window_never_touched_says_earlier_than_it() {
+    let (frame, _) = connected_with_history(&nine_snapshots());
+    let frame = tick_native(press(&frame, "Folder docs"));
+    let frame = walk_nine_touching_nothing(frame, "/shared/docs");
+    let (probe, params) = files_get(&frame, "stat");
+    assert_eq!(params["path"], "/shared/docs");
+    assert_eq!(params["snapshot"], "s9");
+    let frame = tick_native(vec![answer(probe.id, &stat_entry("/shared/docs"))]);
+    assert!(!has_request(&frame, "rpc.query"), "{:?}", frame.requests);
+    assert!(
+        has_text(&frame, "earlier than the last 8 snapshots"),
+        "{:?}",
+        texts(&frame)
+    );
+    assert_eq!(author_row(&frame), "—");
+}
+
+/// A refused stat is the refusal, never "unknown": the node did not say the
+/// path is not there.
+#[test]
+fn a_refused_stat_past_the_walk_reads_as_the_refusal() {
+    let (frame, _) = connected_with_history(&nine_snapshots());
+    let frame = tick_native(press(&frame, "Folder docs"));
+    let frame = walk_nine_touching_nothing(frame, "/shared/docs");
+    let probe = files_get(&frame, "stat").0.id;
+    let frame = tick_native(vec![refuse(probe, "files: busy")]);
+    assert!(
+        has_text(
+            &frame,
+            "Could not read the file's history: files: busy [module]"
+        ),
+        "{:?}",
+        texts(&frame)
+    );
+    assert!(!has_text(&frame, "unknown"), "{:?}", texts(&frame));
 }
 
 /// A name typed into the New folder prompt leaves as a duckfs commit the
@@ -688,7 +948,7 @@ fn a_refused_write_is_shown_in_place_and_keeps_the_draft() {
     // the pane under the backdrop
     let refusal = node_ending(&frame, "/name-prompt/refusal");
     assert!(
-        matches!(&refusal, Node::Text { content, .. } if content == "the local user key is locked"),
+        matches!(&refusal, Node::Text { content, .. } if content == "the local user key is locked [module]"),
         "{refusal:?}"
     );
     assert!(
@@ -713,7 +973,7 @@ fn a_refused_write_is_shown_in_place_and_keeps_the_draft() {
     let frame = tick_native(vec![refuse(submit, "not a member")]);
     let refusal = node_ending(&frame, "/confirm-delete/refusal");
     assert!(
-        matches!(&refusal, Node::Text { content, .. } if content == "not a member"),
+        matches!(&refusal, Node::Text { content, .. } if content == "not a member [module]"),
         "{refusal:?}"
     );
     assert!(
@@ -734,7 +994,7 @@ fn a_choice_survives_a_refusal_and_a_page_not_yet_walked() {
     // a deep link into a directory whose first page does not carry the file
     let frame = tick_native(vec![item(
         held.session,
-        &routed_session(true, "/shared/big/zz.md", 1),
+        &routed_session(true, "duck://testnet-0a1b2c3d/files/shared/big/zz.md", 1),
     )]);
     let ls = ls_of(&frame, "/shared/big").0.id;
     let frame = tick_native(vec![answer(
@@ -764,7 +1024,7 @@ fn a_choice_survives_a_refusal_and_a_page_not_yet_walked() {
     let frame = tick_native(vec![answer(snapshots, &history())]);
     assert!(has_text(
         &frame,
-        "Could not list this directory: files: busy"
+        "Could not list this directory: files: busy [module]"
     ));
     assert!(has_text(&frame, "/shared/big/zz.md"), "{:?}", texts(&frame));
 
@@ -891,14 +1151,21 @@ fn a_folder_deletes_with_everything_in_it() {
 
 /// A listing the node refuses is a STATE the pane draws, with the way back
 /// beside it — never a loading word that stays. The write controls stay
-/// reachable.
+/// reachable. The refusal reads as the module's sentence with its token after
+/// it, the line duckfs prints; a reply the view could not decode is its own
+/// words and carries no token.
 #[test]
 fn a_failed_listing_is_a_plate_with_a_retry() {
     let frame = boot();
     let session_id = request(&frame, "files.props").id;
     let frame = tick_native(vec![item(session_id, &session(true))]);
     let ls = ls_of(&frame, "/shared").0.id;
-    let frame = tick_native(vec![refuse(ls, "files: path not found")]);
+    // the class the files module answers every query refusal under
+    let frame = tick_native(vec![Event::Response {
+        id: ls,
+        result: Err(wire::Refusal::new("files_query", "path not found: /shared")),
+        done: true,
+    }]);
     let home = ls_of(&frame, "/home").0.id;
     let frame = tick_native(vec![answer(home, &homes())]);
     let snapshots = files_get(&frame, "history").0.id;
@@ -906,7 +1173,7 @@ fn a_failed_listing_is_a_plate_with_a_retry() {
     assert!(
         has_text(
             &frame,
-            "Could not list this directory: files: path not found"
+            "Could not list this directory: path not found: /shared [files_query]"
         ),
         "{:?}",
         texts(&frame)
@@ -923,6 +1190,24 @@ fn a_failed_listing_is_a_plate_with_a_retry() {
     assert!(
         has_text(&frame, "Shared"),
         "the sidebar is drawn from its own reads"
+    );
+
+    // an answer that is not the module's reply at all
+    let frame = tick_native(press(&frame, "Try again"));
+    let ls = ls_of(&frame, "/shared").0.id;
+    let frame = tick_native(vec![raw_answer(ls, b"not json")]);
+    let home = ls_of(&frame, "/home").0.id;
+    let frame = tick_native(vec![answer(home, &homes())]);
+    let snapshots = files_get(&frame, "history").0.id;
+    let frame = tick_native(vec![answer(snapshots, &history())]);
+    let undecoded = serde_json::from_slice::<serde_json::Value>(b"not json").unwrap_err();
+    assert!(
+        has_text(
+            &frame,
+            &format!("Could not list this directory: {undecoded}")
+        ),
+        "{:?}",
+        texts(&frame)
     );
 
     let frame = tick_native(press(&frame, "Try again"));
@@ -1090,7 +1375,10 @@ fn a_binary_file_and_a_refused_read_each_say_so_in_words() {
     let _settled = settle_workspace(&frame, "/shared", &listing());
     let frame = tick_native(vec![refuse(head, "not connected to a node")]);
     assert!(
-        has_text(&frame, "Could not read this file: not connected to a node"),
+        has_text(
+            &frame,
+            "Could not read this file: not connected to a node [module]"
+        ),
         "{:?}",
         texts(&frame)
     );
@@ -1526,7 +1814,7 @@ fn a_text_preview_gives_the_native_reader_a_scrollable_height() {
     let (_, held) = connected_with_listing();
     let frame = tick_native(vec![item(
         held.session,
-        &routed_session(true, "/shared/notes.txt", 1),
+        &routed_session(true, "duck://testnet-0a1b2c3d/files/shared/notes.txt", 1),
     )]);
     let head = files_get(&frame, "refs").0.id;
     let frame = tick_native(vec![answer(head, &refs())]);
@@ -1576,7 +1864,10 @@ fn a_drop_builds_its_commit_in_the_guest_and_keeps_the_base_read_before_device_i
     let release = request(&frame, "fs.release");
     assert_eq!(release.payload, b"grant");
     let frame = tick_native(vec![raw_answer(release.id, b"")]);
-    assert!(has_text(&frame, "path changed since base snapshot"));
+    assert!(has_text(
+        &frame,
+        "path changed since base snapshot [module]"
+    ));
 }
 
 #[test]
@@ -1584,7 +1875,7 @@ fn a_drop_into_a_namespace_root_refuses_before_reading_device_bytes() {
     let (_, held) = connected_with_listing();
     let frame = tick_native(vec![item(
         held.session,
-        &routed_session(true, "/README.md", 1),
+        &routed_session(true, "duck://testnet-0a1b2c3d/files/README.md", 1),
     )]);
     let _ = settle_workspace(&frame, "/", &empty_listing());
     let frame = tick_native(vec![item(
@@ -1595,4 +1886,48 @@ fn a_drop_into_a_namespace_root_refuses_before_reading_device_bytes() {
     let release = request(&frame, "fs.release");
     let frame = tick_native(vec![raw_answer(release.id, b"")]);
     assert!(has_text(&frame, "path is outside /home and /shared"));
+}
+
+/// A listing and a preview still being read are the kit's loading state —
+/// a titled block in the pane — never a lone caption in its corner.
+#[test]
+fn a_pending_listing_and_preview_draw_the_kits_loading_state() {
+    let frame = boot();
+    let session_id = request(&frame, "files.props").id;
+    let frame = tick_native(vec![item(session_id, &session(true))]);
+    assert!(
+        matches!(node_ending(&frame, "/pending/title"), Node::Text { .. }),
+        "{:?}",
+        keys(&frame)
+    );
+    let (frame, _held) = connected_with_listing();
+    let frame = tick_native(press(&frame, "File README.md"));
+    assert!(
+        matches!(node_ending(&frame, "/reading/title"), Node::Text { .. }),
+        "{:?}",
+        keys(&frame)
+    );
+}
+
+/// A refused history read is a danger notice in the sidebar, the same
+/// plate every other failure wears.
+#[test]
+fn a_refused_history_read_is_a_notice() {
+    let frame = boot();
+    let session_id = request(&frame, "files.props").id;
+    let frame = tick_native(vec![item(session_id, &session(true))]);
+    let ls = ls_of(&frame, "/shared").0.id;
+    let frame = tick_native(vec![answer(ls, &listing())]);
+    let home = ls_of(&frame, "/home").0.id;
+    let frame = tick_native(vec![answer(home, &homes())]);
+    let history = files_get(&frame, "history").0.id;
+    let frame = tick_native(vec![refuse(history, "index offline")]);
+    assert!(
+        matches!(
+            node_ending(&frame, "/history-error-box"),
+            Node::Container { .. }
+        ),
+        "{:?}",
+        texts(&frame)
+    );
 }

@@ -98,9 +98,10 @@ impl FilesView {
             Listing::Pending => native::sized(
                 native::container(
                     format!("{key}/pending-box"),
-                    kit::inset(
-                        native::caption(format!("{key}/pending"), "Loading…"),
-                        wire::Edges::all(12.),
+                    native::empty_state(
+                        format!("{key}/pending"),
+                        "Loading…",
+                        "This folder's entries arrive next.",
                     ),
                 ),
                 Some(wire::Length::Fill),
@@ -126,7 +127,7 @@ impl FilesView {
                     native::empty_state(
                         format!("{key}/empty"),
                         "Empty folder",
-                        "Nothing is committed under this path. New folder and New file add to it; a file dropped on the window uploads here.",
+                        "This folder is empty. Choose New folder or New file, or drop a file here to upload it.",
                     ),
                 ),
                 Some(wire::Length::Fill),
@@ -165,9 +166,9 @@ impl FilesView {
             border: None,
             spacing: None,
             padding: Some(wire::Edges {
-                top: 4.,
+                top: native::spacing::XXS as f32,
                 right: 2.,
-                bottom: 6.,
+                bottom: native::spacing::XS as f32,
                 left: 2.,
             }),
             width: Some(wire::Length::Fill),
@@ -203,9 +204,9 @@ impl FilesView {
                                         ),
                                     ],
                                 ),
-                                8.,
+                                native::spacing::SM as f32,
                             ),
-                            wire::Edges::all(10.),
+                            wire::Edges::all(native::spacing::MD as f32),
                         ),
                     ],
                 ),
@@ -255,22 +256,31 @@ impl FilesView {
             KIND_WIDTH,
             wire::AlignX::Left,
         ));
-        let face = native::spaced(native::centered_row(format!("{key}/cells"), cells), 8.);
+        let face = native::spaced(
+            native::centered_row(format!("{key}/cells"), cells),
+            native::spacing::SM as f32,
+        );
         let mut button = native::list_row(
             format!("{key}/select"),
             face,
             chosen,
             Some(slots::message(Message::Select(entry.path.clone()))),
         );
+        let name = match entry.is_dir() {
+            true => format!("Folder {}", entry.name),
+            false => format!("File {}", entry.name),
+        };
         if let wire::Node::Button { label, height, .. } = &mut button {
             *height = Some(wire::Length::Fixed(ROW_HEIGHT));
-            *label = Some(match entry.is_dir() {
-                true => format!("Folder {}", entry.name),
-                false => format!("File {}", entry.name),
-            });
+            *label = Some(name.clone());
         }
         wire::Node::MouseArea {
             key,
+            role: Some(wire::Role::Row),
+            label: Some(name),
+            expanded: None,
+            selected: Some(chosen),
+            checked: None,
             on_press: None,
             on_release: None,
             on_double_click: Some(slots::message(Message::Open(entry.path.clone()))),

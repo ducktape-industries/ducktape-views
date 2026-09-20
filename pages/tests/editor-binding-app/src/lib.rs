@@ -13,15 +13,15 @@ pub mod document_sync;
 pub mod editor;
 #[path = "../../../src/editor_binding.rs"]
 pub mod editor_binding;
-#[path = "../../../src/rich_document.rs"]
-pub mod rich_document;
-#[path = "../../../src/editor_format.rs"]
-pub mod format;
 #[path = "../../../src/editor_menu.rs"]
 pub mod editor_menu;
 #[path = "../../../src/editor_view.rs"]
 pub mod editor_view;
 pub mod fixture_source;
+#[path = "../../../src/editor_format.rs"]
+pub mod format;
+#[path = "../../../src/rich_document.rs"]
+pub mod rich_document;
 pub mod fixture {
     use crate::fixture_source::DocumentSource;
     use ducktape_view_guest::wire;

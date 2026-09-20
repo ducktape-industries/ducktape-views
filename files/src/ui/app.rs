@@ -44,11 +44,14 @@ impl Preview {
 }
 
 /// The snapshot that last touched the chosen path, once the walk answers.
+/// `rooted` says a walk that found nothing has nothing earlier to name: it
+/// reached the first snapshot, or the head does not hold the path.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Provenance {
     pub path: String,
     pub snapshot: FsSnapshot,
     pub searched: i64,
+    pub rooted: bool,
     pub answered: bool,
     pub error: String,
 }
@@ -72,7 +75,7 @@ pub struct FilesView {
     pub(crate) account: String,
     /// moves when the session comes up and after every write: every read restarts
     pub(crate) generation: i64,
-    /// the last `duck://files/...` push this view has landed on
+    /// the last `duck://<chain>/files/<path…>` push this view has landed on
     pub(crate) route_serial: i64,
     // ---- where the reader stands ----
     pub(crate) nav: Navigation,
@@ -374,7 +377,7 @@ impl FilesView {
     pub(crate) const PREFERRED_WINDOW_SIZE: &'static str = "none";
     /// This state's layout, digested — `snapshot_schema` holds it here.
     pub(crate) const SNAPSHOT_SCHEMA: &'static str =
-        "90dd66a8f7aae8d943bfe74f65272b4f658d0db93169eddf128d6fe260c23969";
+        "3639db4b1965424044c39d8b5b983d1f6b31298d4cccbe4b12a1e7a9ab475aa7";
 }
 
 impl FilesView {
@@ -454,6 +457,13 @@ fn gated<M: 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The tree the view paints, every control in it named and placed.
+    fn view(app: &FilesView) -> wire::Node {
+        let root = app.view();
+        assert_eq!(wire::accessibility_faults(&root), Vec::new());
+        root
+    }
 
     #[test]
     fn resizing_and_toggling_rails_preserve_the_filename_column() {
@@ -590,7 +600,7 @@ mod tests {
             .stack_size(4 * 1024 * 1024)
             .spawn(|| {
                 let (app, _) = FilesView::boot();
-                let _ = app.view();
+                let _ = view(&app);
             })
             .unwrap()
             .join()

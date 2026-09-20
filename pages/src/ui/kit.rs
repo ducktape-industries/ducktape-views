@@ -14,6 +14,15 @@ fn named(mut node: Node, name: &str) -> Node {
     node
 }
 
+/// A button that opens and closes what it names, saying which it is now.
+fn disclosure(mut node: Node, open: bool) -> Node {
+    let Node::Button { expanded, .. } = &mut node else {
+        unreachable!("disclosure")
+    };
+    *expanded = Some(open);
+    node
+}
+
 fn action(
     key: impl Into<String>,
     label: impl Into<String>,
@@ -71,10 +80,10 @@ fn fill(node: Node) -> Node {
 fn header_bar(key: &str, left: f32, children: impl IntoIterator<Item = Node>) -> Node {
     kit::sized(
         kit::padded(
-            kit::spaced(kit::centered_row(key, children), 8.),
+            kit::spaced(kit::centered_row(key, children), kit::spacing::SM as f32),
             wire::Edges {
                 top: 0.,
-                right: 8.,
+                right: kit::spacing::SM as f32,
                 bottom: 0.,
                 left,
             },
@@ -102,7 +111,7 @@ fn menu_item(key: String, glyph: &str, label: &str, message: Message, disabled: 
                 kit::nowrap(kit::text(format!("{key}/label"), label)),
             ],
         ),
-        8.,
+        kit::spacing::SM as f32,
     );
     let mut button = kit::button_child(
         key,
@@ -120,10 +129,10 @@ fn menu_item(key: String, glyph: &str, label: &str, message: Message, disabled: 
         *accessible = Some(label.into());
         *width = Some(Length::Fill);
         *padding = Some(wire::Edges {
-            top: 4.,
-            right: 8.,
-            bottom: 4.,
-            left: 8.,
+            top: kit::spacing::XXS as f32,
+            right: kit::spacing::SM as f32,
+            bottom: kit::spacing::XXS as f32,
+            left: kit::spacing::SM as f32,
         });
     }
     button
@@ -170,6 +179,7 @@ fn modal(key: &str, child: Node, width: f32) -> Node {
 
 fn overlay(
     key: &str,
+    label: &str,
     card: Node,
     dismiss: Message,
     align_x: wire::AlignX,
@@ -177,7 +187,8 @@ fn overlay(
 ) -> Node {
     Node::Overlay {
         key: key.into(),
-        padding: 24.,
+        label: Some(label.into()),
+        padding: kit::spacing::XL as f32,
         backdrop: wire::Rgba([0.; 4]),
         align_x,
         align_y,
@@ -234,14 +245,15 @@ impl PagesView {
                                 ),
                             ],
                         ),
-                        8.,
+                        kit::spacing::SM as f32,
                     ),
                 ],
             ),
-            12.,
+            kit::spacing::LG as f32,
         );
         overlay(
             "pages/delete",
+            "Delete page",
             modal("pages/delete/card", contents, 440.),
             Message::DisarmPageDelete,
             wire::AlignX::Center,

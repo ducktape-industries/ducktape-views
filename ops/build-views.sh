@@ -3,6 +3,14 @@
 # encoded flags preserve paths containing spaces and replace ambient Rust flags.
 set -euo pipefail
 repo=$(pwd -P)
+# The accessibility gate: no component is built while a view draws a tree
+# assistive technology cannot read. Every view's tests assert that
+# `view_wire::accessibility_faults` is empty over EVERY tree they render, in
+# the helper each frame passes through, so the gate is the view tests
+# themselves, unfiltered: a name filter would skip a view that forgot the
+# name. A native test run, before the rust flags below and never for the wasm
+# target, so it does not move a component's bytes.
+"${CARGO:-cargo}" test --locked --manifest-path "$repo/Cargo.toml" --workspace
 cargo_home=$(cd "${CARGO_HOME:-$HOME/.cargo}" && pwd -P)
 # A toolchain installed without rustup (the agent guest's /opt/rust) has no
 # rustup home; its sysroot is the prefix rust's own paths live under.
@@ -47,7 +55,12 @@ packages=()
 while (($#)); do
   case "$1" in
     -p) packages+=("$2"); shift 2 ;;
-    *) echo "expected -p <view-package>, got $1" >&2; exit 1 ;;
+    # every workspace member whose package name ends in `-view`, sorted
+    --all)
+      names=$(sed -n 's/^name = "\(.*-view\)"$/\1/p' "$repo"/*/Cargo.toml | sort)
+      for name in $names; do packages+=("$name"); done
+      shift ;;
+    *) echo "expected -p <view-package> or --all, got $1" >&2; exit 1 ;;
   esac
 done
 (("${#packages[@]}")) || { echo "no view packages selected" >&2; exit 1; }
@@ -60,4 +73,16 @@ for package in "${packages[@]}"; do
   library=${package//-/_}
   wasm-tools component new "$view_target/wasm32-unknown-unknown/release/$library.wasm" \
     -o "$repo/target/views/$library.wasm"
+done
+wasm-tools --version > "$repo/target/views/WASM_TOOLS_VERSION"
+# Each view again as the ONE unit a node's registry takes: `<id>/view.wasm`
+# beside that view's `assets/`, when it has any — the shape core's founding set
+# and `modules.update` read. Rebuilt whole, so a removed asset does not linger.
+for package in "${packages[@]}"; do
+  id=${package%-view}
+  unit="$repo/target/views/registry/$id"
+  rm -rf "$unit"
+  mkdir -p "$unit"
+  cp "$repo/target/views/${package//-/_}.wasm" "$unit/view.wasm"
+  [ ! -d "$repo/$id/assets" ] || cp -R "$repo/$id/assets" "$unit/assets"
 done

@@ -33,7 +33,7 @@ const LEVELS: [(&str, &str, &str); 6] = [
 /// The densities this screen is built on: a reading, a list row, a module
 /// row and a console line.
 const READING_ROW: f32 = 24.;
-const LIST_ROW: f32 = 28.;
+const LIST_ROW: f32 = kit::height::CONTROL as f32;
 const MODULE_ROW: f32 = 32.;
 
 // Every cell of a reading, a list row and a module row is ONE LINE. Those
@@ -127,7 +127,7 @@ impl NodeView {
         }
         kit::spaced(
             kit::column("node/tabs", [tabs, kit::divider("node/tabs/rule")]),
-            6.,
+            kit::spacing::XS as f32,
         )
     }
 
@@ -202,13 +202,17 @@ impl NodeView {
         let identity_rows = [
             Self::copyable("node/key", "Node key", &facts.node_key),
             Self::copyable("node/root", "Root hash", &facts.node_root_hash),
-            Self::copyable("node/directory", "Data directory", &self.node_data_dir),
+            Self::copyable(
+                "node/directory",
+                "Local app data directory",
+                &self.node_data_dir,
+            ),
             Self::reading(
                 "node/version",
                 "Version",
                 mono("node/version/value", &facts.node_version),
             ),
-            kit::gap(4.),
+            kit::gap(kit::spacing::XXS as f32),
             kit::row(
                 "node/identity-actions",
                 [kit::sized(
@@ -251,12 +255,18 @@ impl NodeView {
             let Node::Button { label, .. } = &mut copy else {
                 unreachable!("a copy control is a button")
             };
-            *label = Some(format!("Copy peer key {}", host::short_label(&peer.key)));
+            *label = Some(format!(
+                "Copy peer key {}",
+                ducktape_view_guest::kit::short_id(&peer.key, 8)
+            ));
             peers.push(Self::list_row(
                 &key,
                 [
                     kit::sized(
-                        mono(format!("{key}/key"), host::short_label(&peer.key)),
+                        mono(
+                            format!("{key}/key"),
+                            ducktape_view_guest::kit::short_id(&peer.key, 8),
+                        ),
                         Some(Length::Fill),
                         None,
                     ),
@@ -283,6 +293,22 @@ impl NodeView {
             "Chain",
             chain,
         )];
+        // the two faults a node that stopped following can be in: it is
+        // behind a tip it heard, or the poll that would tell it so has gone
+        // quiet. Both can be true at once, and they are different sentences.
+        for (key, sentence) in [
+            ("node/behind", host::behind_line(facts, self.wall_now)),
+            ("node/unheard", host::unheard_line(facts, self.wall_now)),
+        ] {
+            if sentence.is_empty() {
+                continue;
+            }
+            sections.push(kit::notice(
+                key,
+                kit::wrapping(kit::text(format!("{key}/text"), sentence)),
+                Tone::Warning,
+            ));
+        }
         if !facts.node_sync_last_error.is_empty() {
             sections.push(kit::notice(
                 "node/sync-error",
@@ -356,7 +382,7 @@ impl NodeView {
                         "Node administration",
                         text("node/admin/value", admin),
                     ),
-                    kit::gap(4.),
+                    kit::gap(kit::spacing::XXS as f32),
                     kit::wrapping(kit::secondary("node/standing-description", description)),
                     kit::wrapping(kit::caption(
                         "node/quorum-note",
@@ -454,8 +480,14 @@ impl NodeView {
                 kit::centered_row(
                     &key,
                     [
-                        kit::nowrap(kit::strong(format!("{key}/name"), &module.id)),
-                        kit::spacer(),
+                        // the name takes the row's rest and truncates there; a
+                        // label at its own width never shrinks and pushed the
+                        // badges out
+                        kit::sized(
+                            kit::nowrap(kit::strong(format!("{key}/name"), &module.id)),
+                            Some(Length::Fill),
+                            None,
+                        ),
                         kit::badge(
                             format!("{key}/category"),
                             host::capitalized(&module.category),
@@ -482,38 +514,44 @@ impl NodeView {
             if module.pending_hash.is_empty() {
                 continue;
             }
-            content.push(Self::reading(
-                &format!("{key}/pending"),
-                "Pending code",
-                kit::centered_row(
-                    format!("{key}/pending/row"),
-                    [
-                        mono(
-                            format!("{key}/pending/value"),
-                            host::short_digest(&module.pending_hash),
-                        ),
-                        caption(
-                            format!("{key}/activation"),
-                            format!(
-                                "activates at {}",
-                                host::height_label_short(module.activation_height)
+            // a digest, two captions and a copy do not fit one 24px line in
+            // a narrow pane: this reading has no fixed height, and its parts
+            // wrap onto further lines instead of running past the edge
+            content.push(kit::aligned(
+                kit::kv(
+                    format!("{key}/pending"),
+                    "Pending code",
+                    kit::wrapped_row(
+                        format!("{key}/pending/row"),
+                        [
+                            mono(
+                                format!("{key}/pending/value"),
+                                ducktape_view_guest::kit::short_id(&module.pending_hash, 12),
                             ),
-                        ),
-                        caption(
-                            format!("{key}/readiness"),
-                            format!("{} signalled ready", module.readiness),
-                        ),
-                        kit::button(
-                            format!("{key}/pending/copy"),
-                            "Copy pending code",
-                            Some(slots::message(Message::CopyToClipboard(
-                                module.pending_hash.clone(),
-                                "Pending code copied".into(),
-                            ))),
-                            ButtonPreset::Subtle,
-                        ),
-                    ],
+                            caption(
+                                format!("{key}/activation"),
+                                format!(
+                                    "activates at {}",
+                                    host::height_label_short(module.activation_height)
+                                ),
+                            ),
+                            caption(
+                                format!("{key}/readiness"),
+                                format!("{} signalled ready", module.readiness),
+                            ),
+                            kit::button(
+                                format!("{key}/pending/copy"),
+                                "Copy pending code",
+                                Some(slots::message(Message::CopyToClipboard(
+                                    module.pending_hash.clone(),
+                                    "Pending code copied".into(),
+                                ))),
+                                ButtonPreset::Subtle,
+                            ),
+                        ],
+                    ),
                 ),
+                AlignX::Center,
             ));
         }
         if content.is_empty() {
@@ -582,9 +620,18 @@ impl NodeView {
             ),
         ];
         retune.extend(retune_note.map(kit::wrapping));
+        // both control rows wrap: the chips, a filter and the retune do
+        // not fit one line of a narrow pane, and a row that cannot wrap ran
+        // its controls past the edge
         let mut content = vec![
-            kit::centered_row("node/filters", [self.level_chips(), filter]),
-            kit::centered_row("node/retune", retune),
+            kit::wrapped_row(
+                "node/filters",
+                [
+                    self.level_chips(),
+                    kit::sized(filter, Some(Length::Fixed(240.)), None),
+                ],
+            ),
+            kit::wrapped_row("node/retune", retune),
         ];
         let visible =
             host::visible_log(&self.log_lines, &self.node_log_filter, &self.node_log_level);
@@ -627,14 +674,14 @@ impl NodeView {
                         ),
                     ],
                 ),
-                8.,
+                kit::spacing::SM as f32,
             )
         });
         let mut log = kit::scroll(
             "node/logs",
             kit::padded(
                 kit::spaced(kit::column("node/log-lines", rows), 2.),
-                wire::Edges::all(8.),
+                wire::Edges::all(kit::spacing::SM as f32),
             ),
         );
         if let Node::Scroll {
@@ -658,7 +705,10 @@ impl NodeView {
         }
         content.push(log);
         kit::sized(
-            kit::spaced(kit::column("node/activity", content), 8.),
+            kit::spaced(
+                kit::column("node/activity", content),
+                kit::spacing::SM as f32,
+            ),
             Some(Length::Fill),
             Some(Length::Fill),
         )
@@ -696,13 +746,21 @@ impl NodeView {
                 )
             }),
         );
-        kit::sized(chips, Some(Length::Shrink), None)
+        let mut chips = kit::sized(chips, Some(Length::Shrink), None);
+        let Node::Linear { wrap, .. } = &mut chips else {
+            unreachable!("a chip row is a row")
+        };
+        *wrap = Some(wire::Wrap {
+            spacing: None,
+            align: None,
+        });
+        chips
     }
 
     fn section(key: &str, title_key: &str, title: &str, content: Node) -> Node {
         kit::spaced(
             kit::column(key, [kit::heading(title_key, title), content]),
-            8.,
+            kit::spacing::SM as f32,
         )
     }
 
@@ -712,7 +770,13 @@ impl NodeView {
     }
 
     /// One reading: a fixed-width label and its value, on one 24px line.
+    /// A text value takes the row's rest and truncates there: a label at
+    /// its own width never shrinks, so a long sync line ran past the card.
     fn reading(key: &str, label: &str, value: Node) -> Node {
+        let value = match value {
+            Node::Text { .. } => kit::sized(value, Some(Length::Fill), None),
+            other => other,
+        };
         kit::sized(
             kit::aligned(kit::kv(key, label, value), AlignX::Center),
             Some(Length::Fill),
@@ -757,7 +821,12 @@ impl NodeView {
 
     /// A digest reading: the head of it on the row, all of it on the copy.
     fn digest(key: &str, label: &str, value: &str) -> Node {
-        Self::copyable_showing(key, label, value, &host::short_digest(value))
+        Self::copyable_showing(
+            key,
+            label,
+            value,
+            &ducktape_view_guest::kit::short_id(value, 12),
+        )
     }
 
     /// A reading the reader can take with them: the value, and a ghost copy

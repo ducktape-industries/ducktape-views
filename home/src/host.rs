@@ -11,12 +11,15 @@
 //! against `chat` for the rooms and against `runs` for the recent agent
 //! runs, and `files.get` for the recent duckfs snapshots — each re-read on
 //! every `rpc.live` hit for its own plane. A card's door out is
-//! `home.open_link` carrying a `duck://` address the shell's link plane
+//! `host.open_link` carrying a `duck://` address the shell's link plane
 //! routes; the clipboard is `home.copy`. This view has no core module: no
 //! op is ever addressed to it, and it submits nothing.
 
 use std::collections::BTreeMap;
 
+use duck_address::chat::MessageAddress;
+use duck_address::runs::RunAddress;
+use duck_address::{Address, ChainId, Refused};
 use ducktape_view_guest::host;
 use futures::{Stream, StreamExt, stream};
 use serde::{Deserialize, Serialize};
@@ -122,9 +125,13 @@ async fn view(target: &str, query: serde_json::Value) -> Result<serde_json::Valu
 }
 
 async fn files_get(lane: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
-    let reply = ask("rpc.query", &serde_json::json!({
-        "target": "files", "query": {lane: params}
-    })).await?;
+    let reply = ask(
+        "rpc.query",
+        &serde_json::json!({
+            "target": "files", "query": {lane: params}
+        }),
+    )
+    .await?;
     let value = reply.get(lane).cloned().ok_or("unexpected Files reply")?;
     match lane {
         "history" => Ok(serde_json::json!({"snapshots": value})),
@@ -330,6 +337,8 @@ fn sync_label(phase: &str, applied: i64, target: i64) -> String {
 pub struct PeerRow {
     pub key: String,
     pub role: String,
+    /// this node holds a link to the peer (`connected`); false says only
+    /// that no link is held, never that the peer is down
     pub live: bool,
 }
 
@@ -408,12 +417,13 @@ async fn load_blocks() -> BlocksItem {
     }
 }
 
-/// The block rows that carried operations, newest first as the node lists
-/// them. The endpoint is not uniformly filtered: a follower's boundary
-/// marker and an idle block come back with no ops, and neither is a block
-/// a dashboard has anything to say about.
+/// The newest [`BLOCK_ROWS`] block rows that carried operations, newest
+/// first. The node lists its window oldest-first, so the order is the
+/// fold's own, by height. The endpoint is not uniformly filtered: a
+/// follower's boundary marker and an idle block come back with no ops, and
+/// neither is a block a dashboard has anything to say about.
 pub fn fold_blocks(reply: &serde_json::Value) -> Vec<BlockRow> {
-    reply
+    let mut rows: Vec<BlockRow> = reply
         .as_array()
         .cloned()
         .unwrap_or_default()
@@ -426,8 +436,10 @@ pub fn fold_blocks(reply: &serde_json::Value) -> Vec<BlockRow> {
                 op_count: count_i64(ops),
             })
         })
-        .take(BLOCK_ROWS)
-        .collect()
+        .collect();
+    rows.sort_by_key(|row| std::cmp::Reverse(row.height));
+    rows.truncate(BLOCK_ROWS);
+    rows
 }
 
 // ---------- the roster ----------
@@ -835,24 +847,36 @@ pub fn copy(text: &str, label: &str) -> bool {
     true
 }
 
-/// `duck://channel/<id>?net=…` — the room's address on this chain.
+/// A room's address on this chain, or "" when there is none to give.
 pub fn duck_channel_link(channel: &str, chain_id: &str) -> String {
-    format!("duck://channel/{channel}{}", net_query(chain_id))
+    minted(chain_id, |chain| {
+        MessageAddress {
+            channel: channel.to_owned(),
+            seq: None,
+        }
+        .address(chain)
+    })
 }
 
-/// `duck://run/<dispatch_id>?net=…` — the run's address on this chain.
+/// A run by its dispatch id, or "" when there is no address to give.
 pub fn duck_run_link(dispatch_id: &str, chain_id: &str) -> String {
-    format!("duck://run/{dispatch_id}{}", net_query(chain_id))
+    minted(chain_id, |chain| {
+        RunAddress {
+            digest: dispatch_id.to_owned(),
+        }
+        .address(chain)
+    })
 }
 
-/// The `?net=` a produced `duck://` link carries: the chain id's hash half
-/// (the part after its `#`), or nothing when the chain is unknown.
-fn net_query(chain_id: &str) -> String {
-    let digest = chain_id.rsplit_once('#').map(|(_, hex)| hex).unwrap_or("");
-    match digest.is_empty() {
-        true => String::new(),
-        false => format!("?net={digest}"),
-    }
+/// `address` on `chain` (`<label>#<salt>`) as a `duck://` link, or "" when
+/// there is none to give: no chain known, or a tail its module refuses.
+fn minted(chain: &str, address: impl FnOnce(ChainId) -> Result<Address, Refused>) -> String {
+    chain
+        .parse()
+        .ok()
+        .and_then(|chain| address(chain).ok())
+        .map(|address| address.to_string())
+        .unwrap_or_default()
 }
 
 // ---------- the layout ----------

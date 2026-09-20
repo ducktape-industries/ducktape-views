@@ -57,8 +57,24 @@ fn the_node_card_reads_consensus_checkpoint_and_the_module_set() {
     assert!(resident.modules.is_empty());
 }
 
+/// The card holds the NEWEST op-carrying blocks, newest first, whatever
+/// order the node lists them in: `GET /v1/blocks` answers oldest-first, and
+/// taking its first rows showed the oldest of the window.
+#[test]
+fn recent_blocks_are_the_newest_whatever_the_order() {
+    let rows: Vec<serde_json::Value> = (1..=12)
+        .map(|height| serde_json::json!({ "height": height, "hash": "aa", "ops": [{}] }))
+        .collect();
+    let newest: Vec<i64> = (5..=12).rev().collect();
+    for listed in [rows.clone(), rows.into_iter().rev().collect()] {
+        let blocks = fold_blocks(&serde_json::Value::Array(listed));
+        let heights: Vec<i64> = blocks.iter().map(|b| b.height).collect();
+        assert_eq!(heights, newest);
+    }
+}
+
 /// Peers read connected first; blocks keep only the rows that carried
-/// operations, in the node's own newest-first order.
+/// operations.
 #[test]
 fn peers_lead_with_the_connected_and_blocks_drop_the_idle() {
     let peers = fold_peers(&serde_json::json!({ "peers": [
@@ -175,10 +191,15 @@ fn snapshots_runs_and_proposals_fold_their_rows() {
 }
 
 #[test]
-fn links_carry_the_chain_digest_and_never_the_whole_id() {
+fn links_carry_the_chain_in_their_authority_and_none_without_one() {
     assert_eq!(
         duck_channel_link("general", "dev#a1b2c3d4"),
-        "duck://channel/general?net=a1b2c3d4"
+        "duck://dev-a1b2c3d4/chat/general"
     );
-    assert_eq!(duck_run_link("abc", ""), "duck://run/abc");
+    let digest = "ab".repeat(32);
+    assert_eq!(
+        duck_run_link(&digest, "dev#a1b2c3d4"),
+        format!("duck://dev-a1b2c3d4/runs/{digest}")
+    );
+    assert_eq!(duck_run_link(&digest, ""), "");
 }

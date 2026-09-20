@@ -17,7 +17,12 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 
+use duck_address::chat::MessageAddress;
+use duck_address::identity::AccountAddress;
+use duck_address::runs::RunAddress;
+use duck_address::{Address, ChainId, Refused};
 use ducktape_view_guest::host;
+use files_wire::FileAddress;
 use futures::{FutureExt, Stream, StreamExt, stream};
 use serde::{Deserialize, Serialize};
 
@@ -93,7 +98,7 @@ pub struct ChatMember {
 #[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
 pub struct ChatSpan {
     pub mention: String,
-    pub mention_link: String,
+    pub mention_account: String,
     pub link_text: String,
     pub link: String,
     pub bold_italic: String,
@@ -116,7 +121,7 @@ pub struct ChatBlock {
 
 /// Where a send puts a message's files; a paragraph that is one link into
 /// it reads as a file card, not a line of text.
-pub const ATTACHMENTS_PREFIX: &str = "duck://files/shared/attachments/";
+pub const ATTACHMENTS_DIR: &str = "/shared/attachments/";
 
 /// The host picture slot this view draws into.
 pub const PICTURE_SURFACE: &str = "chat";
@@ -145,11 +150,13 @@ pub fn is_picture(name: &str) -> bool {
     )
 }
 
-/// The duckfs path behind an attachment link: the scheme and host dropped,
-/// the query too.
+/// The absolute duckfs path a `duck://<chain>/files/…` link names, or ""
+/// when the link names no file.
 pub fn attachment_file_path(link: &str) -> String {
-    let path = link.strip_prefix("duck://files").unwrap_or(link);
-    path.split('?').next().unwrap_or_default().to_owned()
+    Address::parse(link)
+        .and_then(|address| FileAddress::try_from(&address))
+        .map(|file| format!("/{}", file.path.join("/")))
+        .unwrap_or_default()
 }
 
 /// Every picture attachment across the timeline and the thread, once each,
@@ -515,6 +522,9 @@ pub struct Session {
     pub endpoint: String,
     pub network_name: String,
     pub network_chain_id: String,
+    /// this view's own network, `<label>#<salt>`, what its links carry
+    #[serde(default)]
+    pub chain: String,
     pub status: String,
     pub block_height: i64,
     /// the reader's own rendered handle (`acct:7` / `user:<hex>`) and signing
@@ -705,8 +715,10 @@ impl Names {
             true => key_hex.to_owned(),
             false => format!("user:{key_hex}"),
         };
-        self.name_of_handle(&handle)
-            .map_or_else(|| short_label(key_hex), str::to_owned)
+        self.name_of_handle(&handle).map_or_else(
+            || ducktape_view_guest::kit::short_id(key_hex, 8),
+            str::to_owned,
+        )
     }
 
     /// The account a signing key holds, if the directory knows one.
@@ -2142,7 +2154,8 @@ fn attachment_block(kind: &str, spans: &[ChatSpan]) -> Option<ChatBlock> {
     let [only] = spans else {
         return None;
     };
-    let is_file = kind == "paragraph" && only.link.starts_with(ATTACHMENTS_PREFIX);
+    let is_file =
+        kind == "paragraph" && attachment_file_path(&only.link).starts_with(ATTACHMENTS_DIR);
     if !is_file {
         return None;
     }
@@ -2183,7 +2196,7 @@ fn run_spans(runs: &[serde_json::Value], names: &Names) -> Vec<ChatSpan> {
             _ => None,
         });
         let mention = marks.iter().find_map(|mark| match tagged(mark) {
-            ("mention", party) => Some(mention_link(party)),
+            ("mention", party) => Some(mention_account(party)),
             _ => None,
         });
         let bold = marks.iter().any(|mark| mark.as_str() == Some("bold"));
@@ -2196,7 +2209,7 @@ fn run_spans(runs: &[serde_json::Value], names: &Names) -> Vec<ChatSpan> {
             }
             (None, Some(link), _, _) => {
                 rendered.mention = text;
-                rendered.mention_link = link;
+                rendered.mention_account = link;
             }
             (None, None, true, true) => rendered.bold_italic = text,
             (None, None, true, false) => rendered.bold = text,
@@ -2208,13 +2221,23 @@ fn run_spans(runs: &[serde_json::Value], names: &Names) -> Vec<ChatSpan> {
     out
 }
 
-/// `duck://account/<n>` — the address a mention of an account opens (the DM
+/// The account a mention names, in decimal: what its span hands back when
+/// pressed, and `account_link` turns into the address the app opens (the DM
 /// with that account). A mention naming a bare key addresses no account the
-/// app can open, so it carries no link and draws as a plate alone.
-fn mention_link(party: &serde_json::Value) -> String {
+/// app can open, so it carries none and draws as a plate alone.
+fn mention_account(party: &serde_json::Value) -> String {
     match tagged(party) {
-        ("account", number) => format!("duck://account/{}", number.as_u64().unwrap_or(0)),
+        ("account", number) => number.as_u64().unwrap_or(0).to_string(),
         _ => String::new(),
+    }
+}
+
+/// `duck://<chain>/identity/<account>` for a pressed mention; any other link
+/// is already an address and passes through. Nothing without a chain.
+pub fn pressed_link(link: String, chain_id: &str) -> String {
+    match link.parse::<u64>() {
+        Ok(account) => minted(chain_id, |chain| AccountAddress { account }.address(chain)),
+        Err(_) => link,
     }
 }
 
@@ -2228,7 +2251,7 @@ pub fn author_display(author: &str, names: &Names) -> String {
 
 fn author_name(author: &str) -> String {
     match author.split_once(':') {
-        Some(("user", id)) => format!("user {}", short_label(id)),
+        Some(("user", id)) => format!("user {}", ducktape_view_guest::kit::short_id(id, 8)),
         Some(("acct", account)) => format!("account {account}"),
         Some(("module", id)) => id.to_owned(),
         _ => "system".into(),
@@ -2262,14 +2285,6 @@ fn avatar_kind(author: &str, names: &Names) -> &'static str {
         },
         Some(_) | None => "agent",
     }
-}
-
-fn short_label(id: &str) -> String {
-    let mut label: String = id.chars().take(8).collect();
-    if id.chars().count() > 8 {
-        label.push('…');
-    }
-    label
 }
 
 fn json_bytes(value: &serde_json::Value) -> Vec<u8> {
@@ -2478,7 +2493,10 @@ pub fn send_join_voice(id: &str) -> bool {
 
 /// A pressed link, handed to the kernel's ONE open door.
 pub fn send_open_link(url: &str) -> bool {
-    ducktape_view_guest::host::open_link(url);
+    // a mention pressed with no chain has no address to open
+    if !url.is_empty() {
+        ducktape_view_guest::host::open_link(url);
+    }
     true
 }
 
@@ -2676,6 +2694,14 @@ pub fn post_gate(archived: bool, members_only: bool, members: &[ChatMember], me:
     String::new()
 }
 
+/// Whether the reader's handle holds an account on this network. Every write
+/// in chat is authored by an account, so a signing key that holds none
+/// (`user:<hex>`) may read the room and nothing more — the handle the session
+/// renders is the whole of what that takes to know.
+pub fn holds_account(me: &str) -> bool {
+    me.starts_with("acct:")
+}
+
 /// THE BANNER A REFUSED REACTION LEAVES BEHIND — and, on a live channel, the
 /// banner already on screen, returned untouched. Opening the picker is a READ:
 /// it must not wipe a failed send the reader has not seen yet.
@@ -2850,24 +2876,46 @@ pub fn height_label_short(height: i64) -> String {
     height_label(height)
 }
 
-fn net_query(chain_id: &str) -> String {
-    let digest = chain_id.rsplit_once('#').map(|(_, hex)| hex).unwrap_or("");
-    match digest.is_empty() {
-        true => String::new(),
-        false => format!("?net={digest}"),
+/// This view's own network: the `chain` prop, else the `network_chain_id`
+/// an app that predates it pushes.
+pub fn own_chain(session: &Session) -> String {
+    match session.chain.is_empty() {
+        true => session.network_chain_id.clone(),
+        false => session.chain.clone(),
     }
 }
 
+/// `address` on `chain` (`<label>#<salt>`) as a `duck://` link, or "" when
+/// there is none to give: no chain known, or a tail its module refuses.
+fn minted(chain: &str, address: impl FnOnce(ChainId) -> Result<Address, Refused>) -> String {
+    chain
+        .parse()
+        .ok()
+        .and_then(|chain| address(chain).ok())
+        .map(|address| address.to_string())
+        .unwrap_or_default()
+}
+
 pub fn duck_run_link(dispatch_id: String, chain_id: String) -> String {
-    format!("duck://run/{dispatch_id}{}", net_query(&chain_id))
+    minted(&chain_id, |chain| {
+        RunAddress {
+            digest: dispatch_id,
+        }
+        .address(chain)
+    })
 }
 
 pub fn duck_channel_link(channel: String, chain_id: String) -> String {
-    format!("duck://channel/{channel}{}", net_query(&chain_id))
+    minted(&chain_id, |chain| {
+        MessageAddress { channel, seq: None }.address(chain)
+    })
 }
 
 pub fn duck_channel_message_link(channel: String, seq: i64, chain_id: String) -> String {
-    format!("duck://channel/{channel}{}#{seq}", net_query(&chain_id))
+    let seq = u64::try_from(seq).ok();
+    minted(&chain_id, |chain| {
+        MessageAddress { channel, seq }.address(chain)
+    })
 }
 
 pub fn mmss(seconds: i64) -> String {
@@ -2957,7 +3005,11 @@ mod tests {
         for reason in UNREADABLE {
             let item = folded(host::Refusal::new(reason, "words a view must not read"));
             assert!(item.unavailable, "{reason} is an entitlement");
-            assert!(item.error.is_empty(), "{reason} drew an error: {:?}", item.error);
+            assert!(
+                item.error.is_empty(),
+                "{reason} drew an error: {:?}",
+                item.error
+            );
         }
         // the same prose the old substring list keyed on, under a token that
         // says the stream broke: now an error, as it should always have been.
@@ -2978,17 +3030,17 @@ mod tests {
     #[test]
     fn a_lone_link_into_the_attachments_root_is_a_file_card() {
         let names = Names::default();
-        let file = serde_json::json!({"paragraph": [{"text": "deck.pdf", "marks": [{"link": "duck://files/shared/attachments/message-1-2/deck.pdf"}]}]});
+        let file = serde_json::json!({"paragraph": [{"text": "deck.pdf", "marks": [{"link": "duck://testnet-0a1b2c3d/files/shared/attachments/message-1-2/deck.pdf"}]}]});
         let block = block_view(&file, &names);
         assert_eq!(block.kind, "attachment");
         assert_eq!(block.text, "deck.pdf");
         assert_eq!(
             block.link,
-            "duck://files/shared/attachments/message-1-2/deck.pdf"
+            "duck://testnet-0a1b2c3d/files/shared/attachments/message-1-2/deck.pdf"
         );
         let web = serde_json::json!({"paragraph": [{"text": "site", "marks": [{"link": "https://example.com"}]}]});
         assert_eq!(block_view(&web, &names).kind, "paragraph");
-        let worded = serde_json::json!({"paragraph": [{"text": "see ", "marks": []}, {"text": "deck.pdf", "marks": [{"link": "duck://files/shared/attachments/message-1-2/deck.pdf"}]}]});
+        let worded = serde_json::json!({"paragraph": [{"text": "see ", "marks": []}, {"text": "deck.pdf", "marks": [{"link": "duck://testnet-0a1b2c3d/files/shared/attachments/message-1-2/deck.pdf"}]}]});
         assert_eq!(block_view(&worded, &names).kind, "paragraph");
     }
 
@@ -3033,13 +3085,13 @@ mod tests {
     fn picture_attachments_are_found_once_and_fit_the_box() {
         assert!(is_picture("Cover.PNG") && is_picture("a.jpeg") && !is_picture("deck.pdf"));
         assert_eq!(
-            attachment_file_path("duck://files/shared/attachments/a-1/x.png?net=abcd1234"),
+            attachment_file_path("duck://testnet-0a1b2c3d/files/shared/attachments/a-1/x.png"),
             "/shared/attachments/a-1/x.png"
         );
         let block = |name: &str| ChatBlock {
             kind: "attachment".into(),
             text: name.into(),
-            link: format!("duck://files/shared/attachments/a-1/{name}"),
+            link: format!("duck://testnet-0a1b2c3d/files/shared/attachments/a-1/{name}"),
             ..ChatBlock::default()
         };
         let message = |blocks: Vec<ChatBlock>| ChatMessage {
@@ -3053,8 +3105,8 @@ mod tests {
         assert_eq!(
             links,
             vec![
-                "duck://files/shared/attachments/a-1/x.png".to_owned(),
-                "duck://files/shared/attachments/a-1/y.gif".to_owned()
+                "duck://testnet-0a1b2c3d/files/shared/attachments/a-1/x.png".to_owned(),
+                "duck://testnet-0a1b2c3d/files/shared/attachments/a-1/y.gif".to_owned()
             ]
         );
         assert_eq!(picture_box(1200, 600), (360., 180.));

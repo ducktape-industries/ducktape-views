@@ -25,7 +25,7 @@ pub(crate) fn selection(text: &str, cursor: wire::EditorCursor) -> Range<usize> 
 fn markers(tag: &str) -> Option<(&'static str, &'static str)> {
     match tag {
         "bold" => Some(("**", "**")),
-        "italic" => Some(("_", "_")),
+        "italic" => Some(("*", "*")),
         "code" => Some(("```\n", "\n```")),
         "quote" => Some(("> ", "")),
         _ => None,
@@ -192,10 +192,31 @@ impl Draft {
                 let caret = range.start + text.len();
                 apply(state, range, text, caret)
             }
+            // With something selected all three remove it, mention tokens
+            // and all — `expanded` has already widened the range. With
+            // nothing selected only Backspace may go back to the host:
+            // every app installed today knows Enter, Tab and Backspace as
+            // native defaults and stops the view on any other key handed
+            // back, so cut answers nothing and delete does the work here.
+            "cut" | "backspace" | "delete" if range.is_empty() => match tag {
+                "backspace" => wire::EditorDecision::DefaultEditorAction,
+                "delete" => match state.text.get(range.start..).and_then(|ahead| {
+                    unicode_segmentation::UnicodeSegmentation::graphemes(ahead, true).next()
+                }) {
+                    // the grapheme ahead of the caret, whole; a delete INTO a
+                    // mention never gets here — `expanded` swallowed the
+                    // token and left a range to remove
+                    Some(ahead) => apply(
+                        state,
+                        range.start..range.start + ahead.len(),
+                        String::new(),
+                        range.start,
+                    ),
+                    None => wire::EditorDecision::Noop,
+                },
+                _ => wire::EditorDecision::Noop,
+            },
             "cut" | "backspace" | "delete" => {
-                if range.is_empty() {
-                    return wire::EditorDecision::DefaultEditorAction;
-                }
                 let caret = range.start;
                 apply(state, range, String::new(), caret)
             }
@@ -206,6 +227,14 @@ impl Draft {
                     history: wire::EditorHistoryEffect::Native,
                 }
             }
+            // the arrows and Escape when no menu is open: the host's caret
+            // to move, the host's Escape to answer, nothing here to say
+            "ignore" => wire::EditorDecision::Noop,
+            // Of the claimed keys only Tab reaches here, and Tab is a native
+            // default every app knows. Enter leaves as "send" or a mention,
+            // Backspace/Delete and the chords are all named above, and the
+            // arrows and Escape carry "ignore". Keep it that way: a claimed
+            // key that falls through here stops the view on installed apps.
             _ => wire::EditorDecision::DefaultEditorAction,
         }
     }

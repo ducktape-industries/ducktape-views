@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ChatSpan {
     pub mention: String,
-    pub mention_link: String,
+    pub mention_account: String,
     pub link_text: String,
     pub link: String,
     pub bold_italic: String,
@@ -265,7 +265,7 @@ impl Names {
         };
         self.of_handle(&handle)
             .map(str::to_owned)
-            .unwrap_or_else(|| short_label(key_hex))
+            .unwrap_or_else(|| ducktape_view_guest::kit::short_id(key_hex, 8))
     }
 }
 
@@ -295,7 +295,7 @@ pub fn author_display(author: &str, names: &Names) -> String {
 /// frame: a user is named by the shortened key.
 fn author_name(author: &str) -> String {
     match author.split_once(':') {
-        Some(("user", id)) => format!("user {}", short_label(id)),
+        Some(("user", id)) => format!("user {}", ducktape_view_guest::kit::short_id(id, 8)),
         Some(("acct", account)) => format!("account {account}"),
         Some(("module", id)) => id.to_owned(),
         Some(_) | None => "system".to_owned(),
@@ -351,21 +351,14 @@ fn mention_label(party: &Party, names: &Names) -> String {
     }
 }
 
-/// `duck://account/<n>` — the address a mention of an account opens. A
+/// The account a mention names, in decimal: what its span hands back when
+/// pressed, and `host::pressed_link` turns into the address the app opens. A
 /// mention that names a bare key addresses no account the app can open.
-fn mention_link(party: &Party) -> String {
+fn mention_account(party: &Party) -> String {
     match party {
-        Party::Account(account) => format!("duck://account/{account}"),
+        Party::Account(account) => account.to_string(),
         Party::Key(_) | Party::Module(_) | Party::System => String::new(),
     }
-}
-
-pub fn short_label(id: &str) -> String {
-    let mut label: String = id.chars().take(8).collect();
-    if id.chars().count() > 8 {
-        label.push('…');
-    }
-    label
 }
 
 pub fn hex_encode(bytes: &[u8]) -> String {
@@ -514,7 +507,7 @@ fn span_arm(span: &Span) -> SpanArm {
         Mark::Bold | Mark::Italic | Mark::Link(_) => None,
     });
     if let Some(party) = mention {
-        return SpanArm::Mention(mention_link(party));
+        return SpanArm::Mention(mention_account(party));
     }
     let bold = span.marks.iter().any(|mark| matches!(mark, Mark::Bold));
     let italic = span.marks.iter().any(|mark| matches!(mark, Mark::Italic));
@@ -540,7 +533,7 @@ fn run_spans(spans: &[Span]) -> Vec<ChatSpan> {
             }
             SpanArm::Mention(link) => {
                 rendered.mention = span.text.clone();
-                rendered.mention_link = link;
+                rendered.mention_account = link;
             }
             SpanArm::BoldItalic => rendered.bold_italic = span.text.clone(),
             SpanArm::Bold => rendered.bold = span.text.clone(),

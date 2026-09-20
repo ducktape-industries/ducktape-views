@@ -47,7 +47,11 @@ impl InboxView {
                 Tone::Danger,
             ));
         }
-        body.push(self.list());
+        // a failed read with nothing on screen is the notice alone: an empty
+        // state under it would say "Nothing new" about a queue never read
+        if self.error.is_empty() || !self.rows.is_empty() {
+            body.push(self.list());
+        }
         kit::page("inbox/content", body)
     }
 
@@ -74,12 +78,19 @@ impl InboxView {
             can_mark.then(|| slots::message(Message::MarkAllRead)),
             ButtonPreset::Secondary,
         ));
-        kit::spaced(kit::centered_row("inbox/head", cells), 8.)
+        kit::spaced(
+            kit::centered_row("inbox/head", cells),
+            kit::spacing::SM as f32,
+        )
     }
 
     fn list(&self) -> Node {
         if self.reading {
-            return kit::secondary("inbox/reading", "Reading your notifications…");
+            return kit::empty_state(
+                "inbox/reading",
+                "Reading your notifications…",
+                "The newest arrive first.",
+            );
         }
         if self.rows.is_empty() {
             return kit::empty_state(
@@ -92,7 +103,10 @@ impl InboxView {
             "inbox/list",
             kit::column(
                 "inbox/rows",
-                self.rows.iter().map(|row| self.row(row)).collect::<Vec<_>>(),
+                self.rows
+                    .iter()
+                    .map(|row| self.row(row))
+                    .collect::<Vec<_>>(),
             ),
         )
     }
@@ -111,11 +125,11 @@ impl InboxView {
             kit::column(
                 key.clone(),
                 [
-                    kit::spaced(kit::centered_row(format!("{key}/line"), line), 8.),
-                    kit::nowrap(kit::secondary(
-                        format!("{key}/detail"),
-                        row.detail.clone(),
-                    )),
+                    kit::spaced(
+                        kit::centered_row(format!("{key}/line"), line),
+                        kit::spacing::SM as f32,
+                    ),
+                    kit::nowrap(kit::secondary(format!("{key}/detail"), row.detail.clone())),
                 ],
             ),
             2.,
@@ -123,6 +137,10 @@ impl InboxView {
         // A row with no address opens nothing — the source is gone, or this
         // app has no tab for it — and says so by not being pressable.
         let door = (!row.link.is_empty()).then(|| slots::message(Message::Open(row.link.clone())));
-        kit::list_row(format!("{key}/press"), entry, false, door)
+        let mut press = kit::list_row(format!("{key}/press"), entry, false, door);
+        if let Node::Button { label, .. } = &mut press {
+            *label = Some(row.title.clone());
+        }
+        press
     }
 }

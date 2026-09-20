@@ -161,7 +161,7 @@ fn a_slash_opens_on_new_page_and_the_pick_makes_one_where_it_was_typed() {
     // In a document that already holds a picture and a page — the shapes the
     // dialect spells without a marker — the pick still lands on its own line.
     let live = "Handbook\nEverything a new member needs.\n/\n\
-                ![duck](duck://files/shared/a/duck.png)\n>> Onboarding";
+                ![duck](duck://testnet-0a1b2c3d/files/shared/a/duck.png)\n>> Onboarding";
     let typed = doc(live, 2, 1);
     let mut state = menu::Menu::default();
     state.after_edit(&doc(&live.replace("\n/\n", "\n\n"), 2, 0), None);
@@ -557,7 +557,9 @@ fn ask_ai_lists_the_agents_and_addresses_the_comment_to_the_one_picked() {
     nobody.format(&selection);
     let (_, nobody) = nobody.pick(&selection, "more");
     let (_, picker) = nobody.pick(&selection, "ai");
-    let view = picker.current(&selection).expect("the picker opens on its one row");
+    let view = picker
+        .current(&selection)
+        .expect("the picker opens on its one row");
     assert_eq!(tags(&view), vec!["none"]);
     assert_eq!(view.items[0].1, "No active agents");
     let intent = picker.intent(&selection, "none");

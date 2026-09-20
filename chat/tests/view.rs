@@ -4,10 +4,10 @@
 //! rename leaves as `op.submit` carrying chat's own message. Composers use
 //! the shared editor transaction contract.
 
-use chat_view::host::{Channel, Session};
 use chat_view::boot_native;
+use chat_view::host::{Channel, Session};
 use ducktape_view_guest::testing::{answer, has_text, item, press, refuse, texts, type_into};
-use ducktape_view_guest::wire::{Frame, Node, Request, SurfaceValue};
+use ducktape_view_guest::wire::{ButtonContent, Frame, Node, Request, Role, SurfaceValue};
 
 /// A native tick of this screen walks a deep tree; libtest's 2 MiB thread is
 /// at the edge of it in a debug build, so every test runs on its own roomier
@@ -21,8 +21,16 @@ fn on_a_deep_stack(test: fn()) {
         .expect("the test thread finishes");
 }
 
+/// Every frame a test renders is one assistive technology can name.
+fn nameable(frame: Frame) -> Frame {
+    if let Some(root) = &frame.root {
+        assert_eq!(ducktape_view_guest::wire::accessibility_faults(root), []);
+    }
+    frame
+}
+
 fn tick_native(input: Vec<ducktape_view_guest::wire::Event>) -> Frame {
-    let mut frame = chat_view::tick_native(input);
+    let mut frame = nameable(chat_view::tick_native(input));
     let sidebar = frame
         .requests
         .iter()
@@ -54,7 +62,7 @@ fn tick_native(input: Vec<ducktape_view_guest::wire::Event>) -> Frame {
             &serde_json::json!({"channels":{"channels":rows,"has_more":false,"next_after":null}}),
         )
         .unwrap();
-        let mut next = chat_view::tick_native(vec![answer(request.id, &bytes)]);
+        let mut next = nameable(chat_view::tick_native(vec![answer(request.id, &bytes)]));
         next.requests
             .extend(frame.requests.drain(..).filter(|old| old.id != request.id));
         return next;
@@ -67,7 +75,7 @@ fn session(connected: bool) -> Session {
         connected,
         endpoint: "http://127.0.0.1:1".into(),
         network_name: "testnet".into(),
-        network_chain_id: "testnet#abcd".into(),
+        network_chain_id: "testnet#0a1b2c3d".into(),
         status: "Live".into(),
         block_height: 84_912,
         me: "acct:7".into(),
@@ -522,6 +530,28 @@ fn choosing_a_room_uses_the_common_link_intent() {
     });
 }
 
+/// A key on no account cannot hold a DM. Pressing a person says so, and the
+/// session the app pushes on the next block does not take the sentence away.
+#[test]
+fn a_dm_a_key_with_no_account_cannot_open_says_why_across_blocks() {
+    on_a_deep_stack(|| {
+        let mut seated = session(true);
+        seated.me = "user:cc".into();
+        seated.me_key = "cc".into();
+        let (frame, _, props) = connected_room_with(&seated, roots());
+        let frame = tick_native(press(&frame, "Ada Lovelace"));
+        let refusal = "Couldn’t open this conversation: this key is on no account — a DM needs one";
+        assert!(has_text(&frame, refusal), "{:?}", texts(&frame));
+        seated.block_height += 1;
+        let frame = tick_native(vec![item(props, &encoded(&seated))]);
+        assert!(
+            has_text(&frame, refusal),
+            "the next block's session took the refusal away: {:?}",
+            texts(&frame)
+        );
+    });
+}
+
 /// A reaction leaves as `op.submit` carrying chat's own message, and the chip
 /// is on screen before the block lands.
 #[test]
@@ -638,10 +668,21 @@ fn composer_commit(
     text: Option<&str>,
     action: Option<&str>,
 ) -> Vec<ducktape_view_guest::wire::Event> {
+    composer_commit_at(frame, "/composer/editor", text, action)
+}
+
+/// The same, aimed at a named field — the timeline's composer and a thread's
+/// are two drafts, and a transaction meant for one must be addressed to it.
+fn composer_commit_at(
+    frame: &Frame,
+    suffix: &str,
+    text: Option<&str>,
+    action: Option<&str>,
+) -> Vec<ducktape_view_guest::wire::Event> {
     use ducktape_view_guest::wire;
     let Node::Editor {
         document, options, ..
-    } = node_ending(frame, "/composer/editor")
+    } = node_ending(frame, suffix)
     else {
         panic!("composer editor")
     };
@@ -841,7 +882,9 @@ fn attachment_upload_uses_file_grants_and_posts_a_guest_built_link() {
         let write = request(&frame, "op.submit");
         let payload = String::from_utf8(write.payload.clone()).unwrap();
         assert!(
-            payload.contains("duck://files/shared/attachments/attachment-1/hello.txt"),
+            payload.contains(
+                "duck://testnet-0a1b2c3d/files/shared/attachments/attachment-1/hello.txt"
+            ),
             "{payload}"
         );
     });
@@ -1117,7 +1160,9 @@ fn a_refused_output_stream_falls_back_to_committed_progress() {
 
         let shown = texts(&frame);
         assert!(
-            shown.iter().any(|text| text == "Working · 3 actions recorded"),
+            shown
+                .iter()
+                .any(|text| text == "Working · 3 actions recorded"),
             "the refused card does not show committed progress: {shown:?}"
         );
         assert!(
@@ -1329,16 +1374,19 @@ fn a_landing_short_of_the_rooms_head_offers_the_jump() {
 fn visible_room_navigation_requests_a_fresh_sidebar_without_a_live_event() {
     on_a_deep_stack(|| {
         boot_native();
-        let boot = chat_view::tick_native(Vec::new());
+        let boot = nameable(chat_view::tick_native(Vec::new()));
         let props_id = request(&boot, "chat.props").id;
         let visible_id = request(&boot, "host.visible").id;
-        let _ = chat_view::tick_native(vec![
+        nameable(chat_view::tick_native(vec![
             item(props_id, &encoded(&session(true))),
             item(visible_id, b"true"),
-        ]);
+        ]));
         let mut next = session(true);
         next.active_channel = "channel-b".into();
-        let frame = chat_view::tick_native(vec![item(props_id, &encoded(&next))]);
+        let frame = nameable(chat_view::tick_native(vec![item(
+            props_id,
+            &encoded(&next),
+        )]));
         assert!(
             frame
                 .requests
@@ -1394,7 +1442,7 @@ fn a_dm_click_creates_the_room_through_common_requests_before_navigation() {
         let navigate = request(&frame, "host.open_link");
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&navigate.payload).unwrap(),
-            serde_json::json!({"link":format!("duck://channel/{channel}")})
+            serde_json::json!({"link":format!("duck://testnet-0a1b2c3d/chat/{channel}")})
         );
     });
 }
@@ -1545,9 +1593,44 @@ fn creating_a_text_channel_uses_common_requests_and_waits_before_navigation() {
         let navigate = request(&frame, "host.open_link");
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&navigate.payload).unwrap(),
-            serde_json::json!({"link":"duck://channel/channel-new"})
+            serde_json::json!({"link":"duck://testnet-0a1b2c3d/chat/channel-new"})
         );
         assert!(!has_text(&frame, "Create a channel"));
+    });
+}
+
+#[test]
+fn reopening_after_channel_creation_session_update_resets_the_form() {
+    on_a_deep_stack(|| {
+        let (frame, _, props) = connected_room_with(&session(true), roots());
+        let frame = tick_native(press(&frame, "New channel"));
+        let frame = tick_native(type_into(&frame, "Channel name", "Design"));
+        let frame = tick_native(press(&frame, "Members only: Off"));
+        let frame = tick_native(press(&frame, "Create channel"));
+        let frame = tick_native(vec![answer(request(&frame, "host.id").id, b"channel-new")]);
+        let frame = tick_native(vec![answer(
+            request(&frame, "rpc.view").id,
+            br#"{"channel":null}"#,
+        )]);
+        let submit = request(&frame, "op.submit").id;
+        let mut next = session(true);
+        next.active_channel = "channel-new".into();
+        let frame = tick_native(vec![item(props, &encoded(&next))]);
+        assert!(!has_text(&frame, "Create a channel"));
+        let frame = tick_native(vec![answer(
+            view_asking(&frame, "channel").id,
+            br#"{"channel":{"id":"channel-new","name":"Design","created_at":1,"post_policy":"members_only","owner":"acct:7","archived":false,"hooks":[],"huddle":[],"head_seq":0}}"#,
+        )]);
+        let frame = tick_native(vec![answer(request(&frame, "rpc.view").id, &roots())]);
+        let frame = tick_native(vec![answer(request(&frame, "rpc.view").id, &members())]);
+        let frame = tick_native(press(&frame, "New channel"));
+        assert!(has_text(&frame, "Channel name"));
+        assert!(has_text(&frame, "Voice room: Off"));
+        assert!(has_text(&frame, "Members only: Off"));
+        let frame = tick_native(vec![answer(submit, b"42")]);
+        assert!(has_text(&frame, "Channel name"));
+        assert!(has_text(&frame, "Voice room: Off"));
+        assert!(has_text(&frame, "Members only: Off"));
     });
 }
 
@@ -1655,4 +1738,517 @@ fn a_lost_creation_reply_is_reconciled_before_retrying_the_write() {
         assert!(kinds(&frame).contains(&"host.open_link"));
         assert!(!has_text(&frame, "Create a channel"));
     });
+}
+
+/// Boots on a network that has no channel at all: the session names no room
+/// and the sidebar read comes back empty. Not `seated_view`, which hands the
+/// view three channels.
+fn empty_network() -> Frame {
+    empty_network_as(session(true))
+}
+
+/// The same, with the reader spelled out — the network is empty for a key
+/// that holds no account too, and the way on is not the same for her.
+fn empty_network_as(seated: Session) -> Frame {
+    boot_native();
+    let frame = nameable(chat_view::tick_native(Vec::new()));
+    let props = request(&frame, "chat.props").id;
+    let mut empty = seated;
+    empty.active_channel = String::new();
+    let frame = nameable(chat_view::tick_native(vec![item(props, &encoded(&empty))]));
+    let sidebar = view_asking(&frame, "channels").id;
+    let none = serde_json::to_vec(
+        &serde_json::json!({"channels": {"channels": [], "has_more": false, "next_after": null}}),
+    )
+    .expect("the empty sidebar encodes");
+    nameable(chat_view::tick_native(vec![answer(sidebar, &none)]))
+}
+
+/// A network with no channel says so and offers the one way on. What it must
+/// not do is what it did: draw a nameless `#` room, tell the reader this is the
+/// very beginning of nothing, and hang a composer of dead buttons under it.
+#[test]
+fn a_network_with_no_channel_says_so_and_offers_the_way_to_make_one() {
+    on_a_deep_stack(|| {
+        let frame = empty_network();
+        assert!(has_text(&frame, "No channels yet"), "{:?}", texts(&frame));
+        for lie in ["This is the very beginning of #", "#", "Send"] {
+            assert!(
+                !has_text(&frame, lie),
+                "`{lie}` with no channel behind it: {:?}",
+                texts(&frame)
+            );
+        }
+        // the action opens the very form the sidebar's New channel opens
+        let frame = nameable(chat_view::tick_native(press(&frame, "Create a channel")));
+        assert!(
+            has_text(&frame, "Voice room: Off"),
+            "the create form did not open: {:?}",
+            texts(&frame)
+        );
+    });
+}
+
+/// A control by the name a reader hears. `press` panics on a dead button, so a
+/// button that should be dead has to be read off the tree instead of pressed.
+fn labelled<'a>(frame: &'a Frame, label: &str) -> &'a Node {
+    fn walk<'a>(node: &'a Node, label: &str) -> Option<&'a Node> {
+        // the name a reader hears is the accessible one where a control has
+        // it, and the text on the face where it does not
+        let named = match node {
+            Node::Button {
+                label: Some(name), ..
+            } => name == label,
+            Node::Button { content, .. } => {
+                matches!(content, ButtonContent::Label(name) if name == label)
+            }
+            _ => false,
+        };
+        if named {
+            return Some(node);
+        }
+        node.children().iter().find_map(|node| walk(node, label))
+    }
+    walk(frame.root.as_ref().expect("a tree"), label).expect("a named control")
+}
+
+/// A KEY THAT HOLDS NO ACCOUNT IS TOLD THE STEP, NOT REFUSED AFTER THE PRESS.
+/// The header offered "Start a huddle" to a signing key with no account and the
+/// host turned it away; the composer and the reactions were live in the same
+/// way. One thing gates all of them now, it says what to do, and an account
+/// made on a later block opens the room's writes without a re-read.
+#[test]
+fn a_key_with_no_account_reads_the_room_and_every_write_says_what_to_do() {
+    on_a_deep_stack(|| {
+        let notice = "To send messages, create or join an account in Settings → Account. You can read this channel without an account.";
+        let mut keyed = session(true);
+        keyed.me = "user:cc".into();
+        keyed.me_key = "cc".into();
+        let (frame, _, props) = connected_room_with(&keyed, roots());
+
+        let Node::Button {
+            on_press,
+            description,
+            ..
+        } = labelled(&frame, "Start a huddle")
+        else {
+            panic!("the header lost its huddle button")
+        };
+        assert!(
+            on_press.is_none(),
+            "the huddle still presses into the host's refusal"
+        );
+        assert_eq!(
+            description.as_deref(),
+            Some("Create an account to start a huddle"),
+            "the disabled huddle gives no reason"
+        );
+
+        // the composer is not there to be pressed at all: the reason stands
+        // where it was, and the same one thing holds the reactions
+        assert!(has_text(&frame, notice), "{:?}", texts(&frame));
+        let Node::Button { on_press, .. } = labelled(&frame, "React with 👍") else {
+            panic!("a message lost its reaction control")
+        };
+        assert!(
+            on_press.is_none(),
+            "a reaction is still offered to a key that cannot sign one"
+        );
+
+        // an account of her own, on the next block, and the room is writable —
+        // nothing re-reads it to find that out
+        keyed.me = "acct:7".into();
+        keyed.block_height += 1;
+        let frame = tick_native(vec![item(props, &encoded(&keyed))]);
+        assert!(
+            !has_text(&frame, notice),
+            "the account is made and the room still says it is not: {:?}",
+            texts(&frame)
+        );
+        let frame = tick_native(press(&frame, "React with 👍"));
+        let op: serde_json::Value =
+            serde_json::from_slice(&request(&frame, "op.submit").payload).expect("an op decodes");
+        assert_eq!(op["payload"]["add_reaction"]["emoji"], "👍");
+    });
+}
+
+#[test]
+fn message_rows_name_and_reveal_actions_on_keyboard_activation() {
+    on_a_deep_stack(|| {
+        let mut root = row(1, "first light");
+        root["reply_count"] = 1.into();
+        let window = serde_json::json!({
+            "roots": {"roots": [root.clone(), row(2, "second wind")], "has_more": false}
+        })
+        .to_string()
+        .into_bytes();
+        let (frame, _, _) = connected_room_with(&session(true), window.clone());
+        let Node::Button {
+            on_press: Some(open),
+            ..
+        } = labelled(&frame, "Open thread")
+        else {
+            panic!("the timeline message lost its Open thread control");
+        };
+        let frame = tick_native(vec![ducktape_view_guest::wire::Event::Message(*open)]);
+        let read = request(&frame, "rpc.view").id;
+        let page = serde_json::json!({
+            "thread": {
+                "root": root,
+                "replies": [reply(3, "thread reply", 1)],
+                "has_more": false,
+                "next_reply_seq": null
+            }
+        });
+        let frame = tick_native(vec![answer(read, page.to_string().as_bytes())]);
+
+        for suffix in ["/Timeline/2/contents/select", "/Thread/3/contents/select"] {
+            let Node::MouseArea {
+                role: Some(Role::Row),
+                label: Some(label),
+                on_press: Some(_),
+                ..
+            } = node_ending(&frame, suffix)
+            else {
+                panic!("the message row is not a named Row control: {suffix}");
+            };
+            assert!(
+                label.starts_with("Select message, shows its actions: "),
+                "unexpected message row name: {label}"
+            );
+        }
+
+        let Node::MouseArea {
+            on_press: Some(press),
+            ..
+        } = node_ending(&frame, "/Timeline/2/contents/select")
+        else {
+            panic!("the timeline message lost its PressMessage");
+        };
+        let frame = tick_native(vec![ducktape_view_guest::wire::Event::Message(*press)]);
+        let Node::Hover { open, .. } = node_ending(&frame, "/message/2/hover") else {
+            panic!("the timeline message lost its Hover");
+        };
+        assert!(*open, "ordinary timeline activation did not open its Hover");
+        for (suffix, expected) in [
+            ("/message/2/thread", "Open thread"),
+            ("/message/2/thumbs-up", "React with 👍"),
+            ("/message/2/react", "Manage reactions"),
+            ("/message/2/more", "More message actions"),
+        ] {
+            let Node::Button {
+                label: Some(label), ..
+            } = node_ending(&frame, suffix)
+            else {
+                panic!("missing timeline action {expected:?}");
+            };
+            assert_eq!(label, expected);
+        }
+
+        let Node::MouseArea {
+            on_press: Some(press),
+            ..
+        } = node_ending(&frame, "/Thread/3/contents/select")
+        else {
+            panic!("the thread message lost its PressMessage");
+        };
+        let frame = tick_native(vec![ducktape_view_guest::wire::Event::Message(*press)]);
+        let Node::Hover { open, .. } = node_ending(&frame, "/message/3/hover") else {
+            panic!("the thread message lost its Hover");
+        };
+        assert!(*open, "ordinary thread activation did not open its Hover");
+        for (suffix, expected) in [
+            ("/message/3/thumbs-up", "React with 👍"),
+            ("/message/3/react", "Manage reactions"),
+            ("/message/3/more", "More message actions"),
+        ] {
+            let Node::Button {
+                label: Some(label), ..
+            } = node_ending(&frame, suffix)
+            else {
+                panic!("missing thread action {expected:?}");
+            };
+            assert_eq!(label, expected);
+        }
+
+        let mut shifted = session(true);
+        shifted.shift_held = true;
+        let (frame, _, _) = connected_room_with(&shifted, window);
+        let Node::MouseArea {
+            on_press: Some(press),
+            ..
+        } = node_ending(&frame, "/Timeline/2/contents/select")
+        else {
+            panic!("the shifted timeline message lost its PressMessage");
+        };
+        let frame = tick_native(vec![ducktape_view_guest::wire::Event::Message(*press)]);
+        assert!(has_text(&frame, "1 message selected"));
+        let Node::Hover { open, .. } = node_ending(&frame, "/message/2/hover") else {
+            panic!("the shifted timeline message lost its Hover");
+        };
+        assert!(!*open, "Shift activation selected the toolbar");
+
+        let Node::MouseArea {
+            on_press: Some(press),
+            ..
+        } = node_ending(&frame, "/Timeline/1/contents/select")
+        else {
+            panic!("the second shifted timeline message lost its PressMessage");
+        };
+        let frame = tick_native(vec![ducktape_view_guest::wire::Event::Message(*press)]);
+        assert!(has_text(&frame, "2 messages selected"));
+        let Node::Hover { open, .. } = node_ending(&frame, "/message/1/hover") else {
+            panic!("the second shifted timeline message lost its Hover");
+        };
+        assert!(!*open, "Shift activation selected the second toolbar");
+    });
+}
+
+/// A control by that name as the gate leaves it: whether it presses, and the
+/// reason it names when it does not.
+fn gate<'a>(frame: &'a Frame, name: &str) -> (bool, Option<&'a str>) {
+    let Node::Button {
+        on_press,
+        description,
+        ..
+    } = labelled(frame, name)
+    else {
+        panic!("`{name}` is not a button")
+    };
+    (on_press.is_some(), description.as_deref())
+}
+
+/// CREATING A CHANNEL IS A WRITE, AND IT IS GATED WHERE THE OTHER WRITES ARE.
+/// The stranger's default path — "New channel", or "Create a channel" in an
+/// empty network — opened a form whose submit was live and whose write the
+/// host then refused. The same predicate holds the door and the submit now,
+/// and each says the step out of it.
+#[test]
+fn a_key_with_no_account_is_not_offered_a_channel_it_cannot_create() {
+    on_a_deep_stack(|| {
+        let reason = Some("Create an account to create a channel");
+        let mut keyed = session(true);
+        keyed.me = "user:cc".into();
+        keyed.me_key = "cc".into();
+        let (frame, _, props) = connected_room_with(&keyed, roots());
+        assert_eq!(
+            gate(&frame, "New channel"),
+            (false, reason),
+            "the sidebar still opens a form the host would refuse"
+        );
+
+        // an account of her own, on the next block, and the door opens on a
+        // form whose submit is live — nothing re-reads the room to find out
+        keyed.me = "acct:1".into();
+        keyed.block_height += 1;
+        let frame = tick_native(vec![item(props, &encoded(&keyed))]);
+        assert_eq!(
+            gate(&frame, "New channel"),
+            (true, None),
+            "the account is made and the sidebar still refuses"
+        );
+        let frame = tick_native(press(&frame, "New channel"));
+        assert_eq!(
+            gate(&frame, "Create channel"),
+            (true, None),
+            "the form an account opened cannot be submitted"
+        );
+
+        // the other door is the empty network's, and it is the same gate: the
+        // plate still says what the first channel is for, and the button on it
+        // says the step this key has to take first
+        let mut stranger = session(true);
+        stranger.me = "user:cc".into();
+        stranger.me_key = "cc".into();
+        let frame = empty_network_as(stranger);
+        assert!(has_text(&frame, "No channels yet"), "{:?}", texts(&frame));
+        assert_eq!(
+            gate(&frame, "Create a channel"),
+            (false, reason),
+            "the empty network still offers a form the host would refuse"
+        );
+    });
+}
+
+/// Answers the reads a room costs on entry, so the room the reader moved to
+/// is as live as the one they left.
+fn room_settles(frame: Frame) -> Frame {
+    let record = request(&frame, "rpc.view").id;
+    let frame = tick_native(vec![answer(record, &channel_record())]);
+    let read = request(&frame, "rpc.view").id;
+    let frame = tick_native(vec![answer(read, &roots())]);
+    let roster = request(&frame, "rpc.view").id;
+    tick_native(vec![answer(roster, &members())])
+}
+
+/// Pushes the session that puts `channel` on screen and lets its reads land.
+fn enter_room(props: u64, channel: &str) -> Frame {
+    let mut next = session(true);
+    next.active_channel = channel.into();
+    room_settles(tick_native(vec![item(props, &encoded(&next))]))
+}
+
+fn composer_document(
+    frame: &Frame,
+    suffix: &str,
+) -> ducktape_view_guest::wire::editor_document::EditorDocumentRef {
+    let Node::Editor { document, .. } = node_ending(frame, suffix) else {
+        panic!("composer editor")
+    };
+    document.clone()
+}
+
+fn send_is_live(frame: &Frame, suffix: &str) -> bool {
+    let Node::Button { on_press, .. } = node_ending(frame, suffix) else {
+        panic!("send button")
+    };
+    on_press.is_some()
+}
+
+/// A DRAFT BELONGS TO ITS ROOM, NOT TO THE FIELD IT IS TYPED IN. Every room
+/// draws its composer at the same node key, and the host keys its native
+/// editor by the DOCUMENT id — so while every draft shared one id, moving
+/// rooms left the old room's words sitting in the new room's field, typing
+/// appended to them, and Send stayed dead because the guest dropped every
+/// transaction whose `before` did not match the draft it actually held.
+#[test]
+fn a_draft_left_unsent_stays_in_its_own_room() {
+    on_a_deep_stack(|| {
+        let (frame, _, props) = connected_room_with(&session(true), roots());
+        let frame = tick_native(composer_commit(&frame, Some("room a draft"), None));
+        let a = composer_document(&frame, "/composer/editor");
+        assert_eq!(a.byte_len, "room a draft".len() as u32);
+
+        let frame = enter_room(props, "channel-b");
+        let b = composer_document(&frame, "/composer/editor");
+        assert_ne!(
+            b.document, a.document,
+            "each room's draft is its own editor document"
+        );
+        assert_eq!(b.byte_len, 0, "a room never opens holding another's words");
+        assert!(
+            !send_is_live(&frame, "/composer/send"),
+            "nothing to send yet"
+        );
+
+        // The host's transaction is addressed to B's document, and lands.
+        let frame = tick_native(composer_commit(&frame, Some("room b draft"), None));
+        assert_eq!(
+            composer_document(&frame, "/composer/editor").byte_len,
+            "room b draft".len() as u32,
+            "the transaction addressed to B's document reached B's draft"
+        );
+        assert!(
+            send_is_live(&frame, "/composer/send"),
+            "a draft the guest accepted can be sent"
+        );
+
+        let frame = enter_room(props, "channel-a");
+        let back = composer_document(&frame, "/composer/editor");
+        assert_eq!(back.document, a.document, "the room keeps its document");
+        assert_eq!(
+            (back.reset, back.text_revision, back.revision, back.byte_len),
+            (a.reset, a.text_revision, a.revision, a.byte_len),
+            "the draft is the one it was left as, counters and all"
+        );
+        assert!(send_is_live(&frame, "/composer/send"));
+    });
+}
+
+/// The same rule one room down. A thread's reply is a draft of its own, and
+/// so is the room's timeline draft — two drafts at two node keys. But two
+/// THREADS share one node key, the way two rooms do, so the reply left in one
+/// thread must not be sitting in the next thread's field.
+#[test]
+fn a_reply_stays_in_the_thread_it_was_written_in() {
+    on_a_deep_stack(|| {
+        let (frame, _) = connected_room();
+        let frame = tick_native(composer_commit(&frame, Some("timeline draft"), None));
+        let timeline = composer_document(&frame, "/composer/editor");
+
+        let frame = open_thread(&frame, 1);
+        let first = composer_document(&frame, "/reply_composer/editor");
+        assert_ne!(
+            first.document, timeline.document,
+            "a thread reply is not the room's own draft"
+        );
+        let frame = tick_native(composer_commit_at(
+            &frame,
+            "/reply_composer/editor",
+            Some("a reply"),
+            None,
+        ));
+        assert!(
+            send_is_live(&frame, "/reply_composer/send"),
+            "the reply the guest accepted can be sent"
+        );
+        assert_eq!(
+            composer_document(&frame, "/composer/editor").byte_len,
+            timeline.byte_len,
+            "typing a reply does not touch the room's own draft"
+        );
+
+        let frame = open_thread(&frame, 2);
+        let second = composer_document(&frame, "/reply_composer/editor");
+        assert_ne!(
+            second.document, first.document,
+            "each thread's reply is its own editor document"
+        );
+        assert_eq!(
+            second.byte_len, 0,
+            "a thread never opens holding another thread's reply"
+        );
+    });
+}
+
+/// Opens the thread anchored at `seq` and answers the page it reads.
+fn open_thread(frame: &Frame, seq: u64) -> Frame {
+    let Node::Button { on_press, .. } = node_ending(frame, &format!("/message/{seq}/thread"))
+    else {
+        panic!("thread control")
+    };
+    let frame = tick_native(vec![ducktape_view_guest::wire::Event::Message(
+        on_press.expect("the thread control is live"),
+    )]);
+    let read = request(&frame, "rpc.view").id;
+    let page = serde_json::json!({"thread":{
+        "root": row(seq, "a message with replies"),
+        "replies": [], "has_more": false, "next_reply_seq": null,
+    }})
+    .to_string();
+    tick_native(vec![answer(read, page.as_bytes())])
+}
+
+/// AN EDIT IS A DRAFT TOO. Every message being rewritten draws its editor at
+/// the one `edit-composer` key, so under a shared document id the second
+/// message opened for editing inherited the first one's text and could not be
+/// typed into either.
+#[test]
+fn an_edit_in_progress_stays_on_the_message_it_rewrites() {
+    on_a_deep_stack(|| {
+        let (frame, _) = connected_room();
+        let frame = begin_edit(&frame, 1);
+        let first = composer_document(&frame, "message-edit-composer/editor");
+        let frame = begin_edit(&frame, 2);
+        let second = composer_document(&frame, "message-edit-composer/editor");
+        assert_ne!(
+            second.document, first.document,
+            "each message being edited is its own editor document"
+        );
+    });
+}
+
+/// Opens the row menu for `seq` and chooses Edit.
+fn begin_edit(frame: &Frame, seq: u64) -> Frame {
+    let frame = press_node(frame, &format!("/message/{seq}/more"));
+    tick_native(press(&frame, "Edit message"))
+}
+
+fn press_node(frame: &Frame, suffix: &str) -> Frame {
+    let Node::Button { on_press, .. } = node_ending(frame, suffix) else {
+        panic!("no button ending {suffix:?}")
+    };
+    tick_native(vec![ducktape_view_guest::wire::Event::Message(
+        on_press.unwrap_or_else(|| panic!("button {suffix:?} is disabled")),
+    )])
 }

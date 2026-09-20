@@ -256,14 +256,22 @@ pub(super) struct Lettering {
     pub(super) legible: bool,
 }
 /// The inset every island keeps from the stage's edge.
-const ISLAND: f32 = 12.;
+pub(super) const ISLAND: f32 = kit::spacing::LG as f32;
 /// The width of the board's own menu. Fixed, because a menu whose width came
 /// from its longest row would change shape as rows come and go — and the rows
 /// come and go with what is under the cursor, so the same press in two places
 /// would put the same action in two different spots.
 const MENU_WIDTH: f32 = 200.;
 /// The side of an icon-only tool.
-const TOOL: f32 = 36.;
+pub(super) const TOOL: f32 = 36.;
+/// How wide the tool bar stands: the lock and the tools are `TOOL` squares,
+/// and the hairline after the lock, the gaps and the island's inset and border
+/// come to less than one more.
+pub(super) const TOOL_BAR: f32 = (TOOLS.len() + 2) as f32 * TOOL;
+/// How far from an edge a float stands to clear the row of islands along that
+/// edge: their inset, then an island — at most a `TOOL` square and its chrome —
+/// and a gap.
+const PAST_ISLANDS: f32 = ISLAND + TOOL + 20.;
 /// The width of the zoom readout. Fixed on purpose — a readout that resized as
 /// you zoomed would shuffle the whole camera island sideways under the pointer
 /// that was zooming — which means it has to be wide enough for the WIDEST
@@ -320,9 +328,6 @@ impl BoardsView {
             }
             layers.extend(self.empty_prompt(board, w, h));
         }
-        // Last of the stage's layers, so the menu stands over everything drawn
-        // on the board and its backdrop stands over everything but the menu.
-        layers.extend(self.menu_layers());
         let mut stage = Node::Stack {
             key: "boards/stage".into(),
             width: Some(Length::Fill),
@@ -334,58 +339,72 @@ impl BoardsView {
             under: 0,
             children: layers,
         };
+        stage = self.menu_layers(stage);
         // Every island sits on an overlay, never a pin: the host stops a
         // press on an overlay's surface, where a pinned card lets it fall
         // through to the canvas underneath and the gesture it starts
         // re-renders the card out from under the click.
         let picker_open = self.picking_a_board();
         let dismiss = (picker_open && board.is_some()).then_some(Message::BoardPicker);
+        // The menu shares the top edge with the tool bar whenever a board is
+        // open on a wide stage, and stops an inset short of it; otherwise only
+        // the stage's own edge stands in its way.
+        let menu_room = match board.is_some() && !compact {
+            true => (w - TOOL_BAR) / 2. - 2. * ISLAND,
+            false => w - 2. * ISLAND,
+        };
         stage = float(
             "boards/menu-float",
+            "Board menu",
             stage,
-            self.menu_island(&board, picker_open),
-            AlignX::Left,
-            AlignY::Top,
+            self.menu_island(&board, picker_open, menu_room),
+            (AlignX::Left, AlignY::Top),
             ISLAND,
             dismiss,
         );
         if let Some(board) = &board {
-            let tools_y = if compact { AlignY::Bottom } else { AlignY::Top };
+            // A compact stage has no room at the top beside the menu, and no
+            // room at the bottom between the camera and help: the bar stands
+            // over them, one island up.
+            let (tools_y, tools_inset) = match compact {
+                true => (AlignY::Bottom, PAST_ISLANDS),
+                false => (AlignY::Top, ISLAND),
+            };
             stage = float(
                 "boards/tools-float",
+                "Tools",
                 stage,
                 self.tool_island(),
-                AlignX::Center,
-                tools_y,
-                ISLAND,
+                (AlignX::Center, tools_y),
+                tools_inset,
                 None,
             );
             if let Some(inspector) = self.inspector_island(board) {
                 stage = float(
                     "boards/properties-float",
+                    "Properties",
                     stage,
                     inspector,
-                    AlignX::Right,
-                    AlignY::Top,
+                    (AlignX::Right, AlignY::Top),
                     ISLAND,
                     None,
                 );
             }
             stage = float(
                 "boards/camera-float",
+                "Zoom and view",
                 stage,
                 self.camera_island(),
-                AlignX::Left,
-                AlignY::Bottom,
+                (AlignX::Left, AlignY::Bottom),
                 ISLAND,
                 None,
             );
             stage = float(
                 "boards/help-float",
+                "Shortcuts",
                 stage,
                 self.help_island(),
-                AlignX::Right,
-                AlignY::Bottom,
+                (AlignX::Right, AlignY::Bottom),
                 ISLAND,
                 None,
             );
@@ -393,10 +412,10 @@ impl BoardsView {
                 let strip_y = if compact { AlignY::Top } else { AlignY::Bottom };
                 stage = float(
                     "boards/typing-float",
+                    "Text entry",
                     stage,
                     self.typing_strip(inline),
-                    AlignX::Center,
-                    strip_y,
+                    (AlignX::Center, strip_y),
                     ISLAND,
                     None,
                 );
@@ -406,11 +425,11 @@ impl BoardsView {
             let card = kit::sized(notice, Some(Length::Fixed(480.)), None);
             stage = float(
                 "boards/notice-float",
+                "Notice",
                 stage,
                 card,
-                AlignX::Center,
-                AlignY::Top,
-                ISLAND + TOOL + 20.,
+                (AlignX::Center, AlignY::Top),
+                PAST_ISLANDS,
                 None,
             );
         }
@@ -420,75 +439,64 @@ impl BoardsView {
             // on — on a narrow window the sheet gives up a few characters of
             // the longest labels rather than hanging off the edge, because a
             // key you cannot see is worse than a description you can guess.
-            let sheet = (w - 2. * 24.).min(700.);
+            let sheet = (w - 2. * kit::spacing::XL as f32).min(700.);
             let card = kit::sized(self.help_card(), Some(Length::Fixed(sheet)), None);
-            stage = modal("boards/help-modal", stage, card, Message::Help);
+            stage = modal(
+                "boards/help-modal",
+                "Keyboard shortcuts",
+                stage,
+                card,
+                Message::Help,
+            );
         }
+        // Every tree the crate's own tests render is one assistive
+        // technology can read.
+        #[cfg(test)]
+        assert_accessible(&stage);
         stage
     }
-    /// The board's own menu, where the secondary button opened it: a backdrop
-    /// that shuts it on any press, then the card floated at the cursor.
-    ///
-    /// A `Node::Float` and not the `float` overlay every island uses: the
-    /// overlay's wrapper paints its surface at the card's UN-translated
-    /// origin, which a floated card leaves behind as a grey rectangle in the
-    /// corner. The chat view learned this the same way. A `Float` carries its
-    /// own surface and stops a press inside it, which is the half of the
-    /// overlay that a menu actually needs.
-    fn menu_layers(&self) -> Vec<Node> {
+    /// The board's own menu, where the secondary button opened it: a modal
+    /// overlay whose translated card floats at the cursor.
+    fn menu_layers(&self, base: Node) -> Node {
         let Some(press) = self.menu else {
-            return Vec::new();
+            return base;
         };
         let items = self.menu_items();
         let (card, height) = self.board_menu(&items);
         let at = menu_origin(press, [MENU_WIDTH, height], self.viewport);
-        vec![
-            Node::MouseArea {
-                key: "boards/menu-backdrop".into(),
-                on_press: Some(slots::message(Message::CloseMenu)),
-                on_release: None,
-                on_double_click: None,
-                // The second button shuts it too, rather than opening a second
-                // menu over the first — which is what a press outside a menu
-                // means everywhere else.
-                on_right_press: Some(slots::message(Message::CloseMenu)),
-                on_right_release: None,
-                on_middle_press: None,
-                on_middle_release: None,
-                on_enter: None,
-                on_exit: None,
-                on_move: None,
-                on_press_at: None,
-                on_scroll: None,
-                content: Box::new(kit::space(Some(Length::Fill), Some(Length::Fill))),
-            },
-            // The box around the float, not the card inside it: a float takes
-            // the width of the box it is laid out in, and the box a stage
-            // layer hands it is the whole stage — which paints its surface
-            // from the cursor to the right edge. Sizing the card within it
-            // does not help; the sheet is the float's own.
-            kit::sized(
-                kit::container(
-                    "boards/menu-box",
-                    Node::Float {
-                        key: "boards/menu-card".into(),
-                        x: at[0],
-                        y: at[1],
-                        scale: 1.,
-                        shadow: wire::Shadow {
-                            color: Some(Rgba([0., 0., 0., self.menu_shade()])),
-                            x: Some(0.),
-                            y: Some(4.),
-                            blur: Some(16.),
+        Node::Overlay {
+            key: "boards/menu-overlay".into(),
+            label: Some("Board menu".into()),
+            padding: 0.,
+            backdrop: Rgba([0.; 4]),
+            align_x: AlignX::Left,
+            align_y: AlignY::Top,
+            on_dismiss: Some(slots::message(Message::CloseMenu)),
+            children: vec![
+                base,
+                kit::sized(
+                    kit::container(
+                        "boards/menu-box",
+                        Node::Float {
+                            key: "boards/menu-card".into(),
+                            x: at[0],
+                            y: at[1],
+                            scale: 1.,
+                            shadow: wire::Shadow {
+                                color: Some(Rgba([0., 0., 0., self.menu_shade()])),
+                                x: Some(0.),
+                                y: Some(4.),
+                                blur: Some(16.),
+                            },
+                            radius: Some([kit::radius::CARD as f32; 4]),
+                            content: Box::new(card),
                         },
-                        radius: Some([10.; 4]),
-                        content: Box::new(card),
-                    },
+                    ),
+                    Some(Length::Fixed(MENU_WIDTH)),
+                    Some(Length::Fixed(height)),
                 ),
-                Some(Length::Fixed(MENU_WIDTH)),
-                Some(Length::Fixed(height)),
-            ),
-        ]
+            ],
+        }
     }
     /// A dropped shadow lifts the card off the board; deeper on a dark one,
     /// where a soft grey under a card reads as part of the card.
@@ -503,10 +511,10 @@ impl BoardsView {
     /// a menu pressed near the bottom of the stage opens upward, and it cannot
     /// wait for a frame to find out how tall it is.
     fn board_menu(&self, items: &[MenuItem]) -> (Node, f32) {
-        const ROW: f32 = 28.;
+        const ROW: f32 = kit::height::CONTROL as f32;
         const GAP: f32 = 2.;
         const RULE: f32 = 1.;
-        const PADDING: f32 = 8.;
+        const PADDING: f32 = kit::spacing::SM as f32;
         let mut rows = Vec::new();
         let mut height = 2. * PADDING;
         for item in items {
@@ -529,37 +537,72 @@ impl BoardsView {
         (card, height - GAP)
     }
     /// Top-left: the board's name and its save state; open, the board list.
-    fn menu_island(&self, board: &Option<Board>, open: bool) -> Node {
+    /// No wider than `room`, and the name is what gives way to it: the chip
+    /// is the one place a board says whether its work is kept, and a long
+    /// name used to push it under the tool bar.
+    fn menu_island(&self, board: &Option<Board>, open: bool, room: f32) -> Node {
         let title = board.as_ref().map_or("Boards", |b| b.title.as_str());
+        let mut switcher = action(
+            "boards/switcher",
+            title,
+            "Choose a board",
+            Message::BoardPicker,
+            board.is_some(),
+        );
+        // Inside the button only the name gives way; the ▾ is a word of its
+        // own after it, so the ellipsis cannot take it.
+        if let Node::Button {
+            content,
+            width,
+            expanded,
+            ..
+        } = &mut switcher
+        {
+            *expanded = Some(open);
+            let name = wide(kit::nowrap(kit::text("boards/switcher/name", title)));
+            let caret = kit::nowrap(kit::text("boards/switcher/caret", "▾"));
+            let label = kit::spaced(
+                kit::row("boards/switcher/label", [name, caret]),
+                kit::spacing::XS as f32,
+            );
+            *content = wire::ButtonContent::Child(Box::new(wide(label)));
+            *width = Some(Length::Fill);
+        }
+        // The host never shrinks a button, however it is sized, so the room
+        // the button gets is its box's: a box that gives the chip its width
+        // first and keeps what is left.
         let head = kit::spaced(
-            kit::centered_row(
+            wide(kit::centered_row(
                 "boards/menu-head",
                 [
-                    action(
-                        "boards/switcher",
-                        &format!("{title}  ▾"),
-                        "Choose a board",
-                        Message::BoardPicker,
-                        board.is_some(),
-                    ),
+                    kit::container("boards/switcher/room", switcher),
                     kit::nowrap(kit::caption("boards/sync", self.status())),
                 ],
-            ),
-            6.,
+            )),
+            kit::spacing::XS as f32,
         );
-        if !open {
-            return island("boards/menu", head);
+        let mut menu = match open {
+            false => island("boards/menu", head),
+            true => {
+                let mut rows = vec![head, kit::divider("boards/menu-rule")];
+                rows.extend(self.picker());
+                kit::sized(
+                    island(
+                        "boards/menu",
+                        kit::spaced(
+                            kit::column("boards/menu-body", rows),
+                            kit::spacing::XS as f32,
+                        ),
+                    ),
+                    Some(Length::Fixed(room.min(260.))),
+                    None,
+                )
+            }
+        };
+        if let Node::Container { max_width, .. } = &mut menu {
+            *max_width = Some(room);
         }
-        let mut rows = vec![head, kit::divider("boards/menu-rule")];
-        rows.extend(self.picker());
-        kit::sized(
-            island(
-                "boards/menu",
-                kit::spaced(kit::column("boards/menu-body", rows), 6.),
-            ),
-            Some(Length::Fixed(260.)),
-            None,
-        )
+        menu
     }
     /// Top-centre: the lock, then the tools, icon-only with their keys.
     fn tool_island(&self) -> Node {
@@ -591,7 +634,7 @@ impl BoardsView {
     /// Bottom-left: the camera, then history, then snapping.
     fn camera_island(&self) -> Node {
         let controls = [
-            action("boards/zoom-out", "−", "Zoom out", Message::Zoom(0.8), true),
+            glyph("boards/zoom-out", "−", "Zoom out", Message::Zoom(0.8)),
             kit::sized(
                 action(
                     "boards/zoom",
@@ -603,7 +646,7 @@ impl BoardsView {
                 Some(Length::Fixed(ZOOM_READOUT)),
                 None,
             ),
-            action("boards/zoom-in", "+", "Zoom in", Message::Zoom(1.25), true),
+            glyph("boards/zoom-in", "+", "Zoom in", Message::Zoom(1.25)),
             action("boards/fit", "Fit", "Fit board · F", Message::Fit, true),
             rule("boards/camera-rule-a"),
             icon_button(
@@ -736,7 +779,7 @@ impl BoardsView {
                         ),
                     ],
                 ),
-                8.,
+                kit::spacing::SM as f32,
             ),
         );
         kit::sized(strip, Some(Length::Fixed(280.)), None)
@@ -808,14 +851,25 @@ impl BoardsView {
             list.push(kit::divider("boards/picker-rule"));
             list.push(kit::caption("boards/shared", "Shared with this network"));
         }
+        // a button never shrinks below its label, so a long title is a
+        // one-line text in it that ends in an ellipsis at the strip's edge
         list.extend(self.catalog.iter().map(|(id, title)| {
-            wide(action(
-                &format!("boards/open/{id}"),
+            let key = format!("boards/open/{id}");
+            let mut row = wide(action(
+                &key,
                 title,
                 "Open board",
                 Message::Open(id.clone()),
                 idle,
-            ))
+            ));
+            if let Node::Button { content, .. } = &mut row {
+                *content = wire::ButtonContent::Child(Box::new(kit::sized(
+                    kit::nowrap(kit::text(format!("{key}/title"), title)),
+                    Some(Length::Fill),
+                    None,
+                )));
+            }
+            row
         }));
         list
     }
@@ -876,13 +930,13 @@ impl BoardsView {
                                     ),
                                 ],
                             ),
-                            8.,
+                            kit::spacing::SM as f32,
                         ),
                         wire::Edges {
                             top: 0.,
-                            right: 24.,
-                            bottom: 24.,
-                            left: 24.,
+                            right: kit::spacing::XL as f32,
+                            bottom: kit::spacing::XL as f32,
+                            left: kit::spacing::XL as f32,
                         },
                     ),
                 ],
@@ -931,7 +985,10 @@ impl BoardsView {
         }
         kit::card(
             "boards/next-color",
-            kit::spaced(kit::column("boards/next-color-body", pen), 6.),
+            kit::spaced(
+                kit::column("boards/next-color-body", pen),
+                kit::spacing::XS as f32,
+            ),
         )
     }
     fn swatches(&self) -> Node {
@@ -940,7 +997,7 @@ impl BoardsView {
                 "boards/colors",
                 (0..5).map(|color| swatch(color, self.pen.color == color)),
             ),
-            4.,
+            kit::spacing::XXS as f32,
         )
     }
     fn inspector(
@@ -1021,7 +1078,7 @@ impl BoardsView {
                     tile("copy", "Duplicate", "⌘ / Ctrl D", Message::Duplicate),
                 ],
             ),
-            4.,
+            kit::spacing::XXS as f32,
         ));
         if count > 1 {
             properties.push(kit::divider("boards/arrange-rule"));
@@ -1034,7 +1091,7 @@ impl BoardsView {
                             tile(name, label, "Arrange the selection", Message::Arrange(*how))
                         }),
                     ),
-                    4.,
+                    kit::spacing::XXS as f32,
                 ));
             }
             properties.push(kit::divider("boards/arrange-rule-b"));
@@ -1049,7 +1106,10 @@ impl BoardsView {
         )));
         kit::card(
             "boards/properties",
-            kit::spaced(kit::column("boards/properties-body", properties), 6.),
+            kit::spaced(
+                kit::column("boards/properties-body", properties),
+                kit::spacing::XS as f32,
+            ),
         )
     }
     fn notice(&self) -> Option<Node> {
@@ -1063,6 +1123,28 @@ impl BoardsView {
             }
         };
         let mut children = vec![kit::wrapping(kit::text("boards/error", notice))];
+        // Recovery remains available after opening a different board.
+        if self.lost.is_some() && self.confirmed.is_none() {
+            children.push(kit::wrapping(kit::secondary(
+                "boards/lost-help",
+                "Open or create another board, then choose Put it on a new card to keep these words.",
+            )));
+        }
+        if self.lost.is_some() && self.confirmed.is_some() {
+            children.push(kit::spaced(
+                kit::row(
+                    "boards/lost-actions",
+                    [action(
+                        "boards/lost-keep",
+                        "Put it on a new card",
+                        "Put the words on a new card",
+                        Message::KeepLostWords,
+                        self.session.connected,
+                    )],
+                ),
+                kit::spacing::SM as f32,
+            ));
+        }
         if matches!(self.delivery, Delivery::Failed(_)) {
             children.push(kit::spaced(
                 kit::row(
@@ -1084,12 +1166,15 @@ impl BoardsView {
                         ),
                     ],
                 ),
-                8.,
+                kit::spacing::SM as f32,
             ));
         }
         Some(kit::notice(
             "boards/notice",
-            kit::spaced(kit::column("boards/notice-body", children), 8.),
+            kit::spaced(
+                kit::column("boards/notice-body", children),
+                kit::spacing::SM as f32,
+            ),
             kit::Tone::Danger,
         ))
     }
@@ -1159,7 +1244,7 @@ impl BoardsView {
                             .enumerate()
                             .map(|(i, entry)| row(from + i, *entry)),
                     ),
-                    6.,
+                    kit::spacing::XS as f32,
                 ),
                 Some(Length::Fill),
                 None,
@@ -1173,7 +1258,7 @@ impl BoardsView {
                     column("boards/help-right", split, &shortcuts[split..]),
                 ],
             ),
-            24.,
+            kit::spacing::XL as f32,
         );
         kit::card(
             "boards/help-panel",
@@ -1194,16 +1279,38 @@ impl BoardsView {
                         )),
                     ],
                 ),
-                6.,
+                kit::spacing::XS as f32,
             ),
         )
     }
     pub(super) fn canvas_color(&self) -> [f32; 4] {
         kit::palette().background
     }
+    /// Standing on no board, with something on screen saying why. That pair is
+    /// what a board removed under this view leaves behind: the board it was
+    /// drawing on went, and the banner is all that is left of it.
+    ///
+    /// A read that failed before any board was ever opened lands here too, and
+    /// answers the same, which is the truth there as well: nothing this view is
+    /// holding has been saved. Arriving normally says nothing at all, so a view
+    /// on its way to its first board is not this.
+    fn told_why_there_is_no_board(&self) -> bool {
+        self.current.is_empty() && !self.error.is_empty()
+    }
     pub(super) fn status(&self) -> String {
         if self.inline.is_some() {
             return "Editing text…".into();
+        }
+        // An edit the board answered `Ok` to and did nothing about — a card
+        // removed under it — is not work that was kept, and this chip's whole
+        // job is to say whether the work is being kept.
+        //
+        // Nor is an edit aimed at a board that is gone: it went with the board,
+        // whether it left words behind — a card written in — or nothing to keep
+        // at all, a card moved or a colour picked. The chip reads the standing
+        // banner rather than the refusal that raised it, so both answer alike.
+        if self.lost.is_some() || self.told_why_there_is_no_board() {
+            return "Not saved".into();
         }
         // "1 change", never "1 changes". One change is the common case — one
         // shape drawn, one colour picked — so the broken reading was the one a
@@ -1317,6 +1424,14 @@ impl BoardsView {
         };
         let mouse = Node::MouseArea {
             key: "boards/canvas".into(),
+            // The drawing surface: a press starts whatever the tool in hand
+            // draws. The wire has no canvas role; a button is what it is to
+            // the keyboard and the reader.
+            role: Some(wire::Role::Button),
+            label: Some("Board canvas".into()),
+            expanded: None,
+            selected: None,
+            checked: None,
             on_press: Some(slots::message(Message::Begin)),
             on_press_at: Some(slots::handler(Box::new(|(x, y)| {
                 Some(Message::Position(x, y))
@@ -2315,25 +2430,54 @@ fn pin(key: &str, x: f32, y: f32, width: f32, content: Node) -> Node {
         content: Box::new(content),
     }
 }
-/// A card over the stage: the host's overlay, whose surface keeps a press
-/// from reaching the canvas under it and whose layer, given `dismiss`, closes
-/// the card on a press anywhere else.
+/// A card over the stage. Persistent islands are ordinary stacked layout;
+/// only a card with a dismissal boundary is a named modal overlay.
 fn float(
     key: &str,
+    label: &str,
     base: Node,
     card: Node,
-    align_x: AlignX,
-    align_y: AlignY,
+    (align_x, align_y): (AlignX, AlignY),
     inset: f32,
     dismiss: Option<Message>,
 ) -> Node {
+    let Some(dismiss) = dismiss else {
+        let mut position = kit::container(format!("{key}/position"), card);
+        if let Node::Container {
+            width,
+            height,
+            padding,
+            align_x: x,
+            align_y: y,
+            ..
+        } = &mut position
+        {
+            *width = Some(Length::Fill);
+            *height = Some(Length::Fill);
+            *padding = Some(wire::Edges::all(inset));
+            *x = Some(align_x);
+            *y = Some(align_y);
+        }
+        return Node::Stack {
+            key: key.into(),
+            width: Some(Length::Fill),
+            height: Some(Length::Fill),
+            padding: None,
+            background: None,
+            border: None,
+            clip: false,
+            under: 0,
+            children: vec![base, position],
+        };
+    };
     Node::Overlay {
         key: key.into(),
+        label: Some(label.into()),
         padding: inset,
         backdrop: Rgba([0.; 4]),
         align_x,
         align_y,
-        on_dismiss: dismiss.map(slots::message),
+        on_dismiss: Some(slots::message(dismiss)),
         children: vec![base, card],
     }
 }
@@ -2680,7 +2824,7 @@ fn plate(id: &str, words: Node, letters: &Lettering, wash: [f32; 4], room: [f32;
 /// the edge of the board is exactly where you are when you right-click the last
 /// shape in a row.
 pub(super) fn menu_origin(press: [f32; 2], size: [f32; 2], viewport: [f32; 2]) -> [f32; 2] {
-    const GUTTER: f32 = 8.;
+    const GUTTER: f32 = kit::spacing::SM as f32;
     let fits_right = press[0] + size[0] + GUTTER <= viewport[0];
     let fits_below = press[1] + size[1] + GUTTER <= viewport[1];
     let x = match fits_right {
@@ -2688,8 +2832,8 @@ pub(super) fn menu_origin(press: [f32; 2], size: [f32; 2], viewport: [f32; 2]) -
         false => press[0] - size[0],
     };
     let y = match fits_below {
-        true => press[1] + 4.,
-        false => press[1] - size[1] - 4.,
+        true => press[1] + kit::spacing::XXS as f32,
+        false => press[1] - size[1] - kit::spacing::XXS as f32,
     };
     [x.max(GUTTER), y.max(GUTTER)]
 }
@@ -2721,12 +2865,12 @@ fn menu_button(item: MenuItem) -> Node {
         *accessible = Some(label.into());
         *description = Some(hint.into());
         *width = Some(Length::Fill);
-        *height = Some(Length::Fixed(28.));
+        *height = Some(Length::Fixed(kit::height::CONTROL as f32));
         *padding = Some(wire::Edges {
             top: 0.,
-            right: 8.,
+            right: kit::spacing::SM as f32,
             bottom: 0.,
-            left: 8.,
+            left: kit::spacing::SM as f32,
         });
     }
     node
@@ -2769,19 +2913,37 @@ fn menu_key(item: MenuItem) -> &'static str {
     }
 }
 fn island(key: &str, content: Node) -> Node {
-    kit::padded(kit::card(key, content), wire::Edges::all(4.))
+    kit::padded(
+        kit::card(key, content),
+        wire::Edges::all(kit::spacing::XXS as f32),
+    )
 }
 /// A card over a shaded stage that a press anywhere else closes.
-fn modal(key: &str, base: Node, card: Node, dismiss: Message) -> Node {
+fn modal(key: &str, label: &str, base: Node, card: Node, dismiss: Message) -> Node {
     Node::Overlay {
         key: key.into(),
-        padding: 24.,
+        label: Some(label.into()),
+        padding: kit::spacing::XL as f32,
         backdrop: Rgba([0., 0., 0., 0.18]),
         align_x: AlignX::Center,
         align_y: AlignY::Center,
         on_dismiss: Some(slots::message(dismiss)),
         children: vec![base, card],
     }
+}
+#[cfg(test)]
+fn assert_accessible(tree: &Node) {
+    let faults = wire::accessibility_faults(tree);
+    assert!(
+        faults.is_empty(),
+        "{} accessibility fault(s):\n{}",
+        faults.len(),
+        faults
+            .iter()
+            .map(|fault| format!("  {:?} at {}", fault.kind, fault.path.join(" > ")))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
 }
 /// A caption centred across the width it is given.
 fn centered_caption(key: &str, content: &str) -> Node {
@@ -2819,12 +2981,12 @@ fn button(
     } = &mut node
     {
         *description = Some(hint.into());
-        *height = Some(Length::Fixed(28.));
+        *height = Some(Length::Fixed(kit::height::CONTROL as f32));
         *padding = Some(wire::Edges {
             top: 0.,
-            right: 8.,
+            right: kit::spacing::SM as f32,
             bottom: 0.,
-            left: 8.,
+            left: kit::spacing::SM as f32,
         });
     }
     node
@@ -2832,6 +2994,14 @@ fn button(
 /// A quiet action: the bar's and the inspector's default control.
 fn action(key: &str, label: &str, hint: &str, message: Message, enabled: bool) -> Node {
     button(key, label, hint, message, enabled, ButtonPreset::Subtle)
+}
+/// A quiet action whose face is a glyph: it is named by what it does.
+fn glyph(key: &str, face: &str, name: &str, message: Message) -> Node {
+    let mut node = action(key, face, name, message, true);
+    if let Node::Button { label, .. } = &mut node {
+        *label = Some(name.into());
+    }
+    node
 }
 /// A quiet action that reads as on or off.
 fn checked(key: &str, label: &str, hint: &str, message: Message, on: bool) -> Node {
@@ -2986,8 +3156,8 @@ fn tool_button_message(
         // the glyph sits a little up and left of centre, clear of its key
         *padding = Some(wire::Edges {
             top: 0.,
-            right: 6.,
-            bottom: 6.,
+            right: kit::spacing::XS as f32,
+            bottom: kit::spacing::XS as f32,
             left: 0.,
         });
     }
@@ -3021,6 +3191,7 @@ fn tool_button_message(
     if let Node::Button {
         label: accessible,
         checked,
+        selected: chosen,
         width,
         height,
         padding,
@@ -3029,6 +3200,9 @@ fn tool_button_message(
     } = &mut node
     {
         *accessible = Some(label.into());
+        // One tool of many is in hand. The host paints a button's selection
+        // from `checked`, so it says so too.
+        *chosen = Some(selected);
         *checked = Some(selected);
         *width = Some(Length::Fixed(TOOL));
         *height = Some(Length::Fixed(TOOL));
@@ -3038,8 +3212,8 @@ fn tool_button_message(
     Node::Tooltip {
         key: format!("boards/tool-tip/{name}"),
         position: wire::TooltipPosition::Bottom,
-        gap: 6.,
-        padding: 6.,
+        gap: kit::spacing::XS as f32,
+        padding: kit::spacing::XS as f32,
         delay_ms: 350,
         snap: false,
         style: Default::default(),
@@ -3095,7 +3269,7 @@ fn icon_button(
         *checked = Some(on);
         *width = Some(Length::Fixed(28.));
         *height = Some(Length::Fixed(28.));
-        *padding = Some(wire::Edges::all(6.));
+        *padding = Some(wire::Edges::all(kit::spacing::XS as f32));
         *description = Some(hint.into());
     }
     node
@@ -3122,7 +3296,7 @@ fn text_size_row(current: TextSize) -> Node {
                 )
             }),
         ),
-        4.,
+        kit::spacing::XXS as f32,
     )
 }
 /// Whether the shape's body is painted, the one it is set to checked.
@@ -3146,7 +3320,7 @@ fn fill_row(current: Fill) -> Node {
                 )
             }),
         ),
-        4.,
+        kit::spacing::XXS as f32,
     )
 }
 /// Whether the shape's outline is unbroken, the one it is set to checked.
@@ -3170,7 +3344,7 @@ fn dash_row(current: Dash) -> Node {
                 )
             }),
         ),
-        4.,
+        kit::spacing::XXS as f32,
     )
 }
 /// How heavy the shape's line is, the one it is set to checked. Four steps in
@@ -3198,7 +3372,7 @@ fn weight_row(current: Weight) -> Node {
                 )
             }),
         ),
-        4.,
+        kit::spacing::XXS as f32,
     )
 }
 /// Which ends of the arrow carry a head, the one it is set to checked. Three
@@ -3226,7 +3400,7 @@ fn heads_row(current: Heads) -> Node {
                 )
             }),
         ),
-        4.,
+        kit::spacing::XXS as f32,
     )
 }
 /// Where this card's words sit across it, the one it is set to checked.
@@ -3251,7 +3425,7 @@ fn align_row(current: Align) -> Node {
                 )
             }),
         ),
-        4.,
+        kit::spacing::XXS as f32,
     )
 }
 /// A 28px control labelled with a letter rather than a glyph, checked when
@@ -3313,7 +3487,7 @@ fn swatch(color: u8, selected: bool) -> Node {
         *height = Some(Length::Fixed(16.));
         *background = Some(wire::Background::Color(Rgba(fill(color))));
         *border = Some(wire::Border {
-            radius: Some([8.; 4]),
+            radius: Some([kit::radius::PILL as f32; 4]),
             width: Some(if selected { 2. } else { 1. }),
             color: Some(Rgba(if selected {
                 kit::palette().accent
@@ -3505,6 +3679,14 @@ impl BoardsView {
             // card still says it, where the box is the card's own and nothing
             // can crop it.
             placeholder: String::new(),
+            label: Some(
+                match shape.kind {
+                    Kind::Note => "Note text",
+                    Kind::Text => "Text",
+                    _ => "Shape label",
+                }
+                .into(),
+            ),
             width: Some((size[0] - 2. * letters.inset).max(40.)),
             // The editor fills the card. It cannot be asked to lay out to its
             // own content instead — a shrunk editor collapses to its first

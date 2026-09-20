@@ -8,7 +8,7 @@ impl super::ForgeView {
             Message::ForgeLandLink(url) => self.on_forge_land_link(url),
             Message::ReposArrived(next) => self.on_repos_arrived(next),
             Message::RepoArrived(next) => self.on_repo_arrived(next),
-            Message::ItemArrived(next) => self.on_item_arrived(next),
+            Message::ItemArrived(next) => self.on_item_arrived(*next),
             Message::DiscussionArrived(next) => self.on_discussion_arrived(next),
             Message::TreeArrived(next) => self.on_tree_arrived(next),
             Message::BlobArrived(next) => self.on_blob_arrived(next),
@@ -57,10 +57,13 @@ impl super::ForgeView {
             return ::ducktape_view_guest::Task::none();
         }
         let next = item.next.clone();
-        let connection_changed = self.connected_rpc != next.connected_rpc || self.connected != next.connected;
+        let connection_changed =
+            self.connected_rpc != next.connected_rpc || self.connected != next.connected;
         if connection_changed {
             self.upload_handles.clear();
-            for draft in self.composers.values_mut() { draft.retire_device_requests(); }
+            for draft in self.composers.values_mut() {
+                draft.retire_device_requests();
+            }
         }
 
         self.connection_serial = crate::host::connection_serial_after(
@@ -72,7 +75,7 @@ impl super::ForgeView {
         self.dark = next.dark;
         self.org = next.org.to_owned();
         self.about = next.about.to_owned();
-        self.network_chain_id = next.network_chain_id.to_owned();
+        self.network_chain_id = crate::host::own_chain(&next);
         self.connected_rpc = next.connected_rpc.to_owned();
         let routed = next.link_tick != self.link_tick;
         self.link_tick = next.link_tick;
@@ -780,7 +783,8 @@ impl super::ForgeView {
         ::ducktape_view_guest::Task::none()
     }
     fn on_open_message_link(&mut self, url: String) -> ducktape_view_guest::Task<Message> {
-        self.sent = crate::host::open_link(::std::convert::AsRef::as_ref(&(url)));
+        let url = crate::host::pressed_link(url, &self.network_chain_id);
+        self.sent = crate::host::open_link(&url);
         ::ducktape_view_guest::Task::none()
     }
     fn on_copy_to_clipboard(

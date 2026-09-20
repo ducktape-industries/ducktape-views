@@ -39,6 +39,16 @@ pub(super) fn state_tone(state: &str) -> Tone {
     }
 }
 
+/// A read that failed, in the danger tone. Reads re-run on the next live
+/// hit, so the sentence names the way to force one.
+pub(super) fn failed(key: String, sentence: &str) -> wire::Node {
+    native::notice(
+        &key,
+        native::wrapping(native::text(format!("{key}/text"), sentence)),
+        Tone::Danger,
+    )
+}
+
 /// A reading's body size: one step over the 13px chrome, at 1.5 leading.
 pub(super) const READING: f32 = 14.;
 
@@ -64,13 +74,17 @@ impl ForgeView {
     }
 
     pub(super) fn loading_tracker(&self, key: String) -> wire::Node {
-        native::secondary(key, "Loading repository tracker…")
+        native::empty_state(
+            key,
+            "Loading the tracker…",
+            "Issues and pull requests arrive next.",
+        )
     }
     pub(super) fn tracker_unavailable(&self, key: String) -> wire::Node {
-        native::wrapping(native::secondary(
+        failed(
             key,
             "Could not load this repository. Return to all repos and open it again to retry.",
-        ))
+        )
     }
     pub(super) fn empty_issues(&self, key: String) -> wire::Node {
         native::empty_state(
@@ -87,13 +101,17 @@ impl ForgeView {
         )
     }
     pub(super) fn loading_item(&self, key: String) -> wire::Node {
-        native::secondary(key, "Loading tracker item…")
+        native::empty_state(
+            key,
+            "Loading this item…",
+            "Its body and discussion arrive next.",
+        )
     }
     pub(super) fn item_unavailable(&self, key: String) -> wire::Node {
-        native::wrapping(native::secondary(
+        failed(
             key,
             "Could not load this item. Go back and open it again to retry.",
-        ))
+        )
     }
 
     /// A review the chain holds is final; its `created_at` is consensus
@@ -114,7 +132,7 @@ impl ForgeView {
             for next in [
                 span(
                     part.mention.clone(),
-                    Some(part.mention_link.clone()),
+                    Some(part.mention_account.clone()),
                     wire::Weight::Medium,
                     false,
                 ),
@@ -187,8 +205,8 @@ impl ForgeView {
                     }
                     lines.push(code);
                     let mut boxed = native::padded(
-                        native::spaced(native::column(&key, lines), 4.),
-                        wire::Edges::all(10.),
+                        native::spaced(native::column(&key, lines), native::spacing::XXS as f32),
+                        wire::Edges::all(native::spacing::MD as f32),
                     );
                     if let wire::Node::Linear {
                         background, border, ..
@@ -223,7 +241,7 @@ impl ForgeView {
                                 top: 2.,
                                 right: 0.,
                                 bottom: 2.,
-                                left: 12.,
+                                left: native::spacing::LG as f32,
                             },
                         );
                         if let wire::Node::Linear { border, .. } = &mut quote {
@@ -242,7 +260,7 @@ impl ForgeView {
                 _ => {}
             }
         }
-        native::spaced(native::column(key, children), 8.)
+        native::spaced(native::column(key, children), native::spacing::SM as f32)
     }
     /// The item's own body: a reading, wider type at 1.5 leading, held to a
     /// measure a person can track a line across.

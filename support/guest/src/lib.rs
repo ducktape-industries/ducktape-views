@@ -18,8 +18,8 @@ pub mod rev;
 // task, subscription}`), so the desktop that renders for a view takes the same
 // implementation without linking this SDK. Re-exported here because a view
 // names them through this crate.
-pub use view_wire::{kit, task};
 pub use view_wire::{Recipe, Subscription, Task};
+pub use view_wire::{kit, task};
 
 mod editor;
 mod editor_binding;

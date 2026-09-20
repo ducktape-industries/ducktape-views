@@ -33,9 +33,9 @@ impl PagesView {
                     )],
                 ),
                 wire::Edges {
-                    top: 12.,
+                    top: kit::spacing::LG as f32,
                     right: 16.,
-                    bottom: 12.,
+                    bottom: kit::spacing::LG as f32,
                     left: 16.,
                 },
             ));
@@ -66,6 +66,11 @@ impl PagesView {
         // answers, so a row's menu opens at the pointer.
         let screen = Node::MouseArea {
             key: format!("{PAGE_KEY}/press-area"),
+            role: None,
+            label: None,
+            expanded: None,
+            selected: None,
+            checked: None,
             on_press: None,
             on_release: None,
             on_double_click: None,
@@ -85,48 +90,27 @@ impl PagesView {
                 0.,
             ))),
         };
-        // The screen always sits in a stack: a mouse area reports no size of
-        // its own, so a sensor around it would collapse it. A row menu adds
-        // a transparent backdrop that closes it on any press, then the card
-        // floated at the press.
-        let mut layers = vec![screen];
-        if let Some(menu) = self.page_row_menu() {
-            layers.push(page_menu_backdrop());
-            layers.push(menu);
-        }
-        Node::Stack {
-            key: format!("{PAGE_KEY}/menu-stack"),
-            width: Some(Length::Fill),
-            height: Some(Length::Fill),
-            padding: None,
-            background: None,
-            border: None,
-            clip: false,
-            under: 1,
-            children: layers,
+        // A row menu becomes a modal over the screen, with its card floated at
+        // the press.
+        match self.page_row_menu() {
+            None => screen,
+            Some(menu) => Node::Overlay {
+                key: format!("{PAGE_KEY}/menu-overlay"),
+                label: Some("Page menu".into()),
+                padding: 0.,
+                backdrop: wire::Rgba([0.; 4]),
+                align_x: wire::AlignX::Left,
+                align_y: wire::AlignY::Top,
+                on_dismiss: Some(slots::message(Message::ClosePageMenu)),
+                children: vec![screen, menu],
+            },
         }
     }
 }
 
-/// The press-through sheet under an open row menu.
-fn page_menu_backdrop() -> Node {
-    Node::MouseArea {
-        key: format!("{PAGE_KEY}/menu-backdrop"),
-        on_press: Some(slots::message(Message::ClosePageMenu)),
-        on_release: None,
-        on_double_click: None,
-        on_right_press: Some(slots::message(Message::ClosePageMenu)),
-        on_right_release: None,
-        on_middle_press: None,
-        on_middle_release: None,
-        on_enter: None,
-        on_exit: None,
-        on_move: None,
-        on_press_at: None,
-        on_scroll: None,
-        content: Box::new(kit::space(Some(Length::Fill), Some(Length::Fill))),
-    }
-}
+/// Below this document-pane width the toolbar stacks its controls under the
+/// title: the controls alone are ~470px, and the title keeps ~170px beside.
+const TOOLBAR_STACK_WIDTH: f64 = 640.;
 
 impl PagesView {
     fn sidebar(&self) -> Node {
@@ -137,7 +121,7 @@ impl PagesView {
                     [
                         header_bar(
                             "pages/sidebar/header",
-                            12.,
+                            kit::spacing::LG as f32,
                             [kit::nowrap(kit::heading("pages/sidebar/title", "Pages"))],
                         ),
                         kit::divider("pages/sidebar/rule"),
@@ -149,7 +133,7 @@ impl PagesView {
         let mut rows = vec![
             header_bar(
                 "pages/sidebar/header",
-                12.,
+                kit::spacing::LG as f32,
                 [
                     kit::nowrap(kit::heading("pages/sidebar/title", "Pages")),
                     kit::badge(
@@ -174,15 +158,10 @@ impl PagesView {
         ];
         let mut list = self.page_tree_rows();
         if list.is_empty() && !self.loading {
-            list.push(kit::padded(
-                kit::column(
-                    "pages/sidebar/empty-box",
-                    [kit::wrapping(kit::secondary(
-                        "pages/sidebar/empty",
-                        "No pages yet. Create one to start writing.",
-                    ))],
-                ),
-                wire::Edges::all(8.),
+            list.push(empty_state(
+                "pages/sidebar/empty",
+                "No pages yet",
+                "Create one with + to start writing.",
             ));
         }
         rows.push(kit::scroll(
@@ -190,10 +169,10 @@ impl PagesView {
             kit::padded(
                 kit::spaced(kit::column("pages/sidebar/list", list), 1.),
                 wire::Edges {
-                    top: 6.,
-                    right: 6.,
-                    bottom: 8.,
-                    left: 6.,
+                    top: kit::spacing::XS as f32,
+                    right: kit::spacing::XS as f32,
+                    bottom: kit::spacing::SM as f32,
+                    left: kit::spacing::XS as f32,
                 },
             ),
         ));
@@ -226,7 +205,12 @@ impl PagesView {
             ));
             crumb.push(kit::nowrap(kit::caption(format!("{key}/crumb"), "/")));
         }
-        crumb.push(kit::nowrap(kit::strong("pages/toolbar/title", title)));
+        // the title takes what the crumb leaves and ends in an ellipsis there
+        crumb.push(kit::sized(
+            kit::nowrap(kit::strong("pages/toolbar/title", title)),
+            Some(Length::Fill),
+            None,
+        ));
         let status = match self.autosave.as_str() {
             "saving" => ("Saving…", Tone::Neutral),
             "error" => ("Not saved", Tone::Danger),
@@ -247,6 +231,7 @@ impl PagesView {
         if let Node::Button { checked, .. } = &mut comments {
             *checked = Some(self.block_comments_open);
         }
+        let comments = disclosure(comments, self.block_comments_open);
         let mut controls = vec![
             kit::nowrap(kit::text_size(
                 kit::tone_text("pages/toolbar/save-status", status.0, status.1),
@@ -289,32 +274,51 @@ impl PagesView {
                 ),
             );
         }
-        kit::spaced(
-            kit::column(
-                "pages/toolbar-bar",
-                [
-                    header_bar(
+        let heading = kit::sized(
+            kit::spaced(kit::centered_row("pages/toolbar/heading", crumb), kit::spacing::XS as f32),
+            Some(Length::Fill),
+            None,
+        );
+        // A narrow pane cannot hold the title beside ~470px of controls: the
+        // controls move under the title and wrap there.
+        let bar = if self.pages_pane_width < TOOLBAR_STACK_WIDTH {
+            kit::padded(
+                kit::spaced(
+                    kit::column(
                         "pages/toolbar",
-                        16.,
                         [
-                            kit::sized(
-                                kit::spaced(kit::centered_row("pages/toolbar/heading", crumb), 6.),
-                                Some(Length::Fill),
-                                None,
-                            ),
-                            kit::sized(
-                                kit::spaced(
-                                    kit::centered_row("pages/toolbar/controls", controls),
-                                    6.,
-                                ),
-                                Some(Length::Shrink),
-                                None,
+                            heading,
+                            kit::aligned(
+                                kit::spaced(kit::wrapped_row("pages/toolbar/controls", controls), kit::spacing::XS as f32),
+                                wire::AlignX::Center,
                             ),
                         ],
                     ),
-                    kit::divider("pages/toolbar/rule"),
+                    kit::spacing::XS as f32,
+                ),
+                wire::Edges {
+                    top: kit::spacing::XS as f32,
+                    right: kit::spacing::SM as f32,
+                    bottom: kit::spacing::XS as f32,
+                    left: 16.,
+                },
+            )
+        } else {
+            header_bar(
+                "pages/toolbar",
+                16.,
+                [
+                    heading,
+                    kit::sized(
+                        kit::spaced(kit::centered_row("pages/toolbar/controls", controls), kit::spacing::XS as f32),
+                        Some(Length::Shrink),
+                        None,
+                    ),
                 ],
-            ),
+            )
+        };
+        kit::spaced(
+            kit::column("pages/toolbar-bar", [bar, kit::divider("pages/toolbar/rule")]),
             0.,
         )
     }
@@ -408,11 +412,11 @@ impl PagesView {
                                         ),
                                     ],
                                 ),
-                                6.,
+                                kit::spacing::XS as f32,
                             ),
                         ],
                     ),
-                    6.,
+                    kit::spacing::XS as f32,
                 ),
                 Tone::Accent,
             ));
@@ -439,7 +443,7 @@ impl PagesView {
                 "pages/document/surface",
                 fill(kit::spaced(
                     kit::column("pages/document/content", content),
-                    12.,
+                    kit::spacing::LG as f32,
                 )),
             ),
             wire::Edges {
@@ -506,7 +510,7 @@ impl PagesView {
                     results,
                 ],
             ),
-            10.,
+            kit::spacing::MD as f32,
         ));
         let mut panel = modal(
             "pages/search/panel",
@@ -519,6 +523,7 @@ impl PagesView {
         }
         overlay(
             "pages/search",
+            "Search pages",
             panel,
             Message::ClearPageSearch,
             wire::AlignX::Center,
@@ -570,6 +575,7 @@ impl PagesView {
             on_document,
             editable,
             placeholder: "Write with Markdown…".into(),
+            label: Some(format!("{} document", crate::host::titled(&self.active_page_title))),
             width: None,
             height: None,
             min_height: None,
@@ -699,15 +705,18 @@ impl PagesView {
         if !resolved.is_empty() {
             threads.push(leading(
                 "pages/comments/resolved/lead",
-                named(
-                    action(
-                        "pages/comments/resolved",
-                        crate::host::resolved_label(&resolved),
-                        Message::ToggleResolvedComments,
-                        true,
-                        ButtonPreset::Text,
+                disclosure(
+                    named(
+                        action(
+                            "pages/comments/resolved",
+                            crate::host::resolved_label(&resolved),
+                            Message::ToggleResolvedComments,
+                            true,
+                            ButtonPreset::Text,
+                        ),
+                        "Resolved threads",
                     ),
-                    "Resolved threads",
+                    self.resolved_open,
                 ),
             ));
             if self.resolved_open {
@@ -771,11 +780,11 @@ impl PagesView {
             kit::column(
                 "pages/comments/content",
                 [
-                    kit::spaced(kit::centered_row("pages/comments/header", header), 4.),
+                    kit::spaced(kit::centered_row("pages/comments/header", header), kit::spacing::XXS as f32),
                     kit::divider("pages/comments/rule"),
                     kit::scroll(
                         "pages/comments/scroll",
-                        kit::spaced(kit::column("pages/comments/threads", threads), 6.),
+                        kit::spaced(kit::column("pages/comments/threads", threads), kit::spacing::XS as f32),
                     ),
                     kit::wrapping(kit::caption("pages/comments/hint", compose_hint)),
                     kit::column("pages/comments/working", working_row),
@@ -801,11 +810,11 @@ impl PagesView {
                                 ),
                             ],
                         ),
-                        6.,
+                        kit::spacing::XS as f32,
                     ),
                 ],
             ),
-            8.,
+            kit::spacing::SM as f32,
         ));
         let limit =
             crate::host::comment_card_height(self.comment_anchor_y, self.pages_viewport_height)
@@ -822,7 +831,7 @@ impl PagesView {
         {
             *clip = true;
             *width = Some(Length::Fill);
-            *padding = Some(wire::Edges::all(12.));
+            *padding = Some(wire::Edges::all(kit::spacing::LG as f32));
         }
         // The card is as tall as its threads: a block with one note is a
         // short card, not 400px of blank under it. The limit is a ceiling the

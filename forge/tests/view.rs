@@ -6,8 +6,17 @@
 
 use ducktape_view_guest::testing::{answer, has_text, item, press, refuse, texts, type_into};
 use ducktape_view_guest::wire::{Event, Frame, Node, Request};
+use forge_view::boot_native;
 use forge_view::host::Session;
-use forge_view::{boot_native, tick_native};
+
+/// Every frame a test renders is one assistive technology can name.
+fn tick_native(events: Vec<ducktape_view_guest::wire::Event>) -> ducktape_view_guest::wire::Frame {
+    let frame = forge_view::tick_native(events);
+    if let Some(root) = &frame.root {
+        assert_eq!(ducktape_view_guest::wire::accessibility_faults(root), []);
+    }
+    frame
+}
 
 fn node_ending(frame: &Frame, suffix: &str) -> Node {
     fn find(node: &Node, suffix: &str) -> Option<Node> {
@@ -162,6 +171,7 @@ fn session(link: &str) -> Vec<u8> {
         org: "duckhouse".into(),
         about: "a pond".into(),
         network_chain_id: "mynet#d0cdf950".into(),
+        chain: "testnet#0a1b2c3d".into(),
         connected_rpc: "http://127.0.0.1:1".into(),
         link: link.into(),
         link_tick: i64::from(!link.is_empty()),
@@ -169,8 +179,11 @@ fn session(link: &str) -> Vec<u8> {
     .expect("session encodes")
 }
 
+/// The one commit every fixture branch and repo head stands on.
+const HEAD: &str = "1111222233334444555566667777888899990000";
+
 fn repos() -> Vec<u8> {
-    serde_json::json!({ "repos": [{ "name": "core", "head": "1111222233334444" }] })
+    serde_json::json!({ "repos": [{ "name": "ducks/core", "head": "1111222233334444555566667777888899990000" }] })
         .to_string()
         .into_bytes()
 }
@@ -185,7 +198,7 @@ fn accounts() -> Vec<u8> {
 }
 
 fn refs() -> Vec<u8> {
-    serde_json::json!({ "refs": [{ "name": "main", "head": "1111222233334444" }] })
+    serde_json::json!({ "refs": [{ "name": "main", "head": "1111222233334444555566667777888899990000" }] })
         .to_string()
         .into_bytes()
 }
@@ -212,7 +225,7 @@ fn detail() -> Vec<u8> {
 
 fn pr_diff() -> Vec<u8> {
     serde_json::json!({ "pr_diff": {
-        "source_oid": "aaaabbbbccccdddd", "target_oid": "1111222233334444",
+        "source_oid": "aaaabbbbccccdddd", "target_oid": "1111222233334444555566667777888899990000",
         "patch": "--- a/main.rs\n+++ b/main.rs\n@@ -1 +1 @@\n-old\n+new\n",
         "truncated": false, "files_changed": 1, "additions": 1, "deletions": 1
     }})
@@ -226,7 +239,7 @@ fn pr_diff() -> Vec<u8> {
 /// looks like this — a rebuilt `component.wasm` beside its source.
 fn pr_diff_with_binary() -> Vec<u8> {
     serde_json::json!({ "pr_diff": {
-        "source_oid": "aaaabbbbccccdddd", "target_oid": "1111222233334444",
+        "source_oid": "aaaabbbbccccdddd", "target_oid": "1111222233334444555566667777888899990000",
         "patch": concat!(
             "diff --git a/main.rs b/main.rs\n",
             "index 94c9d14..c2e5965 100644\n",
@@ -331,7 +344,11 @@ fn a_connected_view_reads_its_own_repo_namespace() {
     );
 
     let (drive, _live) = namespace("");
-    assert!(has_text(&drive.frame, "core"), "{:?}", texts(&drive.frame));
+    assert!(
+        has_text(&drive.frame, "ducks/core"),
+        "{:?}",
+        texts(&drive.frame)
+    );
     assert!(
         has_text(&drive.frame, "duckhouse"),
         "{:?}",
@@ -380,12 +397,14 @@ fn a_refused_read_is_shown_where_the_listing_would_be() {
 /// itself is the line.
 #[test]
 fn a_refused_file_read_says_so_in_the_file_pane() {
-    let (mut drive, _) = namespace("duck://forge/core/blob/main.rs");
+    let (mut drive, _) = namespace(
+        "duck://testnet-0a1b2c3d/forge/ducks/core/blob/1111222233334444555566667777888899990000/main.rs",
+    );
     drive.answer("list_refs", &refs());
     drive.answer("list_items", &items());
     drive.answer("all", &accounts());
     let tree = serde_json::json!({ "tree": {
-        "rev": "1111222233334444", "born": true, "truncated": false,
+        "rev": "1111222233334444555566667777888899990000", "born": true, "truncated": false,
         "entries": [{ "name": "main.rs", "path": "main.rs", "kind": "file" }]
     }});
     drive.answer("tree", tree.to_string().as_bytes());
@@ -411,7 +430,7 @@ fn a_refused_file_read_says_so_in_the_file_pane() {
 /// both screens are drawn from the reads the item already made.
 #[test]
 fn an_item_opens_on_its_conversation_with_its_files_one_press_away() {
-    let mut drive = open_item("duck://forge/core/7");
+    let mut drive = open_item("duck://testnet-0a1b2c3d/forge/ducks/core/7");
     assert!(
         has_text(&drive.frame, "why this lands"),
         "the body is on the conversation: {:?}",
@@ -469,7 +488,7 @@ fn an_item_opens_on_its_conversation_with_its_files_one_press_away() {
 /// are: a reader deciding whether to merge is on the conversation.
 #[test]
 fn the_merge_box_and_the_reviews_stay_on_the_conversation() {
-    let drive = open_item("duck://forge/core/7");
+    let drive = open_item("duck://testnet-0a1b2c3d/forge/ducks/core/7");
     for expected in ["Merge pull request", "Reviews"] {
         assert!(
             has_text(&drive.frame, expected),
@@ -477,7 +496,7 @@ fn the_merge_box_and_the_reviews_stay_on_the_conversation() {
             texts(&drive.frame)
         );
     }
-    let files = open_files("duck://forge/core/7");
+    let files = open_files("duck://testnet-0a1b2c3d/forge/ducks/core/7");
     for absent in ["Merge pull request", "Reviews"] {
         assert!(
             !has_text(&files.frame, absent),
@@ -491,7 +510,7 @@ fn the_merge_box_and_the_reviews_stay_on_the_conversation() {
 /// a tab that can only ever be empty is a tab that lies.
 #[test]
 fn an_issue_wears_no_files_tab() {
-    let drive = open_issue("duck://forge/core/8");
+    let drive = open_issue("duck://testnet-0a1b2c3d/forge/ducks/core/8");
     assert!(
         has_text(&drive.frame, "the pond is cold"),
         "the issue is open: {:?}",
@@ -511,7 +530,7 @@ fn an_issue_wears_no_files_tab() {
 /// which is where a reader starts.
 #[test]
 fn leaving_an_item_forgets_which_screen_it_was_left_on() {
-    let mut drive = open_files("duck://forge/core/7");
+    let mut drive = open_files("duck://testnet-0a1b2c3d/forge/ducks/core/7");
     assert!(has_text(&drive.frame, "@@ -1 +1 @@"));
     drive.tick(press(&drive.frame, "Back to tracker"));
     drive.tick(press(&drive.frame, "Bound every list"));
@@ -529,7 +548,7 @@ fn leaving_an_item_forgets_which_screen_it_was_left_on() {
 /// never git's own `---`/`+++`/`index` bookkeeping lines.
 #[test]
 fn a_patch_opens_each_file_with_one_named_row() {
-    let drive = open_files("duck://forge/core/7");
+    let drive = open_files("duck://testnet-0a1b2c3d/forge/ducks/core/7");
     let shown = texts(&drive.frame);
     assert!(shown.iter().any(|text| text == "main.rs"), "{shown:?}");
     assert!(
@@ -559,7 +578,7 @@ fn the_whole_sentence_of_a_long_refusal_reaches_the_screen() {
         "source 564ea02b5b094f225ebab8fcf09a1a782d24fffb): ",
         "diff is too large: 1 changed files / 8388609 materialized blob bytes",
     );
-    let (mut drive, _) = namespace("duck://forge/core/7");
+    let (mut drive, _) = namespace("duck://testnet-0a1b2c3d/forge/ducks/core/7");
     drive.answer("list_refs", &refs());
     drive.answer("list_items", &items());
     drive.answer("all", &accounts());
@@ -584,7 +603,7 @@ fn the_whole_sentence_of_a_long_refusal_reaches_the_screen() {
 /// reaches the screen either.
 #[test]
 fn a_changed_binary_is_named_and_offers_nothing_to_press() {
-    let drive = open_files_with_binary("duck://forge/core/7");
+    let drive = open_files_with_binary("duck://testnet-0a1b2c3d/forge/ducks/core/7");
     let shown = texts(&drive.frame);
     assert!(
         shown
@@ -614,7 +633,7 @@ fn a_changed_binary_is_named_and_offers_nothing_to_press() {
 /// cannot end up hidden inside the file above it.
 #[test]
 fn folding_a_text_file_leaves_the_binary_row_alone() {
-    let mut drive = open_files_with_binary("duck://forge/core/7");
+    let mut drive = open_files_with_binary("duck://testnet-0a1b2c3d/forge/ducks/core/7");
     assert!(has_text(&drive.frame, "@@ -1 +1 @@"));
     drive.tick(press(&drive.frame, "main.rs"));
     assert!(
@@ -636,7 +655,7 @@ fn folding_a_text_file_leaves_the_binary_row_alone() {
 /// missing reply decodes to would claim the pull request changes nothing.
 #[test]
 fn a_refused_patch_read_is_said_under_changes() {
-    let (mut drive, _) = namespace("duck://forge/core/7");
+    let (mut drive, _) = namespace("duck://testnet-0a1b2c3d/forge/ducks/core/7");
     drive.answer("list_refs", &refs());
     drive.answer("list_items", &items());
     drive.answer("all", &accounts());
@@ -664,13 +683,13 @@ fn a_refused_patch_read_is_said_under_changes() {
     );
 }
 
-/// A `duck://forge/<repo>/<n>` the app routed here opens the repo AND
+/// A `duck://<chain>/forge/<owner>/<repo>/<n>` the app routed here opens the repo AND
 /// its item without the app holding either: the view parses the address and
 /// makes both reads itself. The author's display name is one of them — the
 /// identity roster, read the way the app reads it.
 #[test]
 fn a_routed_link_opens_the_item_it_names() {
-    let drive = open_item("duck://forge/core/7");
+    let drive = open_item("duck://testnet-0a1b2c3d/forge/ducks/core/7");
     for expected in ["Bound every list", "work into main", "Mallard"] {
         assert!(
             has_text(&drive.frame, expected),
@@ -684,7 +703,7 @@ fn a_routed_link_opens_the_item_it_names() {
 /// the module's wire names, signed by the kernel with the seated key.
 #[test]
 fn a_review_leaves_as_a_signed_op() {
-    let mut drive = open_files("duck://forge/core/7");
+    let mut drive = open_files("duck://testnet-0a1b2c3d/forge/ducks/core/7");
     let typed = type_into(&drive.frame, "Leave a review…", "reads well");
     drive.tick(typed);
     let events = press(&drive.frame, "Submit review");
@@ -693,7 +712,7 @@ fn a_review_leaves_as_a_signed_op() {
     let op: serde_json::Value = serde_json::from_slice(&submit.payload).expect("an op decodes");
     assert_eq!(op["target"], "forge");
     let review = &op["payload"]["submit_review"];
-    assert_eq!(review["repo"], "core");
+    assert_eq!(review["repo"], "ducks/core");
     assert_eq!(review["number"], 7);
     assert_eq!(review["verdict"], "comment");
     assert_eq!(review["body"], "reads well");
@@ -704,7 +723,7 @@ fn a_review_leaves_as_a_signed_op() {
 /// pack for the guest's signed operation with both expected branch heads.
 #[test]
 fn a_merge_uses_its_deployed_service_then_submits_the_commit() {
-    let mut drive = open_item("duck://forge/core/7");
+    let mut drive = open_item("duck://testnet-0a1b2c3d/forge/ducks/core/7");
     let events = press(&drive.frame, "Merge pull request");
     drive.tick(events);
     let config = request(&drive.frame, "asset.read");
@@ -718,8 +737,11 @@ fn a_merge_uses_its_deployed_service_then_submits_the_commit() {
     assert_eq!(envelope["path"], "/merge");
     let body: Vec<u8> = serde_json::from_value(envelope["body"].clone()).unwrap();
     let ask: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(ask["repo"], "core");
-    assert_eq!(ask["ours"], "1111222233334444", "the target tip");
+    assert_eq!(ask["repo"], "ducks/core");
+    assert_eq!(
+        ask["ours"], "1111222233334444555566667777888899990000",
+        "the target tip"
+    );
     assert_eq!(ask["theirs"], "aaaabbbbccccdddd", "the source tip");
 
     let built = serde_json::json!({ "merge_oid": "99998888", "pack_b64": "UEFDSw==" });
@@ -733,8 +755,8 @@ fn a_merge_uses_its_deployed_service_then_submits_the_commit() {
     assert_eq!(
         op["payload"]["merge_pr"],
         serde_json::json!({
-            "repo": "core", "number": 7,
-            "prev_target_oid": "1111222233334444",
+            "repo": "ducks/core", "number": 7,
+            "prev_target_oid": "1111222233334444555566667777888899990000",
             "expected_source_oid": "aaaabbbbccccdddd",
             "merge_oid": "99998888", "pack_digest": "de".repeat(32)
         })
@@ -745,7 +767,7 @@ fn a_merge_uses_its_deployed_service_then_submits_the_commit() {
 /// screen and no op is submitted over a merge that does not exist.
 #[test]
 fn a_conflicting_merge_submits_nothing() {
-    let mut drive = open_item("duck://forge/core/7");
+    let mut drive = open_item("duck://testnet-0a1b2c3d/forge/ducks/core/7");
     let events = press(&drive.frame, "Merge pull request");
     drive.tick(events);
     let config = request(&drive.frame, "asset.read").id;
@@ -776,7 +798,7 @@ fn a_conflicting_merge_submits_nothing() {
 fn the_repository_tree_width_is_the_readers_and_its_edge_has_a_resize_cursor() {
     use ducktape_view_guest::wire::{Length, mouse};
 
-    let (drive, _) = namespace("duck://forge/core");
+    let (drive, _) = namespace("duck://testnet-0a1b2c3d/forge/ducks/core");
     let width = |frame: &Frame| match node_ending(frame, "/tree-pane") {
         Node::Container {
             width: Some(Length::Fixed(width)),
@@ -826,7 +848,7 @@ fn listing(entries: &[(&str, &str)]) -> Vec<u8> {
         })
         .collect();
     serde_json::json!({ "tree": {
-        "rev": "1111222233334444", "born": true, "truncated": false, "entries": entries
+        "rev": "1111222233334444555566667777888899990000", "born": true, "truncated": false, "entries": entries
     }})
     .to_string()
     .into_bytes()
@@ -855,7 +877,7 @@ fn has_key_ending(frame: &Frame, suffix: &str) -> bool {
 /// them without another read.
 #[test]
 fn a_directory_unfolds_under_its_row_and_folds_again() {
-    let (mut drive, _) = namespace("duck://forge/core");
+    let (mut drive, _) = namespace("duck://testnet-0a1b2c3d/forge/ducks/core");
     drive.answer("list_refs", &refs());
     drive.answer("list_items", &items());
     drive.answer("all", &accounts());
@@ -883,7 +905,9 @@ fn a_directory_unfolds_under_its_row_and_folds_again() {
 /// leaves the tree unfolded down to the file.
 #[test]
 fn a_file_link_unfolds_the_tree_down_to_it() {
-    let (mut drive, _) = namespace("duck://forge/core/blob/src/main.rs");
+    let (mut drive, _) = namespace(
+        "duck://testnet-0a1b2c3d/forge/ducks/core/blob/1111222233334444555566667777888899990000/src/main.rs",
+    );
     drive.answer("list_refs", &refs());
     drive.answer("list_items", &items());
     drive.answer("all", &accounts());
@@ -909,7 +933,7 @@ fn a_file_link_unfolds_the_tree_down_to_it() {
 
 #[test]
 fn a_diff_line_comment_keeps_its_anchor_and_submits_without_a_review_body() {
-    let mut drive = open_files("duck://forge/core/7");
+    let mut drive = open_files("duck://testnet-0a1b2c3d/forge/ducks/core/7");
     // the mark reads `+` and carries the line it belongs to as its name
     drive.tick(press(&drive.frame, "main.rs:1"));
     drive.tick(type_into(
@@ -935,7 +959,7 @@ fn a_diff_line_comment_keeps_its_anchor_and_submits_without_a_review_body() {
 /// The tracker with the Issues tab open: the repo the link named, its
 /// refs, its items and the roster behind their authors.
 fn open_issues_tab() -> Drive {
-    let (mut drive, _) = namespace("duck://forge/core");
+    let (mut drive, _) = namespace("duck://testnet-0a1b2c3d/forge/ducks/core");
     drive.answer("list_refs", &refs());
     drive.answer("list_items", &items());
     drive.answer("all", &accounts());
@@ -980,7 +1004,7 @@ fn an_issue_opens_from_the_tracker_and_the_live_hit_lists_it() {
     assert_eq!(
         op["payload"]["open_issue"],
         serde_json::json!({
-            "repo": "core", "title": "the pond is cold", "body": "every morning"
+            "repo": "ducks/core", "title": "the pond is cold", "body": "every morning"
         })
     );
 
@@ -1062,7 +1086,7 @@ fn service_reply(body: serde_json::Value) -> Vec<u8> {
 
 #[test]
 fn a_merge_without_its_deployment_service_asset_is_refused() {
-    let mut drive = open_item("duck://forge/core/7");
+    let mut drive = open_item("duck://testnet-0a1b2c3d/forge/ducks/core/7");
     let events = press(&drive.frame, "Merge pull request");
     drive.tick(events);
     let config = request(&drive.frame, "asset.read").id;
@@ -1093,17 +1117,13 @@ fn surface_named(frame: &Frame) -> String {
 /// forge lands.
 #[test]
 fn a_repository_opens_on_its_readme() {
-    let (mut drive, _) = namespace("duck://forge/core");
+    let (mut drive, _) = namespace("duck://testnet-0a1b2c3d/forge/ducks/core");
     drive.answer("list_refs", &refs());
     drive.answer("list_items", &items());
     drive.answer("all", &accounts());
     drive.answer_tree(
         "",
-        &listing(&[
-            ("LICENSE", "file"),
-            ("README.md", "file"),
-            ("src", "dir"),
-        ]),
+        &listing(&[("LICENSE", "file"), ("README.md", "file"), ("src", "dir")]),
     );
     assert!(
         has_text(&drive.frame, "Loading file…"),
@@ -1114,7 +1134,7 @@ fn a_repository_opens_on_its_readme() {
     drive.tick(vec![answer(
         blob,
         serde_json::json!({ "blob": {
-            "path": "README.md", "rev": "1111222233334444",
+            "path": "README.md", "rev": "1111222233334444555566667777888899990000",
             "text": "# core\n\nwhat this repository is", "binary": false, "truncated": false
         }})
         .to_string()
@@ -1122,17 +1142,27 @@ fn a_repository_opens_on_its_readme() {
     )]);
     // a markdown body parks its inline pictures with the host before it
     // reaches the reader
-    let parked = request(&drive.frame, "picture.inline").id;
+    let parked = request(&drive.frame, "picture.inline");
+    let ask: serde_json::Value = serde_json::from_slice(&parked.payload).unwrap();
+    assert_eq!(
+        ask["base"],
+        format!("duck://testnet-0a1b2c3d/forge/ducks/core/blob/{HEAD}/README.md")
+    );
+    let parked = parked.id;
     drive.tick(vec![answer(parked, b"{}")]);
     assert_eq!(surface_named(&drive.frame), "markdown");
-    assert!(has_text(&drive.frame, "README.md"), "{:?}", texts(&drive.frame));
+    assert!(
+        has_text(&drive.frame, "README.md"),
+        "{:?}",
+        texts(&drive.frame)
+    );
 }
 
 /// A repository without a README leaves the reader's own empty state on
 /// screen — the landing never invents a file to open.
 #[test]
 fn a_repository_without_a_readme_lands_on_its_empty_state() {
-    let (mut drive, _) = namespace("duck://forge/core");
+    let (mut drive, _) = namespace("duck://testnet-0a1b2c3d/forge/ducks/core");
     drive.answer("list_refs", &refs());
     drive.answer("list_items", &items());
     drive.answer("all", &accounts());
@@ -1153,7 +1183,9 @@ fn a_repository_without_a_readme_lands_on_its_empty_state() {
 /// link named, and the README is never read over it.
 #[test]
 fn a_deep_link_beats_the_landing_readme() {
-    let (mut drive, _) = namespace("duck://forge/core/blob/src/main.rs");
+    let (mut drive, _) = namespace(
+        "duck://testnet-0a1b2c3d/forge/ducks/core/blob/1111222233334444555566667777888899990000/src/main.rs",
+    );
     drive.answer("list_refs", &refs());
     drive.answer("list_items", &items());
     drive.answer("all", &accounts());
@@ -1163,7 +1195,7 @@ fn a_deep_link_beats_the_landing_readme() {
     drive.tick(vec![answer(
         blob,
         serde_json::json!({ "blob": {
-            "path": "src/main.rs", "rev": "1111222233334444",
+            "path": "src/main.rs", "rev": "1111222233334444555566667777888899990000",
             "text": "fn main() {}", "binary": false, "truncated": false
         }})
         .to_string()
@@ -1182,7 +1214,9 @@ fn a_deep_link_beats_the_landing_readme() {
 /// it unfolded — a crumb names where to be, not a fold to flip.
 #[test]
 fn a_crumb_shows_its_directory_and_never_folds_it() {
-    let (mut drive, _) = namespace("duck://forge/core/blob/src/util/mod.rs");
+    let (mut drive, _) = namespace(
+        "duck://testnet-0a1b2c3d/forge/ducks/core/blob/1111222233334444555566667777888899990000/src/util/mod.rs",
+    );
     drive.answer("list_refs", &refs());
     drive.answer("list_items", &items());
     drive.answer("all", &accounts());
@@ -1193,7 +1227,7 @@ fn a_crumb_shows_its_directory_and_never_folds_it() {
     drive.tick(vec![answer(
         blob,
         serde_json::json!({ "blob": {
-            "path": "src/util/mod.rs", "rev": "1111222233334444",
+            "path": "src/util/mod.rs", "rev": "1111222233334444555566667777888899990000",
             "text": "pub fn greeting() {}", "binary": false, "truncated": false
         }})
         .to_string()
@@ -1212,7 +1246,7 @@ fn a_crumb_shows_its_directory_and_never_folds_it() {
 
 #[test]
 fn the_landing_file_is_the_readme_whatever_it_is_called() {
-    use forge_view::host::{readme_of, TreeEntry};
+    use forge_view::host::{TreeEntry, readme_of};
     let entry = |path: &str, kind: &str| TreeEntry {
         name: path.rsplit('/').next().unwrap().to_owned(),
         path: path.to_owned(),
@@ -1223,12 +1257,18 @@ fn the_landing_file_is_the_readme_whatever_it_is_called() {
         readme_of(&[entry("readme", "file"), entry("README.md", "file")]),
         "README.md"
     );
-    assert_eq!(readme_of(&[entry("Readme.markdown", "file")]), "Readme.markdown");
+    assert_eq!(
+        readme_of(&[entry("Readme.markdown", "file")]),
+        "Readme.markdown"
+    );
     assert_eq!(readme_of(&[entry("README", "file")]), "README");
     assert_eq!(readme_of(&[entry("README.txt", "file")]), "README.txt");
     // a directory called README is not a file to open, and nothing else is a README
     assert_eq!(readme_of(&[entry("README.md", "dir")]), "");
-    assert_eq!(readme_of(&[entry("src/readme.md", "file")]), "src/readme.md");
+    assert_eq!(
+        readme_of(&[entry("src/readme.md", "file")]),
+        "src/readme.md"
+    );
     assert_eq!(readme_of(&[entry("READMEISH.md", "file")]), "");
     assert_eq!(readme_of(&[]), "");
 }
@@ -1254,7 +1294,7 @@ fn a_crumb_trail_presses_every_directory_but_the_file() {
 /// The events the host sends when a key is pressed with nothing focused.
 fn key_press(named: &str) -> Vec<Event> {
     use ducktape_view_guest::wire::keyboard::{
-        Event as Key, Key as Pressed, KeyState, Location, Modifiers, NativeCode, Named, Physical,
+        Event as Key, Key as Pressed, KeyState, Location, Modifiers, Named, NativeCode, Physical,
     };
     let key = match named {
         "Escape" => Pressed::Named(Named::Escape),
@@ -1297,7 +1337,7 @@ fn mixed_items() -> Vec<u8> {
 
 /// The repo open on its issue tracker, with both sides populated.
 fn tracker() -> Drive {
-    let (mut drive, _) = namespace("duck://forge/core");
+    let (mut drive, _) = namespace("duck://testnet-0a1b2c3d/forge/ducks/core");
     drive.answer("list_refs", &refs());
     drive.answer("list_items", &mixed_items());
     drive.answer("all", &accounts());
@@ -1319,7 +1359,11 @@ fn a_tracker_opens_on_the_open_side_and_the_closed_side_is_a_press_away() {
         texts(&drive.frame)
     );
     // each side wears its own count
-    assert!(has_text(&drive.frame, "Open 2"), "{:?}", texts(&drive.frame));
+    assert!(
+        has_text(&drive.frame, "Open 2"),
+        "{:?}",
+        texts(&drive.frame)
+    );
     assert!(has_text(&drive.frame, "Closed 1"));
     drive.tick(press(&drive.frame, "forge/tracker-side/closed"));
     assert!(has_text(&drive.frame, "Tabs miss their counts"));
@@ -1331,7 +1375,11 @@ fn a_tracker_opens_on_the_open_side_and_the_closed_side_is_a_press_away() {
 #[test]
 fn a_tracker_filter_keeps_what_matches_and_names_the_empty_case() {
     let mut drive = tracker();
-    drive.tick(type_into(&drive.frame, "Filter by title or number", "readme"));
+    drive.tick(type_into(
+        &drive.frame,
+        "Filter by title or number",
+        "readme",
+    ));
     assert!(has_text(&drive.frame, "The landing shows no README"));
     assert!(!has_text(&drive.frame, "Breadcrumbs are one string"));
     drive.tick(type_into(&drive.frame, "Filter by title or number", "#3"));
@@ -1348,7 +1396,7 @@ fn a_tracker_filter_keeps_what_matches_and_names_the_empty_case() {
 /// repository — and a key a native field took is that field's, not ours.
 #[test]
 fn escape_walks_back_out_of_the_item_then_the_repository() {
-    let mut drive = open_item("duck://forge/core/7");
+    let mut drive = open_item("duck://testnet-0a1b2c3d/forge/ducks/core/7");
     assert!(has_text(&drive.frame, "Bound every list"));
     let held = {
         let mut events = key_press("Escape");
@@ -1433,7 +1481,7 @@ fn focus_asks(drive: &Drive) -> Vec<String> {
 /// file leaves the others open.
 #[test]
 fn a_changed_file_folds_its_hunks_away_and_back() {
-    let mut drive = open_files("duck://forge/core/7");
+    let mut drive = open_files("duck://testnet-0a1b2c3d/forge/ducks/core/7");
     let hunk = "@@ -1 +1 @@";
     assert!(has_text(&drive.frame, hunk), "{:?}", texts(&drive.frame));
     drive.tick(press(&drive.frame, "main.rs"));
@@ -1445,4 +1493,131 @@ fn a_changed_file_folds_its_hunks_away_and_back() {
     assert!(has_text(&drive.frame, "main.rs"), "the header stays");
     drive.tick(press(&drive.frame, "main.rs"));
     assert!(has_text(&drive.frame, hunk), "and they come back");
+}
+
+/// An item link carries the view's chain and the repo's owner; a flat repo
+/// name or no chain has no address to give, a routed comment lands on its
+/// seq, and the old spelling names nothing.
+#[test]
+fn an_item_link_is_minted_only_where_the_view_can_address_it() {
+    use forge_view::host::{duck_forge_item_link, forge_link};
+    assert_eq!(
+        duck_forge_item_link("ducks/core", 7, "testnet#0a1b2c3d").as_deref(),
+        Some("duck://testnet-0a1b2c3d/forge/ducks/core/7")
+    );
+    assert_eq!(duck_forge_item_link("core", 7, "testnet#0a1b2c3d"), None);
+    assert_eq!(duck_forge_item_link("ducks/core", 7, ""), None);
+    let link = forge_link("duck://testnet-0a1b2c3d/forge/ducks/core/7/comment/3");
+    assert_eq!(
+        (link.repo.as_str(), link.number, link.seq),
+        ("ducks/core", 7, 3)
+    );
+    assert_eq!(forge_link("duck://forge/core/7?net=0a1b2c3d").repo, "");
+}
+
+// ---------- design: states, tokens, narrow panes ----------
+
+/// The repository list before its read answers is the kit's loading state,
+/// never a bare line — and never a blank pane.
+#[test]
+fn the_repository_list_loads_as_an_empty_state() {
+    let mut drive = Drive::boot();
+    let props = request(&drive.frame, "forge.props").id;
+    drive.tick(vec![item(props, &session(""))]);
+    let Node::Text { content, .. } = node_ending(&drive.frame, "forge/list-status/title") else {
+        panic!("the loading state has a title")
+    };
+    assert_eq!(content, "Loading repositories…");
+}
+
+/// An item whose read was refused is a failed item in the danger tone —
+/// not "Loading…" forever under the refusal.
+#[test]
+fn a_refused_item_read_is_a_failed_state_not_a_loading_one() {
+    let (mut drive, _) = namespace("duck://testnet-0a1b2c3d/forge/ducks/core/7");
+    drive.answer("list_refs", &refs());
+    drive.answer("list_items", &items());
+    drive.answer("all", &accounts());
+    let get_item = drive.take("get_item");
+    drive.tick(vec![refuse(get_item, "gone")]);
+    assert!(
+        matches!(
+            node_ending(&drive.frame, "forge/item-failed"),
+            Node::Container { .. }
+        ),
+        "{:?}",
+        texts(&drive.frame)
+    );
+    assert!(
+        !has_text(&drive.frame, "Loading this item…"),
+        "{:?}",
+        texts(&drive.frame)
+    );
+}
+
+/// The repository toolbar and the tracker's head WRAP: on a pane a few
+/// hundred pixels wide the tabs and the 280px filter drop to a second line
+/// instead of running off the edge.
+#[test]
+fn the_toolbar_and_the_tracker_head_wrap_on_a_narrow_pane() {
+    let drive = open_issues_tab();
+    for key in ["forge/navigation", "forge/tracker-head"] {
+        let Node::Linear { wrap, .. } = node_ending(&drive.frame, key) else {
+            panic!("{key} is a row")
+        };
+        assert!(wrap.is_some(), "{key} does not wrap");
+    }
+}
+
+/// A tracker row's title is body text and its byline the secondary step:
+/// the type scale's sizes, not a size of its own, and both end in an
+/// ellipsis at the row's edge.
+#[test]
+fn a_tracker_row_uses_the_type_scale_and_truncates() {
+    let (mut drive, _) = namespace("duck://testnet-0a1b2c3d/forge/ducks/core");
+    drive.answer("list_refs", &refs());
+    drive.answer("list_items", &items());
+    drive.answer("all", &accounts());
+    drive.tick(press(&drive.frame, "forge/tab/pulls"));
+    fn row_texts(node: &Node, found: &mut Vec<Node>) {
+        if node.key().is_some_and(|key| {
+            key.starts_with("forge/item/") && (key.ends_with("/open") || key.ends_with("/meta"))
+        }) {
+            found.push(node.clone());
+        }
+        for child in node.children() {
+            row_texts(child, found);
+        }
+    }
+    let mut found = Vec::new();
+    row_texts(drive.frame.root.as_ref().unwrap(), &mut found);
+    assert!(!found.is_empty(), "{:?}", texts(&drive.frame));
+    for node in found {
+        let Node::Text {
+            key,
+            size,
+            width,
+            options,
+            ..
+        } = node
+        else {
+            panic!("a row's title and byline are text")
+        };
+        let expected = if key.ends_with("/meta") {
+            Some(ducktape_view_guest::kit::type_scale::SECONDARY as f32)
+        } else {
+            None
+        };
+        assert_eq!(size, expected, "{key}");
+        assert_eq!(
+            width,
+            Some(ducktape_view_guest::wire::Length::Fill),
+            "{key}"
+        );
+        assert_eq!(
+            options.wrapping,
+            Some(ducktape_view_guest::wire::Wrapping::None),
+            "{key}"
+        );
+    }
 }

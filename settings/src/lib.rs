@@ -27,6 +27,12 @@ pub struct SettingsView {
     pub(crate) account_name: String,
     pub(crate) network_name: String,
     pub(crate) connected_rpc: String,
+    /// the node RPC facts (`host::Session::rpc_endpoint*`)
+    pub(crate) rpc_endpoint: String,
+    pub(crate) rpc_endpoint_override: String,
+    pub(crate) rpc_endpoint_refusal: String,
+    pub(crate) rpc_endpoint_editable: Option<bool>,
+    pub(crate) rpc_endpoint_editability_reason: String,
     pub(crate) account_ceremony_phase: String,
     pub(crate) account_ceremony_qr: String,
     pub(crate) account_ceremony_detail: String,
@@ -42,11 +48,13 @@ pub struct SettingsView {
     pub(crate) update_current: String,
     pub(crate) update_previous: String,
     pub(crate) update_staged_display: String,
+    pub(crate) update_refused: String,
     pub(crate) update_channel: String,
     pub(crate) update_checked: String,
     pub(crate) update_note: String,
     pub(crate) update_busy: bool,
     pub(crate) connection_serial: i64,
+    pub(crate) node_key: String,
     pub(crate) tier: String,
     pub(crate) admin: bool,
     pub(crate) members_line: String,
@@ -58,6 +66,7 @@ pub struct SettingsView {
     pub(crate) account_key_draft: String,
     pub(crate) account_key_label_draft: String,
     pub(crate) account_join_draft: String,
+    pub(crate) rpc_endpoint_draft: String,
     pub(crate) host_error: String,
     key_password: String,
     settings_pane: SettingsPane,
@@ -105,6 +114,9 @@ pub enum Message {
     BindAccountJoinDraft(String),
     BindAccountKeyDraft(String),
     BindAccountKeyLabelDraft(String),
+    BindRpcEndpointDraft(String),
+    SaveRpcEndpoint,
+    ClearRpcEndpoint,
     /// Try the view a code ballot would install: `(module, hash hex)`.
     Taste(String, String),
     /// Back to the current view of `module`.
@@ -131,6 +143,11 @@ impl SettingsView {
             account_name: "".to_owned(),
             network_name: "".to_owned(),
             connected_rpc: "".to_owned(),
+            rpc_endpoint: "".to_owned(),
+            rpc_endpoint_override: "".to_owned(),
+            rpc_endpoint_refusal: "".to_owned(),
+            rpc_endpoint_editable: None,
+            rpc_endpoint_editability_reason: "".to_owned(),
             account_ceremony_phase: "".to_owned(),
             account_ceremony_qr: "".to_owned(),
             account_ceremony_detail: "".to_owned(),
@@ -145,11 +162,13 @@ impl SettingsView {
             update_current: "".to_owned(),
             update_previous: "".to_owned(),
             update_staged_display: "".to_owned(),
+            update_refused: "".to_owned(),
             update_channel: "".to_owned(),
             update_checked: "".to_owned(),
             update_note: "".to_owned(),
             update_busy: false,
             connection_serial: 0,
+            node_key: "".to_owned(),
             tier: "".to_owned(),
             admin: false,
             members_line: "".to_owned(),
@@ -161,6 +180,7 @@ impl SettingsView {
             account_key_draft: "".to_owned(),
             account_key_label_draft: "".to_owned(),
             account_join_draft: "".to_owned(),
+            rpc_endpoint_draft: "".to_owned(),
             host_error: "".to_owned(),
             key_password: String::new(),
             settings_pane: SettingsPane::General,
@@ -174,7 +194,7 @@ impl SettingsView {
     pub(crate) const PREFERRED_WINDOW_SIZE: &'static str = "none";
     /// This state's layout, digested — `snapshot_schema` holds it here.
     pub(crate) const SNAPSHOT_SCHEMA: &'static str =
-        "ce3410128672865555ecb44ee823284c572ef8294638ae4679c536dbcecd241b";
+        "136e80e2fa0150c63aebfd41042cc84a37bceb2f1a6dcc9304e70b09af7cbb7c";
     pub(crate) fn snapshot(&self) -> Result<Vec<u8>, String> {
         wire::Snapshot {
             schema: Self::SNAPSHOT_SCHEMA.into(),
@@ -329,6 +349,9 @@ impl SettingsView {
             Message::BindAccountJoinDraft(value) => self.on_bind_account_join_draft(value),
             Message::BindAccountKeyDraft(value) => self.on_bind_account_key_draft(value),
             Message::BindAccountKeyLabelDraft(value) => self.on_bind_account_key_label_draft(value),
+            Message::BindRpcEndpointDraft(value) => self.on_bind_rpc_endpoint_draft(value),
+            Message::SaveRpcEndpoint => self.on_save_rpc_endpoint(),
+            Message::ClearRpcEndpoint => self.on_clear_rpc_endpoint(),
             Message::Taste(module, hash) => self.on_taste(module, hash),
             Message::Untaste(module) => self.on_untaste(module),
         }
@@ -358,6 +381,17 @@ impl SettingsView {
         self.account_name = next.account_name.to_owned();
         self.network_name = next.network_name.to_owned();
         self.connected_rpc = next.connected_rpc.to_owned();
+        // the URL draft follows the stored one whenever it moves — seeded on
+        // the first session, replaced when a save or a clear lands — and is
+        // kept while it does not, so a refused URL stays beside its refusal
+        if next.rpc_endpoint_override != self.rpc_endpoint_override {
+            self.rpc_endpoint_draft = next.rpc_endpoint_override.to_owned();
+        }
+        self.rpc_endpoint = next.rpc_endpoint.to_owned();
+        self.rpc_endpoint_override = next.rpc_endpoint_override.to_owned();
+        self.rpc_endpoint_refusal = next.rpc_endpoint_refusal.to_owned();
+        self.rpc_endpoint_editable = next.rpc_endpoint_editable;
+        self.rpc_endpoint_editability_reason = next.rpc_endpoint_editability_reason.to_owned();
         self.account_ceremony_phase = next.account_ceremony_phase.to_owned();
         self.account_ceremony_qr = next.account_ceremony_qr.to_owned();
         self.account_ceremony_detail = next.account_ceremony_detail.to_owned();
@@ -371,6 +405,7 @@ impl SettingsView {
         self.update_current = next.update_current.to_owned();
         self.update_previous = next.update_previous.to_owned();
         self.update_staged_display = next.update_staged_display.to_owned();
+        self.update_refused = next.update_refused.to_owned();
         self.update_channel = next.update_channel.to_owned();
         self.update_checked = next.update_checked.to_owned();
         self.update_note = next.update_note.to_owned();
@@ -395,6 +430,7 @@ impl SettingsView {
         if !(item.error).is_empty() {
             return Task::none();
         }
+        self.node_key = item.next.node_key.to_owned();
         self.tier = item.next.tier.to_owned();
         self.admin = item.next.admin;
         self.members_line = item.next.members_line.to_owned();
@@ -591,6 +627,24 @@ impl SettingsView {
         self.account_key_label_draft = value;
         Task::none()
     }
+    fn on_bind_rpc_endpoint_draft(&mut self, value: String) -> Task<Message> {
+        self.rpc_endpoint_draft = value;
+        Task::none()
+    }
+    fn on_save_rpc_endpoint(&mut self) -> Task<Message> {
+        if self.rpc_endpoint_editable == Some(false) {
+            return Task::none();
+        }
+        crate::host::set_endpoint(&self.rpc_endpoint_draft);
+        Task::none()
+    }
+    fn on_clear_rpc_endpoint(&mut self) -> Task<Message> {
+        if self.rpc_endpoint_editable == Some(false) {
+            return Task::none();
+        }
+        crate::host::set_endpoint("");
+        Task::none()
+    }
 }
 fn settings_action(
     key: impl Into<String>,
@@ -647,7 +701,7 @@ fn settings_subtle(
 /// labels on the left and controls on the right, whatever the value is.
 const FIELD_WIDTH: f32 = 280.;
 /// The band a settings row takes above and below its content.
-const ROW_BAND: f32 = 8.;
+const ROW_BAND: f32 = ducktape_view_guest::kit::spacing::SM as f32;
 fn settings_input(
     key: &str,
     placeholder: &str,
@@ -721,17 +775,31 @@ fn setting_row(key: &str, name: &str, detail: &str, note: &str, control: wire::N
     if !note.is_empty() {
         lines.push(kit::wrapping(kit::caption(format!("{key}/note"), note)));
     }
-    kit::centered_row(
-        key,
-        [
-            kit::sized(
-                kit::spaced(kit::column(format!("{key}/text"), lines), 2.),
-                Some(wire::Length::Fill),
-                None,
-            ),
-            kit::sized(control, Some(wire::Length::Shrink), None),
-        ],
+    // the row wraps, and its words are a portion, not `Fill`: a portion's
+    // least width is its longest word, so the control sits beside the words
+    // while it fits and drops under them in a narrow pane, where a one-line
+    // row ran it past the edge
+    kit::aligned(
+        kit::wrapped_row(
+            key,
+            [
+                kit::sized(
+                    kit::spaced(kit::column(format!("{key}/text"), lines), 2.),
+                    Some(wire::Length::FillPortion(1)),
+                    None,
+                ),
+                kit::sized(control, Some(wire::Length::Shrink), None),
+            ],
+        ),
+        wire::AlignX::Center,
     )
+}
+/// A one-line reading beside its label: it takes the row's rest and
+/// truncates there, where a label at its own width never shrinks and ran
+/// past the pane.
+fn one_line(node: wire::Node) -> wire::Node {
+    use ducktape_view_guest::kit;
+    kit::sized(kit::nowrap(node), Some(wire::Length::Fill), None)
 }
 /// A run of settings rows: a hairline between them, every one in the same
 /// band, so the tab reads as one list and not as a stack of cards.
@@ -773,7 +841,7 @@ fn settings_section(
                 body,
             ],
         ),
-        6.,
+        kit::spacing::XS as f32,
     )
 }
 impl SettingsView {
@@ -805,12 +873,12 @@ impl SettingsView {
                                 }),
                             ),
                             Some(wire::Length::Fill),
-                            Some(wire::Length::Fixed(28.)),
+                            Some(wire::Length::Fixed(kit::height::CONTROL as f32)),
                         ),
                         kit::divider("settings/tab-rule"),
                     ],
                 ),
-                6.,
+                kit::spacing::XS as f32,
             ),
         ];
         if !self.host_error.is_empty() {
@@ -923,8 +991,10 @@ impl SettingsView {
     }
     /// The "Updates" group: what runs, what is staged, when the network was
     /// last asked, and the controls — a check, the restart into a staged
-    /// release, the rollback to the kept one. Without a launcher (`make dev`
-    /// runs the binary bare) it says so and offers nothing.
+    /// release, discarding it, the rollback to the kept one. A staged release
+    /// its qualify refused reads as refused, with the app's reason, and has
+    /// no restart. Without a launcher (`make dev` runs the binary bare) it
+    /// says so and offers nothing.
     fn updates_section(&self) -> wire::Node {
         use ducktape_view_guest::kit;
         let unavailable = self.update_state == "unavailable";
@@ -936,26 +1006,27 @@ impl SettingsView {
                 "",
                 kit::wrapping(kit::secondary(
                     "settings/updates-unavailable",
-                    "Updates unavailable: not installed through the launcher.",
+                    "Automatic updates are unavailable in this copy of Ducktape. Open the installed app to check for updates.",
                 )),
             );
         }
         let staged = self.update_state == "staged";
+        let refused = staged && !self.update_refused.is_empty();
         let rollback_offered = !self.update_previous.is_empty() && self.update_state == "idle";
         let current = kit::kv(
             "settings/update-current-row",
             "Installed release",
-            kit::nowrap(kit::mono("settings/update-current", &self.update_current)),
+            one_line(kit::mono("settings/update-current", &self.update_current)),
         );
         let channel = kit::kv(
             "settings/update-channel-row",
             "Channel",
-            kit::nowrap(kit::text("settings/update-channel", &self.update_channel)),
+            one_line(kit::text("settings/update-channel", &self.update_channel)),
         );
         let checked = kit::kv(
             "settings/update-checked-row",
             "Last check",
-            kit::nowrap(kit::text(
+            one_line(kit::text(
                 "settings/update-checked",
                 update_check_words(&self.update_state, &self.update_checked, self.update_busy),
             )),
@@ -964,25 +1035,46 @@ impl SettingsView {
         if staged {
             rows.push(kit::kv(
                 "settings/update-staged-row",
-                "Ready to install",
-                kit::nowrap(kit::text(
+                if refused {
+                    "Update cannot be installed"
+                } else {
+                    "Ready to install"
+                },
+                one_line(kit::text(
                     "settings/update-staged",
                     &self.update_staged_display,
                 )),
             ));
         }
+        if refused {
+            rows.push(kit::kv(
+                "settings/update-refused-row",
+                "Reason",
+                one_line(kit::mono("settings/update-refused", &self.update_refused)),
+            ));
+        }
+        // the machine fetches while staged too: a newer release replaces it
         let mut actions = vec![settings_action(
             "settings/update-check",
             "Check now",
             Message::CheckForUpdate,
-            !self.update_busy && self.update_state == "idle",
+            !self.update_busy && (self.update_state == "idle" || staged),
         )];
-        if staged {
+        if staged && !refused {
             actions.push(settings_primary(
                 "settings/update-restart",
                 "Restart to update",
                 Message::RestartToUpdate,
                 true,
+            ));
+        }
+        // a roll-back from `staged` discards the staged release
+        if staged {
+            actions.push(settings_subtle(
+                "settings/update-discard",
+                &format!("Discard {}", self.update_staged_display),
+                Message::RollBackUpdate,
+                !self.update_busy,
             ));
         }
         if rollback_offered {
@@ -994,19 +1086,28 @@ impl SettingsView {
             ));
         }
         let mut body = vec![setting_list("settings/update-rows", rows)];
+        if refused {
+            body.push(kit::wrapping(kit::caption(
+                "settings/update-recovery/help",
+                "Keep using your current version. Choose Check now to look for a newer update, or Discard to remove this download.",
+            )));
+        }
         if !self.update_note.is_empty() {
             body.push(kit::wrapping(kit::caption(
                 "settings/update-note",
                 &self.update_note,
             )));
         }
-        body.push(kit::row("settings/update-actions", actions));
+        body.push(kit::wrapped_row("settings/update-actions", actions));
         settings_section(
             "settings/updates",
             "settings/updates-title",
             "Updates",
             "",
-            kit::spaced(kit::column("settings/updates-body", body), 10.),
+            kit::spaced(
+                kit::column("settings/updates-body", body),
+                kit::spacing::MD as f32,
+            ),
         )
     }
     fn network_settings(&self) -> wire::Node {
@@ -1029,24 +1130,11 @@ impl SettingsView {
             ],
         );
         if !self.connected {
-            // The empty state insets itself by 24; the actions line up under
-            // its words rather than at the page edge.
-            let inset = wire::Edges {
-                top: 0.,
-                right: 24.,
-                bottom: 24.,
-                left: 24.,
-            };
-            return kit::column(
-                "settings/disconnected-network",
-                [
-                    kit::empty_state(
-                        "settings/disconnected",
-                        "Not connected",
-                        "Reconnect to this network, or open another one.",
-                    ),
-                    kit::padded(actions, inset),
-                ],
+            return kit::empty_state_action(
+                "settings/disconnected",
+                "Not connected",
+                "Reconnect to this network, or open another one.",
+                actions,
             );
         }
         let network_name = if self.network_name.is_empty() {
@@ -1055,6 +1143,79 @@ impl SettingsView {
             &self.network_name
         };
         let members = self.reading(&self.members_line, self.members_answered);
+        let rpc_endpoint = kit::kv(
+            "settings/node-rpc-row",
+            "Node RPC",
+            kit::wrapping(kit::mono(
+                "settings/node-rpc",
+                if self.rpc_endpoint.is_empty() {
+                    "—"
+                } else {
+                    &self.rpc_endpoint
+                },
+            )),
+        );
+        let rpc_controls = kit::wrapped_row(
+            "settings/node-rpc-controls",
+            [
+                settings_input(
+                    "settings/node-rpc-draft",
+                    "node RPC URL…",
+                    &self.rpc_endpoint_draft,
+                    Message::BindRpcEndpointDraft,
+                ),
+                settings_primary(
+                    "settings/node-rpc-save",
+                    "Save",
+                    Message::SaveRpcEndpoint,
+                    !self.rpc_endpoint_draft.trim().is_empty()
+                        && self.rpc_endpoint_draft != self.rpc_endpoint_override,
+                ),
+                settings_subtle(
+                    "settings/node-rpc-clear",
+                    "Clear",
+                    Message::ClearRpcEndpoint,
+                    !self.rpc_endpoint_override.is_empty(),
+                ),
+            ],
+        );
+        // the app checks the URL and the node; its refusal sits under the field
+        let rpc_refusal = (!self.rpc_endpoint_refusal.is_empty()).then(|| {
+            kit::sized(
+                kit::wrapping(kit::caption(
+                    "settings/node-rpc-refusal",
+                    &self.rpc_endpoint_refusal,
+                )),
+                Some(wire::Length::Fixed(FIELD_WIDTH)),
+                None,
+            )
+        });
+        let rpc_override = if self.rpc_endpoint_editable == Some(false) {
+            let mut details = vec![kit::wrapping(kit::caption(
+                "settings/node-rpc-editability-reason",
+                &self.rpc_endpoint_editability_reason,
+            ))];
+            if let Some(refusal) = rpc_refusal {
+                details.push(refusal);
+            }
+            kit::kv(
+                "settings/node-rpc-editability",
+                "Node RPC URL",
+                kit::column("settings/node-rpc-editability-details", details),
+            )
+        } else {
+            let mut rpc_field = vec![rpc_controls];
+            if let Some(refusal) = rpc_refusal {
+                rpc_field.push(refusal);
+            }
+            setting_row(
+                "settings/node-rpc-edit",
+                "Node RPC URL",
+                "Used instead of the one in node.toml; Clear goes back to it.",
+                "",
+                kit::column("settings/node-rpc-field", rpc_field),
+            )
+        };
         let network = settings_section(
             "settings/network",
             "settings/network-name",
@@ -1070,7 +1231,7 @@ impl SettingsView {
                                 kit::kv(
                                     "settings/network-status-row",
                                     "Status",
-                                    kit::nowrap(kit::text("settings/network-status", &self.status)),
+                                    one_line(kit::text("settings/network-status", &self.status)),
                                 ),
                                 kit::kv(
                                     "settings/network-rpc-row",
@@ -1118,20 +1279,29 @@ impl SettingsView {
                                     "Node",
                                     kit::centered_row(
                                         "settings/node-row",
-                                        [settings_subtle(
-                                            "settings/view-node",
-                                            "Open node",
-                                            Message::ShowTab("node".into()),
-                                            true,
-                                        )],
+                                        [
+                                            kit::badge(
+                                                "settings/node-standing",
+                                                self.standing(),
+                                                kit::Tone::Neutral,
+                                            ),
+                                            settings_subtle(
+                                                "settings/view-node",
+                                                "Open node",
+                                                Message::ShowTab("node".into()),
+                                                true,
+                                            ),
+                                        ],
                                     ),
                                 ),
+                                rpc_endpoint,
+                                rpc_override,
                             ],
                         ),
                         actions,
                     ],
                 ),
-                12.,
+                kit::spacing::LG as f32,
             ),
         );
         if self.tasting.is_empty() {
@@ -1139,7 +1309,7 @@ impl SettingsView {
         }
         kit::spaced(
             kit::column("settings/network-panes", [network, self.proposed_views()]),
-            24.,
+            kit::spacing::XL as f32,
         )
     }
     /// The views a code ballot or a scheduled swap would install, one row
@@ -1199,13 +1369,6 @@ impl SettingsView {
             );
         }
         let available = !self.account_busy && self.unlocked;
-        let tier = match self.tier.as_str() {
-            "validator" => "Validator",
-            "resident" => "Resident",
-            "guest" => "Guest",
-            _ => "",
-        };
-        let standing = self.reading(tier, self.members_answered);
         // the number sits beside its Copy button: wrapped, it would push the
         // button off the row
         let number = if self.account_number.is_empty() {
@@ -1222,7 +1385,7 @@ impl SettingsView {
             kit::kv(
                 "settings/account-name-row",
                 "Name",
-                kit::nowrap(kit::text(
+                one_line(kit::text(
                     "settings/account-name",
                     if self.account_name.is_empty() {
                         "Unnamed"
@@ -1230,11 +1393,6 @@ impl SettingsView {
                         &self.account_name
                     },
                 )),
-            ),
-            kit::kv(
-                "settings/standing-row",
-                "Standing",
-                kit::badge("settings/standing", standing, kit::Tone::Neutral),
             ),
             kit::kv(
                 "settings/account-number-row",
@@ -1257,13 +1415,31 @@ impl SettingsView {
             ),
             kit::kv("settings/seat-row", "Key on this device", seat),
         ];
+        // the standing is the connected node's: it is yours only when the
+        // node signs with a key your account holds (#40)
+        if self.account_exists
+            && crate::host::account_holds_node_key(
+                &self.node_key,
+                &self.seat_key,
+                &self.account_key_rows,
+            )
+        {
+            identity.insert(
+                1,
+                kit::kv(
+                    "settings/standing-row",
+                    "Standing",
+                    kit::badge("settings/standing", self.standing(), kit::Tone::Neutral),
+                ),
+            );
+        }
         if self.account_exists {
             identity.push(setting_row(
                 "settings/rename-row",
                 "Account name",
                 "What this network calls you; every device you add answers to it.",
                 "",
-                kit::row(
+                kit::wrapped_row(
                     "settings/rename-controls",
                     [
                         settings_input(
@@ -1289,7 +1465,7 @@ impl SettingsView {
                 "settings/identity",
                 "settings/identity-title",
                 "Your identity",
-                "This device holds a key but no account yet.",
+                "Create an account below, or join your existing account from another device.",
                 identity,
             ));
             content.push(settings_section(
@@ -1303,9 +1479,9 @@ impl SettingsView {
                         setting_row(
                             "settings/create-row",
                             "New account",
-                            "This device founds it and holds its first key.",
+                            "Choose a name to create your account on this network.",
                             "",
-                            kit::row(
+                            kit::wrapped_row(
                                 "settings/create-controls",
                                 [
                                     settings_input(
@@ -1326,9 +1502,9 @@ impl SettingsView {
                         setting_row(
                             "settings/join-row",
                             "Join with a ticket",
-                            "A device that already signs for the account mints it.",
+                            "Get a ticket from a device already signed in to your account, then paste it here.",
                             "",
-                            kit::row(
+                            kit::wrapped_row(
                                 "settings/join-controls",
                                 [
                                     settings_input(
@@ -1349,7 +1525,7 @@ impl SettingsView {
                         setting_row(
                             "settings/login-row",
                             "Passkey",
-                            "Or let a passkey from another device admit this one.",
+                            "Use a passkey from another device to sign in to your account.",
                             "",
                             settings_action(
                                 "settings/login",
@@ -1383,7 +1559,7 @@ impl SettingsView {
                                         kit::centered_row(
                                             format!("{key}/head"),
                                             [
-                                                kit::nowrap(kit::strong(
+                                                one_line(kit::strong(
                                                     format!("{key}/label"),
                                                     if row.label.is_empty() {
                                                         "No label"
@@ -1418,15 +1594,38 @@ impl SettingsView {
                     ],
                 ));
             }
+            // an account holds at least its first key: none here is a read
+            // still out, or one that failed and the notice above says why
+            let (help, keys) = match keys.is_empty() {
+                false => (
+                    format!(
+                        "{} — each one signs for this account.",
+                        kit_plural(self.account_key_rows.len(), "key", "keys")
+                    ),
+                    setting_list("settings/keys-rows", keys),
+                ),
+                true => (
+                    String::new(),
+                    match self.host_error.is_empty() {
+                        true => kit::empty_state(
+                            "settings/keys-reading",
+                            "Reading keys…",
+                            "This account's keys arrive from the node.",
+                        ),
+                        false => kit::empty_state(
+                            "settings/keys-unread",
+                            "Keys not read",
+                            "The node did not answer; the notice above says why.",
+                        ),
+                    },
+                ),
+            };
             content.push(settings_section(
                 "settings/keys",
                 "settings/keys-title",
                 "Account keys",
-                &format!(
-                    "{} — each one signs for this account.",
-                    kit_plural(self.account_key_rows.len(), "key", "keys")
-                ),
-                setting_list("settings/keys-rows", keys),
+                &help,
+                keys,
             ));
             let mut add = vec![
                 kit::field(
@@ -1442,7 +1641,7 @@ impl SettingsView {
                 kit::field(
                     "settings/key-label-field",
                     "Label",
-                    kit::row(
+                    kit::wrapped_row(
                         "settings/key-label-row",
                         [
                             settings_input(
@@ -1518,7 +1717,10 @@ impl SettingsView {
                 "settings/add-device",
                 "Add a device",
                 "A ticket admits one more key to this account.",
-                kit::spaced(kit::column("settings/add-body", add), 12.),
+                kit::spaced(
+                    kit::column("settings/add-body", add),
+                    kit::spacing::LG as f32,
+                ),
             ));
         }
         match self.account_ceremony_phase.as_str() {
@@ -1556,7 +1758,7 @@ impl SettingsView {
                                 ),
                             ],
                         ),
-                        8.,
+                        kit::spacing::SM as f32,
                     ),
                 ));
             }
@@ -1656,7 +1858,7 @@ impl SettingsView {
                 "Wallet password",
                 "Unlock this device's key for this session.",
                 "",
-                kit::row(
+                kit::wrapped_row(
                     "settings/unlock-controls",
                     [
                         kit::sized(password, Some(wire::Length::Fixed(FIELD_WIDTH)), None),
@@ -1682,6 +1884,17 @@ impl SettingsView {
 impl SettingsView {
     /// A value the view reads for itself, or what stands in while it has
     /// not: the read is still out, or it failed and the notice above says so.
+    /// The connected node's standing in the roster, as a word.
+    fn standing(&self) -> String {
+        let tier = match self.tier.as_str() {
+            "validator" => "Validator",
+            "resident" => "Resident",
+            "guest" => "Guest",
+            _ => "",
+        };
+        self.reading(tier, self.members_answered)
+    }
+
     fn reading(&self, value: &str, answered: bool) -> String {
         let pending = !answered && self.host_error.is_empty();
         match (value.is_empty(), pending) {

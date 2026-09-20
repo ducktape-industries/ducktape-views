@@ -57,7 +57,7 @@ impl FilesView {
         body.push(native::divider(format!("{key}/facts-rule")));
         body.push(native::padded(
             self.row_actions(format!("{key}/actions"), &entry),
-            wire::Edges::all(8.),
+            wire::Edges::all(native::spacing::SM as f32),
         ));
         kit::filled_column(
             key.clone(),
@@ -157,6 +157,7 @@ impl FilesView {
                     wire::Node::Editor {
                         key: format!("{key}/fs-editor"),
                         placeholder: "File contents…".into(),
+                        label: Some(format!("Contents of {}", self.selected)),
                         document,
                         on_document,
                         editable: !self.loading(),
@@ -175,15 +176,15 @@ impl FilesView {
                         max_height: None,
                     },
                 ),
-                wire::Edges::all(8.),
+                wire::Edges::all(native::spacing::SM as f32),
             );
         }
         native::padded(
             native::spaced(
                 native::column(format!("{key}/content"), self.preview_content(&key)),
-                6.,
+                native::spacing::XS as f32,
             ),
-            wire::Edges::all(12.),
+            wire::Edges::all(native::spacing::LG as f32),
         )
     }
 
@@ -200,9 +201,10 @@ impl FilesView {
         if !preview.is_read() {
             // the head snapshot arrives with the page: until then nothing has
             // been read, and a blank code box would read as an empty file
-            return vec![native::secondary(
+            return vec![native::empty_state(
                 format!("{key}/reading"),
                 "Reading the file…",
+                "Its text at the head snapshot arrives next.",
             )];
         }
         if preview.binary {
@@ -231,7 +233,11 @@ impl FilesView {
         let (name, args, on_event) = match markdown {
             true => (
                 "markdown",
-                vec![Str(preview.display_text.clone()), Str(String::new()), Bool(self.dark)],
+                vec![
+                    Str(preview.display_text.clone()),
+                    Str(String::new()),
+                    Bool(self.dark),
+                ],
                 Some(slots::handler::<wire::SurfaceValue, Message>(Box::new(
                     |value| match value {
                         Str(link) => Some(Message::OpenLinkAt(link)),
@@ -294,12 +300,21 @@ impl FilesView {
             fact("size", "Size", size),
             fact("object", "Object", object),
         ];
+        // a fact nobody can name is "—" like its neighbours, never a blank
+        // row that reads as the value still on its way
         let (modified, author) = self.modified_line();
+        let author = match author.is_empty() {
+            true => "—".into(),
+            false => author,
+        };
         rows.push(fact("modified", "Modified", modified));
         rows.push(fact("author", "Author", author));
         native::padded(
-            native::spaced(native::column(key.clone(), rows), 6.),
-            wire::Edges::all(12.),
+            native::spaced(
+                native::column(key.clone(), rows),
+                native::spacing::XS as f32,
+            ),
+            wire::Edges::all(native::spacing::LG as f32),
         )
     }
 
@@ -320,8 +335,8 @@ impl FilesView {
             return (provenance.error.clone(), "".into());
         }
         let found = !provenance.snapshot.id.is_empty();
-        match found {
-            true => (
+        match (found, provenance.rooted) {
+            (true, _) => (
                 format!(
                     "{} ({})",
                     crate::host::height_label(provenance.snapshot.height),
@@ -329,7 +344,10 @@ impl FilesView {
                 ),
                 provenance.snapshot.author.clone(),
             ),
-            false => (
+            // the walk reached the first snapshot without finding the path,
+            // or the head does not hold it: there is no change to name
+            (false, true) => ("unknown".into(), "".into()),
+            (false, false) => (
                 format!("earlier than the last {} snapshots", provenance.searched),
                 "".into(),
             ),
@@ -400,7 +418,7 @@ impl FilesView {
                         open,
                     ],
                 ),
-                8.,
+                native::spacing::SM as f32,
             ));
         }
         if self.diff_omitted > 0 {
@@ -417,8 +435,11 @@ impl FilesView {
                 native::scroll(
                     format!("{key}/scroll"),
                     native::padded(
-                        native::spaced(native::column(format!("{key}/rows"), rows), 8.),
-                        wire::Edges::all(12.),
+                        native::spaced(
+                            native::column(format!("{key}/rows"), rows),
+                            native::spacing::SM as f32,
+                        ),
+                        wire::Edges::all(native::spacing::LG as f32),
                     ),
                 ),
             ],

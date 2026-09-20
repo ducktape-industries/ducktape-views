@@ -867,7 +867,7 @@ mod tests {
 
     #[test]
     fn named_link_label_keeps_its_destination_when_syntax_is_hidden() {
-        let source = "[문서](duck://pages/alpha)";
+        let source = "[문서](duck://testnet-0a1b2c3d/pages/alpha)";
         let (marks, _) = highlight(source, false, false);
         let (label, _) = marks
             .iter()
@@ -876,7 +876,7 @@ mod tests {
         assert_eq!(&source[label.clone()], "문서");
         assert_eq!(
             super::super::inline::document_link_at(source, label.start).as_deref(),
-            Some("duck://pages/alpha")
+            Some("duck://testnet-0a1b2c3d/pages/alpha")
         );
         let hidden_markers = marks
             .iter()

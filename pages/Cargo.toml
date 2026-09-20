@@ -21,6 +21,10 @@ ducktape-view-guest.workspace = true
 # A picture in a page is a file on the network: the same commit policy the
 # Files view and the chat composer put one there with.
 ducktape-view-files.workspace = true
+# A page's `duck://<chain>/pages/<page>` address: pages' typed tail over the
+# one shared grammar.
+duck-address = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "duck-address" }
+pages-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "pages-wire" }
 
 [dev-dependencies]
 # the snapshot tag is a digest of this view's own state layout; the tracer

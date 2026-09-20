@@ -5,11 +5,22 @@
 //! still leaves as an intent.
 
 use ducktape_view_guest::testing::{
-    answer, has_text, item, press, refuse, submit, texts, type_into,
+    answer, find, has_text, item, measure, press, refuse, submit, texts, type_into,
 };
 use ducktape_view_guest::wire::{Event, Frame, Node, Request};
+use explorer_view::boot_native;
 use explorer_view::host::{Copy, Session};
-use explorer_view::{boot_native, tick_native};
+
+/// The view's own tick, refusing a frame assistive technology cannot read:
+/// every tree these tests render is checked.
+fn tick_native(events: Vec<ducktape_view_guest::wire::Event>) -> ducktape_view_guest::wire::Frame {
+    let frame = explorer_view::tick_native(events);
+    frame
+        .root
+        .iter()
+        .for_each(ducktape_view_guest::testing::assert_accessible);
+    frame
+}
 
 fn node_ending(frame: &Frame, suffix: &str) -> Node {
     fn find(node: &Node, suffix: &str) -> Option<Node> {
@@ -27,10 +38,14 @@ fn boot() -> Frame {
 }
 
 fn session(connected: bool) -> Vec<u8> {
+    session_at(connected, 84_912)
+}
+
+fn session_at(connected: bool, head: i64) -> Vec<u8> {
     serde_json::to_vec(&Session {
         connected,
         dark: false,
-        head: 84_912,
+        head,
         sync_line: "live".into(),
     })
     .expect("session encodes")
@@ -68,6 +83,28 @@ fn reads(frame: &Frame) -> Vec<String> {
         .collect();
     reads.sort();
     reads
+}
+
+/// The tasks status page this frame asks for, if it asks one.
+fn task_page(frame: &Frame) -> Option<(u64, String)> {
+    frame.requests.iter().find_map(|request| {
+        let ask: serde_json::Value = serde_json::from_slice(&request.payload).ok()?;
+        (request.kind == "rpc.view" && ask["target"] == "tasks").then(|| {
+            let status = ask["query"]["by_status"]["status"]
+                .as_str()
+                .unwrap_or_default();
+            (request.id, status.to_owned())
+        })
+    })
+}
+
+/// Answers the tasks leg's later status pages, empty: it reads one page at a
+/// time (#34), so each answer asks the next. The frame once none is asked.
+fn empty_task_pages(mut frame: Frame) -> Frame {
+    while let Some((id, _)) = task_page(&frame) {
+        frame = tick_native(vec![answer(id, br#"{"tasks":{"tasks":[]}}"#)]);
+    }
+    frame
 }
 
 /// One op-carrying block and one op-less follower boundary row, as
@@ -163,6 +200,59 @@ fn the_ledger_width_is_the_readers_and_its_edge_has_a_resize_cursor() {
     assert_eq!(width(&frame), 400.0);
 }
 
+/// In a narrow pane the ledger (never narrower than 260) and a block's
+/// details cannot sit side by side: they stack, with no width to drag, the
+/// search takes a bar of its own, and the sync line gives way instead of
+/// pushing the controls off the bar. A wide pane keeps the split.
+#[test]
+fn a_narrow_pane_stacks_the_ledger_over_the_details() {
+    use ducktape_view_guest::wire::{Axis, Length};
+
+    let (frame, _) = connected_with_ledger();
+    let narrow = tick_native(measure(&frame, "explorer/viewport", 360., 700.));
+    let Some(Node::Linear { axis, .. }) = find(&narrow, "explorer/ledger") else {
+        panic!("no ledger: {:?}", texts(&narrow));
+    };
+    assert_eq!(*axis, Axis::Column, "stacked");
+    assert!(find(&narrow, "explorer/ledger-resize").is_none());
+    let Some(Node::Input { width, .. }) = find(&narrow, "explorer/search") else {
+        panic!("no search");
+    };
+    assert_eq!(*width, Some(Length::Fill));
+    assert!(find(&narrow, "explorer/search-bar").is_some());
+    let Some(Node::Text { width, .. }) = find(&narrow, "explorer/sync") else {
+        panic!("no sync line");
+    };
+    assert_eq!(*width, Some(Length::Fill), "the sync line truncates");
+
+    let wide = tick_native(measure(&narrow, "explorer/viewport", 1280., 700.));
+    let Some(Node::Linear { axis, .. }) = find(&wide, "explorer/ledger") else {
+        panic!("no ledger");
+    };
+    assert_eq!(*axis, Axis::Row, "side by side");
+    assert!(find(&wide, "explorer/ledger-resize").is_some());
+    assert!(find(&wide, "explorer/search-bar").is_none());
+}
+
+/// A ledger read that failed is not an empty ledger: it says the blocks
+/// were not read, and its Retry asks for them again.
+#[test]
+fn a_failed_ledger_read_says_so_and_offers_a_retry() {
+    let frame = boot();
+    let session_id = request(&frame, "explorer.props").id;
+    let frame = tick_native(vec![item(session_id, &session(true))]);
+    let feed = request(&frame, "rpc.blocks").id;
+    let frame = tick_native(vec![refuse(feed, "node unreachable")]);
+    assert!(has_text(&frame, "Blocks not read"), "{:?}", texts(&frame));
+    assert!(!has_text(&frame, "No blocks yet"));
+    let frame = tick_native(press(&frame, "Retry"));
+    assert!(
+        kinds(&frame.requests).contains(&"rpc.blocks"),
+        "{:?}",
+        frame.requests
+    );
+}
+
 /// A block re-reads the window through the live subscription, and Refresh
 /// asks for the same read by hand.
 #[test]
@@ -189,10 +279,16 @@ fn a_block_and_a_refresh_both_re_read_the_window() {
 
 /// A SEARCH COSTS ITS SLOWEST SOURCE, NOT THEIR SUM. Nothing in the fan-out
 /// reads what another leg produced, and a module's first touch runs tens of
-/// seconds against the node client's ceiling — so every round trip the search
+/// seconds against the node client's ceiling — so every source the search
 /// opens with must be in flight AT ONCE. Observed from outside: the frame that
-/// carries the submit carries all eight reads (tasks walks three status
-/// pages), and none of them has been answered yet.
+/// carries the submit asks all six sources, and none of them has been
+/// answered yet.
+///
+/// BUT NO MORE INDEX VIEWS THAN THE NODE SERVES TOGETHER. The node runs four
+/// `rpc.view` reads at once and refuses the fifth with a 429; tasks' three
+/// status pages beside chat, pages and runs made six, and the refused page
+/// silenced Tasks on a node that answers each one (#34). Tasks walks its
+/// pages one after another.
 #[test]
 fn a_workspace_search_reaches_its_six_sources_together() {
     let (frame, _live) = connected_with_ledger();
@@ -216,8 +312,6 @@ fn a_workspace_search_reaches_its_six_sources_together() {
             "rpc.view pages",
             "rpc.view runs",
             "rpc.view tasks",
-            "rpc.view tasks",
-            "rpc.view tasks",
         ],
         "every source of a workspace search is asked at once: {:?}",
         frame.requests
@@ -227,6 +321,14 @@ fn a_workspace_search_reaches_its_six_sources_together() {
     let chat: serde_json::Value =
         serde_json::from_slice(&request(&frame, "rpc.view").payload).expect("a read decodes");
     assert_eq!(chat["query"]["search"]["text"], "needle");
+
+    let mut frame = frame;
+    let mut statuses = Vec::new();
+    while let Some((id, status)) = task_page(&frame) {
+        statuses.push(status);
+        frame = tick_native(vec![answer(id, br#"{"tasks":{"tasks":[]}}"#)]);
+    }
+    assert_eq!(statuses, ["open", "in_progress", "done"]);
 }
 
 #[test]
@@ -249,11 +351,17 @@ fn search_hits_name_the_page_author_and_room_once() {
         answer(request.id, reply.to_string().as_bytes())
     }).collect();
     let frame = tick_native(events);
+    let titles_read = frame
+        .requests
+        .iter()
+        .find(|request| {
+            request.kind == "rpc.view" && task_page(&frame).map(|(id, _)| id) != Some(request.id)
+        })
+        .expect("the page titles read")
+        .id;
+    empty_task_pages(frame);
     let titles = serde_json::json!({"pages": {"pages": [{"id": "page-qa", "title": "Named QA page"}], "has_more": false}});
-    let frame = tick_native(vec![answer(
-        request(&frame, "rpc.view").id,
-        titles.to_string().as_bytes(),
-    )]);
+    let frame = tick_native(vec![answer(titles_read, titles.to_string().as_bytes())]);
     let shown = texts(&frame);
     for expected in [
         "account 7",
@@ -302,7 +410,7 @@ fn an_empty_answer_belongs_to_its_submitted_query_and_can_be_cleared() {
             answer(request.id, reply.to_string().as_bytes())
         })
         .collect();
-    let frame = tick_native(events);
+    let frame = empty_task_pages(tick_native(events));
     assert!(
         has_text(&frame, "No matching results."),
         "{:?}",
@@ -357,7 +465,7 @@ fn a_search_that_lost_a_source_says_which_one_and_keeps_no_chip_for_it() {
         };
         events.push(answer(request.id, reply.to_string().as_bytes()));
     }
-    let frame = tick_native(events);
+    let frame = empty_task_pages(tick_native(events));
 
     for expected in [
         // the app's name directory does not cross the view wire, so a user
@@ -418,7 +526,7 @@ fn unavailable_sources_do_not_claim_that_nothing_matched() {
         .iter()
         .filter(|request| matches!(request.kind.as_str(), "rpc.query" | "rpc.view"))
         .collect();
-    assert_eq!(searches.len(), 8, "tasks reads three status pages");
+    assert_eq!(searches.len(), 6, "tasks reads one status page at a time");
     let failures = searches
         .into_iter()
         .map(|request| refuse(request.id, "unavailable"))
@@ -437,7 +545,7 @@ fn unavailable_sources_do_not_claim_that_nothing_matched() {
 #[test]
 fn an_ops_hash_reads_prefixed_and_copies_bare() {
     let (frame, _live) = connected_with_ledger();
-    let frame = tick_native(press(&frame, "Inspect block"));
+    let frame = tick_native(press(&frame, "Block 84912, 1 op"));
     assert!(has_text(&frame, "0xab12cd34"), "{:?}", texts(&frame));
     for expected in ["Dispatch", "chat", "1 message, 0 events"] {
         assert!(
@@ -480,7 +588,7 @@ fn an_ops_payload_reads_as_labelled_fields_not_json() {
     }])
     .to_string();
     let frame = tick_native(vec![answer(feed, rows.as_bytes())]);
-    let frame = tick_native(press(&frame, "Inspect block"));
+    let frame = tick_native(press(&frame, "Block 9, 1 op"));
     let shown = texts(&frame);
     for expected in [
         "put",
@@ -536,7 +644,7 @@ fn every_digest_reads_whole_and_hex_prefixed_and_copies_the_bare_key() {
         abbreviated.is_none(),
         "the list carries the whole hash, not {abbreviated:?}"
     );
-    let frame = tick_native(press(&frame, "Inspect block"));
+    let frame = tick_native(press(&frame, "Block 84912, 1 op"));
     for expected in [whole, format!("0x{commit}")] {
         assert!(has_text(&frame, &expected), "{:?}", texts(&frame));
     }
@@ -560,7 +668,7 @@ fn every_digest_reads_whole_and_hex_prefixed_and_copies_the_bare_key() {
 #[test]
 fn a_proposer_that_is_not_a_key_keeps_its_label() {
     let (frame, _live) = connected_with_ledger();
-    let frame = tick_native(press(&frame, "Inspect block"));
+    let frame = tick_native(press(&frame, "Block 84912, 1 op"));
     assert!(has_text(&frame, "system"), "{:?}", texts(&frame));
     assert!(!has_text(&frame, "0xsystem"), "{:?}", texts(&frame));
     let frame = tick_native(press(&frame, "Copy proposer"));
@@ -645,7 +753,7 @@ fn every_row_cell_keeps_one_line() {
     assert_eq!(wrapping_cells_in_fixed_rows(&ledger), [] as [String; 0]);
 
     // the details pane: its header bar and the op head line under it
-    let details = tick_native(press(&ledger, "Inspect block"));
+    let details = tick_native(press(&ledger, "Block 84912, 1 op"));
     assert!(has_text(&details, "Applied"), "{:?}", texts(&details));
     assert_eq!(wrapping_cells_in_fixed_rows(&details), [] as [String; 0]);
 
@@ -672,7 +780,52 @@ fn every_row_cell_keeps_one_line() {
             answer(request.id, reply.to_string().as_bytes())
         })
         .collect();
-    let results = tick_native(events);
+    let results = empty_task_pages(tick_native(events));
     assert!(has_text(&results, "message 12"), "{:?}", texts(&results));
     assert_eq!(wrapping_cells_in_fixed_rows(&results), [] as [String; 0]);
+}
+
+/// `tick_native` asserts every frame it returns; this walks the ledger from
+/// boot to a block's details, the states that hold the view's controls.
+#[test]
+fn accessibility_the_ledger_and_a_block_name_their_controls() {
+    boot();
+    let (frame, _live) = connected_with_ledger();
+    tick_native(press(&frame, "Block 84912, 1 op"));
+}
+
+/// A QUIET WINDOW IS NOT AN EMPTY CHAIN. The list reads the last hundred
+/// blocks, so on a chain whose titlebar prints a head the empty plate names
+/// the window it read; "No blocks yet" is kept for the chain that has nothing
+/// in it at all.
+#[test]
+fn an_empty_ledger_names_the_window_it_read() {
+    let frame = boot();
+    let session_id = request(&frame, "explorer.props").id;
+    let frame = tick_native(vec![item(session_id, &session_at(true, 84_912))]);
+    let feed = request(&frame, "rpc.blocks").id;
+    // the window answered, and nothing in it carried operations
+    let quiet = br#"[{"height":84912,"hash":"","commit_hash":"aa11bb22","ops":[]}]"#;
+    let frame = tick_native(vec![answer(feed, quiet)]);
+    assert!(
+        has_text(&frame, "No operations in the last 100 blocks"),
+        "{:?}",
+        texts(&frame)
+    );
+    assert!(!has_text(&frame, "No blocks yet"), "{:?}", texts(&frame));
+}
+
+#[test]
+fn a_chain_with_no_head_still_says_no_blocks_yet() {
+    let frame = boot();
+    let session_id = request(&frame, "explorer.props").id;
+    let frame = tick_native(vec![item(session_id, &session_at(true, 0))]);
+    let feed = request(&frame, "rpc.blocks").id;
+    let frame = tick_native(vec![answer(feed, b"[]")]);
+    assert!(has_text(&frame, "No blocks yet"), "{:?}", texts(&frame));
+    assert!(
+        !has_text(&frame, "No operations in the last 100 blocks"),
+        "{:?}",
+        texts(&frame)
+    );
 }

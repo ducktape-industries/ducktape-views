@@ -1,8 +1,8 @@
 //! Guest-owned conversations, composers, and module operations.
 
 pub mod host;
-mod live;
 mod hydration;
+mod live;
 pub mod notice;
 
 #[path = "ui/app.rs"]

@@ -96,7 +96,7 @@ fn places(key: &str, links: &[host::RunLink], opened: Option<&str>) -> Node {
                 message_chip(&key, link, preview, expanded, preview_key)
             }),
         ),
-        6.,
+        kit::spacing::XS as f32,
     )
 }
 
@@ -145,7 +145,10 @@ fn message_chip(
             format!("{key}/preview"),
             &preview.body,
         )));
-        content.push(kit::spaced(kit::column(format!("{key}/quote"), quote), 4.));
+        content.push(kit::spaced(
+            kit::column(format!("{key}/quote"), quote),
+            kit::spacing::XXS as f32,
+        ));
         content.push(kit::row(
             format!("{key}/actions"),
             [action(format!("{key}/open-chat"), "Open in chat", open())],
@@ -153,7 +156,10 @@ fn message_chip(
     }
     kit::card(
         format!("{key}/message"),
-        kit::spaced(kit::column(format!("{key}/body"), content), 8.),
+        kit::spaced(
+            kit::column(format!("{key}/body"), content),
+            kit::spacing::SM as f32,
+        ),
     )
 }
 
@@ -208,7 +214,7 @@ fn settled_title(state: &str) -> &'static str {
 fn section(key: &str, title: &str, children: impl IntoIterator<Item = Node>) -> Node {
     let mut items = vec![kit::heading(format!("{key}/title"), title)];
     items.extend(children);
-    kit::spaced(kit::column(key, items), 8.)
+    kit::spaced(kit::column(key, items), kit::spacing::SM as f32)
 }
 
 /// A height or a time in the data face, at caption weight: the rail every
@@ -225,9 +231,14 @@ fn filler() -> Node {
     kit::space(Some(Length::Fill), None)
 }
 
+/// Below this pane width a list and its rail cannot both be read side by
+/// side (the editor keeps 320, the run list 200): the rail stacks under
+/// the list, and there is no width to drag.
+const STACK_BELOW: f64 = 640.;
+
 /// The detail rail beside a list: the reader's width, the window's own
 /// colour, clipped at its edge.
-fn detail_pane(key: &str, content: Node, width: f64) -> Node {
+fn detail_pane(key: &str, content: Node, width: Length) -> Node {
     let mut node = kit::container(key, content);
     let Node::Container {
         width: value,
@@ -238,7 +249,7 @@ fn detail_pane(key: &str, content: Node, width: f64) -> Node {
     else {
         unreachable!()
     };
-    *value = Some(Length::Fixed(width as f32));
+    *value = Some(width);
     *height = Some(Length::Fill);
     *clip = true;
     node
@@ -256,10 +267,10 @@ impl AgentsView {
                     [kit::wrapping(kit::secondary("agents/about", note))],
                 ),
                 wire::Edges {
-                    top: 8.,
-                    right: 12.,
-                    bottom: 8.,
-                    left: 12.,
+                    top: kit::spacing::SM as f32,
+                    right: kit::spacing::LG as f32,
+                    bottom: kit::spacing::SM as f32,
+                    left: kit::spacing::LG as f32,
                 },
             ));
             content.push(kit::divider("agents/about-rule"));
@@ -274,7 +285,7 @@ impl AgentsView {
                         Tone::Danger,
                     )],
                 ),
-                wire::Edges::all(12.),
+                wire::Edges::all(kit::spacing::LG as f32),
             ));
         }
         content.push(match self.connected {
@@ -326,27 +337,39 @@ impl AgentsView {
                 None,
             ));
         }
-        items.push(filler());
-        if self.connected {
-            let summary = match self.panel.as_str() {
-                "runs" => host::runs_summary(&self.runs),
-                _ => host::agents_summary(self.connected, &self.rows),
-            };
-            if !summary.is_empty() {
-                items.push(kit::nowrap(kit::secondary("agents/summary", summary)));
+        let summary = match (self.connected, self.panel.as_str()) {
+            (false, _) => String::new(),
+            (true, "runs") => host::runs_summary(&self.runs),
+            (true, _) => host::agents_summary(self.connected, &self.rows),
+        };
+        // the summary takes the bar's rest, right-aligned, and truncates
+        // there: a label at its own width never shrinks and pushed New agent
+        // off a narrow bar
+        items.push(match summary.is_empty() {
+            true => filler(),
+            false => {
+                let mut summary = kit::sized(
+                    kit::nowrap(kit::secondary("agents/summary", summary)),
+                    Some(Length::Fill),
+                    None,
+                );
+                if let Node::Text { align_x, .. } = &mut summary {
+                    *align_x = Some(wire::AlignX::Right);
+                }
+                summary
             }
-            if !self.account.is_empty() {
-                items.push(primary("agents/new", "New agent", Some(Message::OpenNew)));
-            }
+        });
+        if self.connected && !self.account.is_empty() {
+            items.push(primary("agents/new", "New agent", Some(Message::OpenNew)));
         }
         kit::sized(
             kit::padded(
                 kit::centered_row("agents/toolbar", items),
                 wire::Edges {
                     top: 0.,
-                    right: 12.,
+                    right: kit::spacing::LG as f32,
                     bottom: 0.,
-                    left: 12.,
+                    left: kit::spacing::LG as f32,
                 },
             ),
             Some(Length::Fill),
@@ -358,28 +381,47 @@ impl AgentsView {
     /// list is the surface pane, the rail keeps the width the reader
     /// dragged it to, and a hairline is all that stands between them.
     fn split(&self, key: &str, list: Node, rail: Option<(Node, Node)>) -> Node {
+        let stacked = self.stacked();
         let mut panes = vec![kit::pane(format!("{key}/list"), list, Length::Fill)];
         if let Some((handle, pane)) = rail {
-            panes.push(handle);
+            panes.push(match stacked {
+                true => kit::divider(format!("{key}/rule")),
+                false => handle,
+            });
             panes.push(pane);
         }
+        let panes = match stacked {
+            true => kit::column(key, panes),
+            false => kit::row(key, panes),
+        };
         kit::sized(
-            kit::spaced(kit::row(key, panes), 0.),
+            kit::spaced(panes, 0.),
             Some(Length::Fill),
             Some(Length::Fill),
         )
+    }
+
+    /// Whether the pane is too narrow for a list and its rail side by side.
+    fn stacked(&self) -> bool {
+        self.viewport_width < STACK_BELOW
+    }
+
+    /// A rail's width: the reader's, or the whole pane when stacked.
+    fn rail_width(&self, width: f64) -> Length {
+        match self.stacked() {
+            true => Length::Fill,
+            false => Length::Fixed(width as f32),
+        }
     }
 
     fn registry_panel(&self) -> Node {
         let mut rows = Vec::new();
         let no_agents = self.rows.is_empty() && !self.creating;
         match (self.answered, no_agents) {
-            (false, _) => rows.push(kit::padded(
-                kit::row(
-                    "agents/loading-row",
-                    [kit::secondary("agents/loading", "Reading the registry…")],
-                ),
-                wire::Edges::all(16.),
+            (false, _) => rows.push(kit::empty_state(
+                "agents/loading",
+                "Reading the registry…",
+                "Agents arrive from the node with their executor and skills.",
             )),
             (true, true) => rows.push(kit::empty_state(
                 "agents/empty",
@@ -400,21 +442,18 @@ impl AgentsView {
                     format!("{key}/identity"),
                     [
                         kit::nowrap(kit::strong(format!("{key}/name"), &agent.name)),
-                        kit::nowrap(kit::text_size(
-                            kit::secondary(
-                                format!("{key}/meta"),
-                                format!(
-                                    "{} · {} · {}",
-                                    owner,
-                                    agent.capability,
-                                    host::plural(agent.skills.len() as i64, "skill", "skills")
-                                ),
+                        kit::nowrap(kit::secondary(
+                            format!("{key}/meta"),
+                            format!(
+                                "{} · {} · {}",
+                                owner,
+                                agent.capability,
+                                host::plural(agent.skills.len() as i64, "skill", "skills")
                             ),
-                            12.,
                         )),
                     ],
                 ),
-                4.,
+                kit::spacing::XXS as f32,
             );
             let mut line = vec![
                 kit::avatar(
@@ -428,7 +467,10 @@ impl AgentsView {
                 line.push(kit::badge(format!("{key}/working"), "Working", Tone::Agent));
             }
             line.push(state_badge(format!("{key}/standing"), &agent.status));
-            let summary = kit::spaced(kit::centered_row(format!("{key}/summary"), line), 10.);
+            let summary = kit::spaced(
+                kit::centered_row(format!("{key}/summary"), line),
+                kit::spacing::MD as f32,
+            );
             let mut button = kit::list_row(
                 &key,
                 summary,
@@ -437,10 +479,10 @@ impl AgentsView {
             );
             if let Node::Button { label, padding, .. } = &mut button {
                 *padding = Some(wire::Edges {
-                    top: 10.,
-                    right: 10.,
-                    bottom: 10.,
-                    left: 10.,
+                    top: kit::spacing::MD as f32,
+                    right: kit::spacing::MD as f32,
+                    bottom: kit::spacing::MD as f32,
+                    left: kit::spacing::MD as f32,
                 });
                 *label = Some(agent.name.clone());
             }
@@ -450,7 +492,7 @@ impl AgentsView {
             "agents/registry-scroll",
             kit::padded(
                 kit::spaced(kit::column("agents/registry", rows), 2.),
-                wire::Edges::all(8.),
+                wire::Edges::all(kit::spacing::SM as f32),
             ),
         );
         let editor_open = !self.selected.is_empty() || self.creating;
@@ -460,7 +502,7 @@ impl AgentsView {
                 detail_pane(
                     "agents/editor",
                     kit::scroll("agents/editor-scroll", self.editor()),
-                    self.editor_width,
+                    self.rail_width(self.editor_width),
                 ),
             )
         });
@@ -470,12 +512,10 @@ impl AgentsView {
     fn runs_panel(&self) -> Node {
         let mut rows = Vec::new();
         match (self.answered, self.runs.is_empty()) {
-            (false, _) => rows.push(kit::padded(
-                kit::row(
-                    "agents/runs-loading-row",
-                    [kit::secondary("agents/runs-loading", "Reading the runs…")],
-                ),
-                wire::Edges::all(16.),
+            (false, _) => rows.push(kit::empty_state(
+                "agents/runs-loading",
+                "Reading the runs…",
+                "Every dispatch of an agent arrives from the node.",
             )),
             (true, true) => rows.push(kit::empty_state(
                 "agents/no-runs",
@@ -505,26 +545,20 @@ impl AgentsView {
                                     state_badge(format!("{key}/state"), &run.state),
                                 ],
                             ),
-                            6.,
+                            kit::spacing::XS as f32,
                         ),
                         kit::sized(
-                            kit::nowrap(kit::text_size(
-                                kit::secondary(format!("{key}/origin"), &run.origin),
-                                12.,
-                            )),
+                            kit::nowrap(kit::secondary(format!("{key}/origin"), &run.origin)),
                             Some(Length::Fill),
                             None,
                         ),
-                        kit::text_size(
-                            kit::secondary(
-                                format!("{key}/dispatched"),
-                                format!("Dispatched at · {}", run.dispatched),
-                            ),
-                            11.,
+                        kit::caption(
+                            format!("{key}/dispatched"),
+                            format!("Dispatched at · {}", run.dispatched),
                         ),
                     ],
                 ),
-                4.,
+                kit::spacing::XXS as f32,
             );
             let mut button = kit::list_row(
                 &key,
@@ -534,10 +568,10 @@ impl AgentsView {
             );
             if let Node::Button { label, padding, .. } = &mut button {
                 *padding = Some(wire::Edges {
-                    top: 10.,
-                    right: 10.,
-                    bottom: 10.,
-                    left: 10.,
+                    top: kit::spacing::MD as f32,
+                    right: kit::spacing::MD as f32,
+                    bottom: kit::spacing::MD as f32,
+                    left: kit::spacing::MD as f32,
                 });
                 *label = Some(run.run_id.clone());
             }
@@ -547,7 +581,7 @@ impl AgentsView {
             "agents/runs-scroll",
             kit::padded(
                 kit::spaced(kit::column("agents/runs", rows), 2.),
-                wire::Edges::all(8.),
+                wire::Edges::all(kit::spacing::SM as f32),
             ),
         );
         let detail = match self.open_run.is_empty() {
@@ -571,22 +605,28 @@ impl AgentsView {
                 Some(Length::Fill),
             ),
         };
-        kit::sized(
-            kit::spaced(
-                kit::row(
-                    "agents/run-panes",
-                    [
-                        kit::pane(
-                            "agents/run-list",
-                            list,
-                            Length::Fixed(self.run_list_width as f32),
-                        ),
-                        resize("agents/run-list-resize", Message::RunListResized),
-                        kit::pane("agents/journal", detail, Length::Fill),
-                    ],
-                ),
-                0.,
+        let list = kit::pane(
+            "agents/run-list",
+            list,
+            self.rail_width(self.run_list_width),
+        );
+        let journal = kit::pane("agents/journal", detail, Length::Fill);
+        let panes = match self.stacked() {
+            true => kit::column(
+                "agents/run-panes",
+                [list, kit::divider("agents/run-panes/rule"), journal],
             ),
+            false => kit::row(
+                "agents/run-panes",
+                [
+                    list,
+                    resize("agents/run-list-resize", Message::RunListResized),
+                    journal,
+                ],
+            ),
+        };
+        kit::sized(
+            kit::spaced(panes, 0.),
             Some(Length::Fill),
             Some(Length::Fill),
         )
@@ -597,7 +637,7 @@ impl AgentsView {
             let content = (self.open_row.state == "running").then(|| {
                 kit::wrapping(kit::secondary(
                     "agents/control-unavailable",
-                    "This session is not connected for run control.",
+                    "Run controls are unavailable in this session.",
                 ))
             });
             return kit::column("agents/no-controls", content);
@@ -676,7 +716,7 @@ impl AgentsView {
         }
         kit::padded(
             kit::column("agents/control-composer", content),
-            wire::Edges::all(12.),
+            wire::Edges::all(kit::spacing::LG as f32),
         )
     }
 
@@ -719,11 +759,12 @@ impl AgentsView {
                     "agents/journal-standing",
                     [
                         state_badge("agents/journal-state", &self.open_row.state),
+                        // no filler here: a Fill space in a wrapping row takes
+                        // a line of its own, and only added a blank one
                         kit::wrapping(kit::secondary(
                             "agents/journal-origin",
                             &self.open_row.origin,
                         )),
-                        filler(),
                         subtle(
                             "agents/receipt",
                             "Run details",
@@ -731,7 +772,7 @@ impl AgentsView {
                         ),
                     ],
                 ),
-                8.,
+                kit::spacing::SM as f32,
             ),
             kit::secondary(
                 "agents/journal-dispatched",
@@ -751,7 +792,26 @@ impl AgentsView {
             );
             items.push(kit::card(
                 "agents/receipt-card",
-                kit::spaced(kit::column("agents/receipt-body", facts), 6.),
+                kit::spaced(
+                    kit::column("agents/receipt-body", facts),
+                    kit::spacing::XS as f32,
+                ),
+            ));
+        }
+        if let host::OutputConnection::Refused(sentence) = &self.live.connection {
+            items.push(kit::notice(
+                "agents/output-refused",
+                kit::column(
+                    "agents/output-refused-body",
+                    [
+                        kit::strong(
+                            "agents/output-refused-title",
+                            "You cannot watch this run's output",
+                        ),
+                        kit::wrapping(kit::secondary("agents/output-refused-text", sentence)),
+                    ],
+                ),
+                Tone::Neutral,
             ));
         }
         if let host::OutputConnection::Failed(error) = &self.live.connection {
@@ -787,7 +847,7 @@ impl AgentsView {
                     )
                 }),
             ),
-            6.,
+            kit::spacing::XS as f32,
         ));
         let content = match self.run_tab {
             RunTab::Conversation => self.conversation_panel(),
@@ -845,16 +905,25 @@ impl AgentsView {
                 }
                 steps.push(kit::card(
                     &key,
-                    kit::spaced(kit::column(format!("{key}/content"), content), 6.),
+                    kit::spaced(
+                        kit::column(format!("{key}/content"), content),
+                        kit::spacing::XS as f32,
+                    ),
                 ));
             }
             steps.push(kit::wrapping(kit::caption(
                 "agents/process-retention",
                 "Recent output retained by this node",
             )));
-            items.push(kit::spaced(kit::column("agents/process", steps), 8.));
+            items.push(kit::spaced(
+                kit::column("agents/process", steps),
+                kit::spacing::SM as f32,
+            ));
         }
-        kit::spaced(kit::column("agents/trace-panel", items), 12.)
+        kit::spaced(
+            kit::column("agents/trace-panel", items),
+            kit::spacing::LG as f32,
+        )
     }
 
     fn conversation_panel(&self) -> Node {
@@ -893,7 +962,7 @@ impl AgentsView {
                             )),
                         ],
                     ),
-                    8.,
+                    kit::spacing::SM as f32,
                 ));
             }
             if !self.live.answer_preview.is_empty() {
@@ -904,15 +973,22 @@ impl AgentsView {
             }
             items.push(kit::notice(
                 "agents/live",
-                kit::spaced(kit::column("agents/live-body", live), 6.),
+                kit::spaced(
+                    kit::column("agents/live-body", live),
+                    kit::spacing::XS as f32,
+                ),
                 Tone::Agent,
             ));
         }
         if self.live.answer.is_empty() && !show_progress {
-            items.push(kit::secondary(
-                "agents/conversation-empty",
-                "No reply is available for this run.",
-            ));
+            // a refused reader cannot know: the reply is in the output
+            let empty = match self.live.connection {
+                host::OutputConnection::Refused(_) => {
+                    "The reply comes with the run's output, which you cannot watch."
+                }
+                _ => "No reply is available for this run.",
+            };
+            items.push(kit::secondary("agents/conversation-empty", empty));
         }
         kit::spaced(kit::column("agents/conversation-panel", items), 14.)
     }
@@ -945,22 +1021,24 @@ impl AgentsView {
                             kit::wrapping(kit::text("agents/run-reason", &self.open_row.reason)),
                         ],
                     ),
-                    4.,
+                    kit::spacing::XXS as f32,
                 ),
                 Tone::Danger,
             ));
         }
         let mut entries = Vec::new();
         if !journal_ready {
-            entries.push(kit::secondary(
+            entries.push(kit::empty_state(
                 "agents/journal-loading",
                 "Reading the journal…",
+                "This run's entries arrive from the node.",
             ));
         } else if self.journal.entries.is_empty() {
-            entries.push(kit::wrapping(kit::secondary(
+            entries.push(kit::empty_state(
                 "agents/journal-empty",
-                "This run has no journal entries yet. The node may still be catching up.",
-            )));
+                "No journal entries yet",
+                "The node may still be catching up.",
+            ));
         } else {
             for (index, entry) in self.journal.entries.iter().enumerate() {
                 let key = format!("agents/entry/{index}");
@@ -975,7 +1053,7 @@ impl AgentsView {
                 }
                 let mut lines = vec![kit::spaced(
                     kit::centered_row(format!("{key}/head"), head),
-                    8.,
+                    kit::spacing::SM as f32,
                 )];
                 if !entry.summary.is_empty() {
                     lines.push(kit::wrapping(kit::text(
@@ -990,7 +1068,10 @@ impl AgentsView {
                         self.message_preview_open.as_deref(),
                     ));
                 }
-                let body = kit::spaced(kit::column(format!("{key}/body"), lines), 4.);
+                let body = kit::spaced(
+                    kit::column(format!("{key}/body"), lines),
+                    kit::spacing::XXS as f32,
+                );
                 entries.push(kit::spaced(
                     kit::row(
                         &key,
@@ -1003,7 +1084,7 @@ impl AgentsView {
                             body,
                         ],
                     ),
-                    8.,
+                    kit::spacing::SM as f32,
                 ));
             }
         }
@@ -1058,25 +1139,34 @@ impl AgentsView {
             content.push(kit::divider(format!("{key}/divider")));
             items.push(kit::spaced(
                 kit::column(format!("{key}/content"), content),
-                6.,
+                kit::spacing::XS as f32,
             ));
         }
-        kit::spaced(kit::column("agents/raw-panel", items), 4.)
+        kit::spaced(
+            kit::column("agents/raw-panel", items),
+            kit::spacing::XXS as f32,
+        )
     }
 
     fn editor(&self) -> Node {
+        let read_only = !self.can_edit && !self.creating;
+        // A reader cannot save, so the record reads as stored: a title that
+        // followed a draft would name an agent that does not exist.
+        let stored = self
+            .rows
+            .iter()
+            .find(|row| row.id == self.selected)
+            .map(|row| row.name.as_str());
+        let title = match (self.creating, stored) {
+            (true, _) => "New agent",
+            (false, Some(stored)) if read_only => stored,
+            (false, _) => &self.draft_name,
+        };
         let mut items = vec![kit::centered_row(
             "agents/editor-heading",
             [
                 kit::sized(
-                    kit::wrapping(kit::heading(
-                        "agents/editor-title",
-                        if self.creating {
-                            "New agent"
-                        } else {
-                            &self.draft_name
-                        },
-                    )),
+                    kit::wrapping(kit::heading("agents/editor-title", title)),
                     Some(Length::Fill),
                     None,
                 ),
@@ -1087,7 +1177,6 @@ impl AgentsView {
                 ),
             ],
         )];
-        let read_only = !self.can_edit && !self.creating;
         if read_only {
             items.push(kit::notice(
                 "agents/read-only-box",
@@ -1120,7 +1209,7 @@ impl AgentsView {
                 "Standing",
                 [kit::spaced(
                     kit::centered_row("agents/standing-row", standing),
-                    8.,
+                    kit::spacing::SM as f32,
                 )],
             ));
         }
@@ -1151,16 +1240,23 @@ impl AgentsView {
                 kit::wrapping(kit::mono("agents/id", &self.draft_id)),
             ));
         }
-        identity.push(kit::field(
-            "agents/name-field",
-            "Display name",
-            field(
-                "agents/name",
+        identity.push(match read_only {
+            true => kit::kv(
+                "agents/name-row",
                 "Display name",
-                &self.draft_name,
-                Message::BindDraftName,
+                kit::wrapping(kit::text("agents/name", title)),
             ),
-        ));
+            false => kit::field(
+                "agents/name-field",
+                "Display name",
+                field(
+                    "agents/name",
+                    "Display name",
+                    &self.draft_name,
+                    Message::BindDraftName,
+                ),
+            ),
+        });
         items.push(section("agents/identity", "Identity", identity));
         let capability = host::or_empty(&self.draft_capability);
         let executor = if self.can_edit {
@@ -1168,6 +1264,7 @@ impl AgentsView {
             let choices = options.clone();
             Node::PickList {
                 key: "AgentsView/root/editor/agent-capability".into(),
+                label: Some("Executor".into()),
                 selected: options
                     .iter()
                     .position(|value| value == &capability)
@@ -1222,7 +1319,7 @@ impl AgentsView {
             }
             let mut details = vec![kit::spaced(
                 kit::centered_row(format!("{key}/head"), head),
-                4.,
+                kit::spacing::XXS as f32,
             )];
             if !skill.source_prefix.is_empty() {
                 details.push(kit::wrapping(kit::mono(
@@ -1238,7 +1335,10 @@ impl AgentsView {
             }
             skills.push(kit::card(
                 key.clone(),
-                kit::spaced(kit::column(format!("{key}/body"), details), 4.),
+                kit::spaced(
+                    kit::column(format!("{key}/body"), details),
+                    kit::spacing::XXS as f32,
+                ),
             ));
         }
         if self.can_edit {
@@ -1292,7 +1392,7 @@ impl AgentsView {
                             ),
                         ],
                     ),
-                    8.,
+                    kit::spacing::SM as f32,
                 ),
             ));
         }
@@ -1499,7 +1599,7 @@ impl AgentsView {
     pub(crate) const PREFERRED_WINDOW_SIZE: &'static str = "none";
     /// This state's layout, digested — `snapshot_schema` holds it here.
     pub(crate) const SNAPSHOT_SCHEMA: &'static str =
-        "b4af6857860fc1fedcbf5402adbf1fa3df726117feef73754437cd57fc4e005c";
+        "db839e7472373284f8d555195220d0f64449d110b06dd35b4fa6c1b86ec14dfa";
     pub(crate) fn snapshot(&self) -> Result<Vec<u8>, String> {
         self.validate_snapshot()?;
         wire::Snapshot {

@@ -15,7 +15,7 @@ use ducktape_view_guest::{
 };
 
 /// The density a card's row is built on.
-const LIST_ROW: f32 = 28.;
+const LIST_ROW: f32 = kit::height::CONTROL as f32;
 
 /// The gutter between tiles, between columns and between the cards of one
 /// column.
@@ -91,15 +91,15 @@ impl HomeView {
             self.files_card(),
             self.modules_card(),
         ];
+        // a rail is `Fill` (a column's own width), never `FillPortion`: the
+        // host holds a portion no narrower than its widest one-line row, so
+        // one long room name ran its rail past the pane (#35); equal `Fill`
+        // rails split the row evenly and give way to it
         let rails = host::dealt(cards, columns)
             .into_iter()
             .enumerate()
             .map(|(index, cards)| {
-                kit::sized(
-                    kit::spaced(kit::column(format!("home/column/{index}"), cards), GUTTER),
-                    Some(Length::FillPortion(1)),
-                    None,
-                )
+                kit::spaced(kit::column(format!("home/column/{index}"), cards), GUTTER)
             });
         let dashboard = kit::spaced(
             kit::column(
@@ -212,7 +212,7 @@ impl HomeView {
                     kit::caption(format!("{key}/label"), label),
                 ],
             ),
-            4.,
+            kit::spacing::XXS as f32,
         );
         kit::sized(kit::card(key, body), Some(Length::FillPortion(1)), None)
     }
@@ -238,16 +238,30 @@ impl HomeView {
             ));
         }
         children.push(body);
-        let body = kit::spaced(kit::column(format!("{key}/body"), children), 8.);
+        let body = kit::spaced(
+            kit::column(format!("{key}/body"), children),
+            kit::spacing::SM as f32,
+        );
         kit::card(key, body)
     }
 
     fn reading(key: &str, name: &str, value: Node) -> Node {
         kit::sized(
-            kit::kv(key, name, value),
+            kit::kv(key, name, Self::rest(value)),
             None,
             Some(Length::Fixed(LIST_ROW)),
         )
+    }
+
+    /// A reading's text takes what its row leaves and truncates there: a
+    /// label's own width never shrinks, so a long sync line, or a digest
+    /// beside its Copy in a narrow pane, ran over the card's edge. A badge
+    /// keeps its own width.
+    fn rest(value: Node) -> Node {
+        match value {
+            Node::Text { .. } => kit::sized(value, Some(Length::Fill), None),
+            other => other,
+        }
     }
 
     /// A reading of a digest: its head in mono, and a button that copies
@@ -260,7 +274,7 @@ impl HomeView {
                     kit::kv(
                         format!("{key}/reading"),
                         name,
-                        mono(format!("{key}/value"), host::short_label(digest)),
+                        Self::rest(mono(format!("{key}/value"), host::short_label(digest))),
                     ),
                     Some(Length::Fill),
                     None,
@@ -405,9 +419,12 @@ impl HomeView {
         let mut rows = Vec::new();
         for peer in self.peers.iter().take(host::PEER_ROWS) {
             let key = format!("home/peer/{}", peer.key);
+            // `live` is this node's own link to the peer, not the peer's
+            // health: with no link the peer may still be up, so the word
+            // names the link, as Members says it (#9).
             let (state, tone) = match peer.live {
                 true => ("Online", Tone::Success),
-                false => ("Offline", Tone::Neutral),
+                false => ("Not linked", Tone::Neutral),
             };
             rows.push(kit::sized(
                 kit::spaced(
@@ -423,7 +440,7 @@ impl HomeView {
                             kit::badge(format!("{key}/state"), state, tone),
                         ],
                     ),
-                    8.,
+                    kit::spacing::SM as f32,
                 ),
                 None,
                 Some(Length::Fixed(LIST_ROW)),
@@ -432,8 +449,8 @@ impl HomeView {
         if rows.is_empty() {
             rows.push(kit::empty_state(
                 "home/peers/empty",
-                "No peers",
-                "This node has not met another node yet.",
+                "No peers to show",
+                "No peer details are available.",
             ));
         }
         self.card(
@@ -464,7 +481,7 @@ impl HomeView {
                             ),
                         ],
                     ),
-                    8.,
+                    kit::spacing::SM as f32,
                 ),
                 None,
                 Some(Length::Fixed(LIST_ROW)),
@@ -504,7 +521,7 @@ impl HomeView {
                             ),
                         ],
                     ),
-                    8.,
+                    kit::spacing::SM as f32,
                 ),
                 None,
                 Some(Length::Fixed(LIST_ROW)),
@@ -543,7 +560,10 @@ impl HomeView {
             ));
             let row = kit::list_row(
                 key.clone(),
-                kit::spaced(kit::centered_row(format!("{key}/row"), cells), 8.),
+                kit::spaced(
+                    kit::centered_row(format!("{key}/row"), cells),
+                    kit::spacing::SM as f32,
+                ),
                 false,
                 Some(slots::message(Message::OpenRoom(room.id.clone()))),
             );
@@ -590,7 +610,7 @@ impl HomeView {
                             ),
                         ],
                     ),
-                    8.,
+                    kit::spacing::SM as f32,
                 ),
                 false,
                 Some(slots::message(Message::OpenRun(run.dispatch_id.clone()))),
@@ -639,7 +659,7 @@ impl HomeView {
                             ),
                         ],
                     ),
-                    8.,
+                    kit::spacing::SM as f32,
                 ),
                 None,
                 Some(Length::Fixed(LIST_ROW)),
@@ -682,7 +702,7 @@ impl HomeView {
                             mono(format!("{key}/height"), host::height_label(snapshot.height)),
                         ],
                     ),
-                    8.,
+                    kit::spacing::SM as f32,
                 ),
                 None,
                 Some(Length::Fixed(LIST_ROW)),

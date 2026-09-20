@@ -6,8 +6,19 @@
 
 use ducktape_view_guest::testing::{answer, has_text, item, press, refuse, texts};
 use ducktape_view_guest::wire::{Event, Frame, Node, Request};
+use members_view::boot_native;
 use members_view::host::{Copy, Session};
-use members_view::{boot_native, tick_native};
+
+/// The view's own tick, refusing a frame assistive technology cannot read:
+/// every tree these tests render is checked.
+fn tick_native(events: Vec<ducktape_view_guest::wire::Event>) -> ducktape_view_guest::wire::Frame {
+    let frame = members_view::tick_native(events);
+    frame
+        .root
+        .iter()
+        .for_each(ducktape_view_guest::testing::assert_accessible);
+    frame
+}
 
 fn node_ending(frame: &Frame, suffix: &str) -> Node {
     fn find(node: &Node, suffix: &str) -> Option<Node> {
@@ -118,6 +129,48 @@ fn opened(holds_a_seat: bool, label: &str) -> Frame {
     let (frame, _) = connected_roster(holds_a_seat);
     assert!(has_text(&frame, label), "{:?}", texts(&frame));
     tick_native(press(&frame, label))
+}
+
+/// In a narrow pane nothing runs past the edge: the filter chips wrap, a
+/// member's name and an agent's model take the row's rest and truncate, and
+/// an open record stacks under the roster (no width to drag) instead of
+/// leaving the list a sliver beside it. A wide pane keeps the split.
+#[test]
+fn a_narrow_pane_stacks_the_record_and_truncates_long_names() {
+    use ducktape_view_guest::testing::{find, measure};
+    use ducktape_view_guest::wire::{Axis, Length};
+
+    let frame = opened(true, "Reviewer Bot");
+    let narrow = tick_native(measure(&frame, "members/viewport", 360., 700.));
+    let Some(Node::Linear { axis, .. }) = find(&narrow, "members") else {
+        panic!("no panes");
+    };
+    assert_eq!(*axis, Axis::Column, "stacked");
+    assert!(find(&narrow, "members/member-resize").is_none());
+    let Some(Node::Container { width, .. }) = find(&narrow, "members/member") else {
+        panic!("no record");
+    };
+    assert_eq!(*width, Some(Length::Fill));
+    let Some(Node::Linear { wrap, .. }) = find(&narrow, "members/filter") else {
+        panic!("no filter strip");
+    };
+    assert!(wrap.is_some(), "the chips wrap");
+    for key in [
+        "members/row/reviewer-bot/name",
+        "members/row/reviewer-bot/model",
+    ] {
+        let Some(Node::Text { width, .. }) = find(&narrow, key) else {
+            panic!("no {key}");
+        };
+        assert_eq!(*width, Some(Length::Fill), "{key} truncates");
+    }
+
+    let wide = tick_native(measure(&narrow, "members/viewport", 1280., 700.));
+    let Some(Node::Linear { axis, .. }) = find(&wide, "members") else {
+        panic!("no panes");
+    };
+    assert_eq!(*axis, Axis::Row, "side by side");
+    assert!(find(&wide, "members/member-resize").is_some());
 }
 
 /// At boot the view asks for the session only; connected, it reads the
@@ -486,4 +539,32 @@ fn an_admin_opens_a_ballot_over_a_resident_and_a_non_admin_reads_the_rule() {
         "{:?}",
         texts(&frame)
     );
+}
+
+/// THE PEER SAMPLE IS THIS NODE'S LINK, NOT A REPORT ON THE PERSON.
+///
+/// `live` on a human row is folded from `rpc.peers` filtered on
+/// `connected` — what this node has dialled. A member absent from that
+/// sample may be up and serving the rest of the mesh, so the badge names
+/// the missing link and never claims the person is down.
+#[test]
+fn a_member_this_node_has_no_link_to_is_not_called_offline() {
+    // the unseated roster lists the stranger, whom the peer sample does
+    // not carry: the one human row with `live == false`
+    let (frame, _) = connected_roster(false);
+    assert!(has_text(&frame, STRANGER), "{:?}", texts(&frame));
+    assert!(has_text(&frame, "Not linked"), "{:?}", texts(&frame));
+    let tree = format!("{:?}", frame.root);
+    for word in ["offline", "Offline"] {
+        assert!(!tree.contains(word), "{word:?} is still drawn: {tree}");
+    }
+}
+
+/// `tick_native` asserts every frame it returns; this walks the roster and
+/// a record, seated and not, the states that hold the view's controls.
+#[test]
+fn accessibility_the_roster_and_a_record_name_their_controls() {
+    opened(true, THIS_NODE);
+    opened(true, "Reviewer Bot");
+    opened(false, RESIDENT);
 }

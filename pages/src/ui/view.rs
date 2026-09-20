@@ -373,6 +373,13 @@ impl PagesView {
 mod tests {
     use super::*;
 
+    /// The tree the view paints, every control in it named and placed.
+    fn view(app: &PagesView) -> wire::Node {
+        let root = app.view();
+        assert_eq!(wire::accessibility_faults(&root), Vec::new());
+        root
+    }
+
     #[test]
     fn snapshots_reject_nonfinite_layout_in_every_coordinate() {
         let fields: [fn(&mut PagesView) -> &mut f64; 7] = [
@@ -475,14 +482,14 @@ mod tests {
         app.update(Message::PictureReady(
             1,
             crate::host::PictureItem {
-                uri: "duck://files/shared/pages/alpha/p1/duck.png".into(),
+                uri: "duck://testnet-0a1b2c3d/files/shared/pages/alpha/p1/duck.png".into(),
                 alt: "duck.png".into(),
                 error: String::new(),
             },
         ));
         assert_eq!(
             crate::host::document_text(&app.document),
-            "Handbook\n![duck.png](duck://files/shared/pages/alpha/p1/duck.png)\n\nUnder it"
+            "Handbook\n![duck.png](duck://testnet-0a1b2c3d/files/shared/pages/alpha/p1/duck.png)\n\nUnder it"
         );
         assert_eq!(
             app.document.cursor().position,
@@ -535,7 +542,7 @@ mod tests {
         app.update(Message::OpenPageRowMenu("alpha-child".into()));
         app.update(Message::OfferPageMove);
         let frame = wire::Frame {
-            root: Some(app.view()),
+            root: Some(view(&app)),
             ..Default::default()
         };
         let present = keys(&frame);
@@ -583,7 +590,7 @@ mod tests {
         ];
         app.update(Message::TogglePageFold("alpha".into()));
         let frame = wire::Frame {
-            root: Some(app.view()),
+            root: Some(view(&app)),
             ..Default::default()
         };
         let present = keys(&frame);
@@ -592,7 +599,7 @@ mod tests {
         assert!(has(&present, "PagesView/root/pages/page/beta/more"));
         assert!(has(&present, "PagesView/root/pages/page/beta/area"));
         assert!(!has(&present, "PagesView/root/pages/page/beta/menu"));
-        assert!(!has(&present, "PagesView/root/pages/menu-backdrop"));
+        assert!(!has(&present, "PagesView/root/pages/menu-overlay"));
 
         app.update(Message::AddSubpage("alpha".into()));
         assert!(app.busy, "the host is asked for the page");
@@ -605,13 +612,56 @@ mod tests {
         app.update(Message::PressedAt(120., 200.));
         app.update(Message::OpenPageRowMenu("beta".into()));
         let frame = wire::Frame {
-            root: Some(app.view()),
+            root: Some(view(&app)),
             ..Default::default()
         };
         let opened = keys(&frame);
         assert!(has(&opened, "PagesView/root/pages/page/beta/menu"));
         assert!(has(&opened, "PagesView/root/pages/page/beta/menu/delete"));
-        assert!(has(&opened, "PagesView/root/pages/menu-backdrop"));
+        assert!(has(&opened, "PagesView/root/pages/menu-overlay"));
+
+        let mut menu_overlays = 0;
+        let mut old_backdrops = 0;
+        view(&app).for_each_mut(&mut |node| match node {
+            Node::Overlay {
+                key,
+                label,
+                backdrop,
+                on_dismiss,
+                children,
+                ..
+            } if key == "PagesView/root/pages/menu-overlay" => {
+                assert_eq!(label.as_deref(), Some("Page menu"));
+                assert_eq!(*backdrop, wire::Rgba([0.; 4]));
+                assert!(on_dismiss.is_some());
+                assert_eq!(children.len(), 2);
+                assert_eq!(children[0].key(), Some("PagesView/root/pages/press-area"));
+                let mut floats = 0;
+                children[1].for_each_mut(&mut |child| {
+                    if matches!(child, Node::Float { key, .. } if key == "PagesView/root/pages/page/beta/menu") {
+                        floats += 1;
+                    }
+                });
+                assert_eq!(floats, 1, "the page menu dialog carries its Float");
+                menu_overlays += 1;
+            }
+            Node::MouseArea { key, .. } if key == "PagesView/root/pages/menu-backdrop" => {
+                old_backdrops += 1;
+            }
+            _ => {}
+        });
+        assert_eq!(menu_overlays, 1, "one named page menu dialog is open");
+        assert_eq!(old_backdrops, 0, "the old actionable backdrop remains");
+
+        app.update(Message::ClosePageMenu);
+        assert!(app.page_menu_page.is_empty());
+        assert!(!keys(&wire::Frame {
+            root: Some(view(&app)),
+            ..Default::default()
+        })
+        .iter()
+        .any(|key| key == "PagesView/root/pages/menu-overlay"));
+        app.update(Message::OpenPageRowMenu("beta".into()));
 
         app.update(Message::ArmPageDelete("beta".into()));
         assert!(app.page_delete_armed);
@@ -619,10 +669,11 @@ mod tests {
         assert_eq!(app.page_menu_page, "", "the menu closes behind the dialog");
         assert_eq!(app.active_page, "alpha", "the open page is not the target");
         let frame = wire::Frame {
-            root: Some(app.view()),
+            root: Some(view(&app)),
             ..Default::default()
         };
         assert!(!has(&keys(&frame), "PagesView/root/pages/page/beta/menu"));
+        assert!(!has(&keys(&frame), "PagesView/root/pages/menu-overlay"));
 
         app.update(Message::DeletePageSubmit);
         assert!(app.busy);
@@ -634,6 +685,46 @@ mod tests {
         assert_eq!(
             app.active_page, "",
             "deleting the open root lands on the list"
+        );
+    }
+
+    /// The host lays a float out in the box it is handed and paints its
+    /// surface and shadow across that whole box; the row menu's box must be
+    /// the card's own size.
+    #[test]
+    fn the_row_menu_float_is_laid_out_in_a_box_of_the_card_size() {
+        fn parent_of_float<'a>(node: &'a wire::Node, key: &str) -> Option<&'a wire::Node> {
+            let children = node.children();
+            if children
+                .iter()
+                .any(|child| matches!(child, wire::Node::Float { key: k, .. } if k == key))
+            {
+                return Some(node);
+            }
+            children.iter().find_map(|child| parent_of_float(child, key))
+        }
+        let (mut app, _) = PagesView::boot();
+        app.connected = true;
+        app.pages = vec![crate::host::PageItem {
+            id: "beta".into(),
+            title: "BETA".into(),
+            parent: String::new(),
+            prefix: String::new(),
+            child_count: 0,
+        }];
+        app.update(Message::PressedAt(120., 200.));
+        app.update(Message::OpenPageRowMenu("beta".into()));
+        let root = view(&app);
+        let parent = parent_of_float(&root, "PagesView/root/pages/page/beta/menu")
+            .expect("the row menu floats");
+        let wire::Node::Container { width, height, .. } = parent else {
+            panic!("the float's box is not the card's own: {:?}", parent.key());
+        };
+        assert_eq!(*width, Some(Length::Fixed(PAGE_MENU_WIDTH as f32)));
+        let rows = 4.;
+        assert_eq!(
+            *height,
+            Some(Length::Fixed(PAGE_MENU_INSET * 2. + rows * PAGE_MENU_ITEM_HEIGHT))
         );
     }
 
@@ -659,7 +750,7 @@ mod tests {
             page("beta", "", 0, 0),
         ];
         let frame = wire::Frame {
-            root: Some(app.view()),
+            root: Some(view(&app)),
             ..Default::default()
         };
         let present = keys(&frame);
@@ -682,7 +773,7 @@ mod tests {
 
         app.update(Message::TogglePageFold("alpha".into()));
         let frame = wire::Frame {
-            root: Some(app.view()),
+            root: Some(view(&app)),
             ..Default::default()
         };
         let folded = keys(&frame);
@@ -709,7 +800,7 @@ mod tests {
 
         app.update(Message::TogglePageFold("alpha".into()));
         let frame = wire::Frame {
-            root: Some(app.view()),
+            root: Some(view(&app)),
             ..Default::default()
         };
         assert!(
@@ -767,7 +858,7 @@ mod tests {
         app.reply_thread = "thread-a".into();
         let mut editor = false;
         let mut inputs = Vec::new();
-        app.view().for_each_mut(&mut |node| match node {
+        view(&app).for_each_mut(&mut |node| match node {
             Node::Editor {
                 key,
                 editable,
@@ -822,7 +913,7 @@ mod tests {
         let _ = app.update(Message::PagesPaneResized(1060., 700.));
         assert_eq!(app.pages_pane_width, 1060.);
         let mut constrained = false;
-        app.view().for_each_mut(&mut |node| {
+        view(&app).for_each_mut(&mut |node| {
             if let wire::Node::Container {
                 max_width: Some(width),
                 ..
@@ -842,7 +933,7 @@ mod tests {
             .stack_size(4 * 1024 * 1024)
             .spawn(|| {
                 let (app, _) = PagesView::boot();
-                let _ = app.view();
+                let _ = view(&app);
             })
             .unwrap()
             .join()
@@ -865,7 +956,7 @@ mod tests {
         }];
         let mut content = Vec::new();
         let mut keys = Vec::new();
-        app.view().for_each_mut(&mut |node| {
+        view(&app).for_each_mut(&mut |node| {
             if let Some(key) = node.key() {
                 keys.push(key.to_string());
             }
@@ -889,7 +980,7 @@ mod tests {
         app.page_search_draft = "missing".into();
         app.page_search_query = "missing".into();
         let mut found = false;
-        app.view().for_each_mut(&mut |node| {
+        view(&app).for_each_mut(&mut |node| {
             let Node::Overlay {
                 key,
                 children,
@@ -934,7 +1025,7 @@ mod tests {
         app.page_search_draft = "  missing  ".into();
         let empty_answer = |app: &PagesView| {
             let mut found = false;
-            app.view().for_each_mut(&mut |node| {
+            view(app).for_each_mut(&mut |node| {
                 if let Node::Text { content, .. } = node {
                     found |= content == "No matching pages";
                 }

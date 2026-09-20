@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 
 /// How many recent blocks the ledger reads. The window the screen has always
 /// shown.
-const LEDGER_BLOCKS: usize = 100;
+pub(crate) const LEDGER_BLOCKS: usize = 100;
 
 /// The most hits one text-searchable source answers with.
 const SEARCH_HITS: usize = 50;
@@ -767,22 +767,22 @@ async fn search_files(pattern: String) -> Leg {
 /// workspace with no tasks contributes no hits and its chip reads 0 — empty is
 /// not the same as absent. One status page that did not answer silences the
 /// whole source, rather than rendering a list quietly missing every open task.
+///
+/// THE PAGES ARE READ ONE AFTER ANOTHER. The node serves four index views at
+/// once and refuses the fifth outright (429, `index_view_at_capacity`), and
+/// the search already holds chat, pages and runs in flight: three tasks pages
+/// on top made six, and a refused page silenced Tasks on a node that answers
+/// every one of them (#34).
 async fn search_tasks(needle: String) -> Leg {
     const STATUS_PAGES: [(&str, &str); 3] = [
         ("open", "open"),
         ("in_progress", "in progress"),
         ("done", "done"),
     ];
-    let pages = join_all(STATUS_PAGES.iter().map(|(status, _)| {
-        view(
-            "tasks",
-            json!({ "by_status": { "status": status, "limit": TASK_PAGE } }),
-        )
-    }))
-    .await;
     let mut hits = Vec::new();
-    for ((_, label), reply) in STATUS_PAGES.iter().zip(pages) {
-        let Some(reply) = reply else {
+    for (status, label) in STATUS_PAGES {
+        let page = json!({ "by_status": { "status": status, "limit": TASK_PAGE } });
+        let Some(reply) = view("tasks", page).await else {
             return Leg::silent("task", "Tasks");
         };
         for row in rows(&reply["tasks"]["tasks"]) {
@@ -801,7 +801,7 @@ async fn search_tasks(needle: String) -> Leg {
                 kind: "task".into(),
                 label: "Task".into(),
                 title,
-                snippet: (*label).into(),
+                snippet: label.into(),
                 place: author,
                 detail: updated,
                 target: id,
@@ -1030,11 +1030,7 @@ fn user_handle(bytes: &[u8]) -> String {
 }
 
 fn short_label(id: &str) -> String {
-    let mut label: String = id.chars().take(8).collect();
-    if id.chars().count() > 8 {
-        label.push('…');
-    }
-    label
+    ducktape_view_guest::kit::ellipsize(id, 9)
 }
 
 fn hex_encode(bytes: &[u8]) -> String {

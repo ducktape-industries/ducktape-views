@@ -32,18 +32,30 @@ impl ForgeView {
     ) -> wire::Node {
         let draft = self.composers.get(&scope).cloned().unwrap_or_default();
         let choices = self.composer_choices.clone();
+        // The scope is the draft's identity, so it is also the editor
+        // document's: the node key is only the place on screen, and forge
+        // reuses that place for whichever item is open.
+        let document = scope.clone();
         let route = Route {
             scope,
             key: key.clone(),
             target,
             connection: self.connection_serial,
         };
-        composer::view(&draft, &key, hint, editable, &choices, move |event| {
-            Message::Composer(Box::new(ComposerMessage::Editor(
-                route.clone(),
-                Box::new(event),
-            )))
-        })
+        composer::view(
+            &draft,
+            &key,
+            &document,
+            hint,
+            editable,
+            &choices,
+            move |event| {
+                Message::Composer(Box::new(ComposerMessage::Editor(
+                    route.clone(),
+                    Box::new(event),
+                )))
+            },
+        )
     }
     pub(crate) fn on_composer(&mut self, message: ComposerMessage) -> Task<Message> {
         match message {
@@ -229,9 +241,10 @@ impl ForgeView {
             });
             let route = route.clone();
             let upload_token = file.token.clone();
+            let chain = self.network_chain_id.clone();
             let (task, handle) = Task::future(async move {
                 let token = file.token.clone();
-                let result = host::upload(file).await.map_err(host::said);
+                let result = host::upload(file, chain).await.map_err(host::said);
                 Message::Composer(Box::new(ComposerMessage::Uploaded(route, token, result)))
             })
             .abortable();

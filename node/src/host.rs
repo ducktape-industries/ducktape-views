@@ -2,8 +2,8 @@
 //! the node itself.
 //!
 //! The kernel pushes SESSION FACTS ONLY (`node.props`: connected, dark,
-//! the app's connection reading, the workspace directory the daemon runs
-//! out of, and the wall clock — the four things no `/v1` route publishes).
+//! the app's connection reading, the local app data directory, and the wall
+//! clock — the facts no `/v1` route publishes).
 //! Everything the node itself knows is read HERE: `rpc.status` for the
 //! consensus and sync facts, `rpc.status` + the valset for THIS NODE'S OWN
 //! STANDING, `rpc.peers` for the mesh sample, `rpc.status` + a `modules`
@@ -39,6 +39,22 @@ const LOGS_TOPIC: &str = "logs";
 /// so an absence renders `—` and never a measured zero.
 const UNMEASURED: i64 = -1;
 
+/// How long the tip poll may answer nothing before this screen calls it
+/// stopped.
+///
+/// NOT a window this view invented. Both lanes that poll a peer's tip run on
+/// a 12-second tick — the validator's `sync::divergence::ROOT_POLL_TICK` and
+/// the parked resident's `constants::RESIDENT_FALLBACK_POLL` — and the node
+/// itself waits three of them (`BEHIND_AFTER_SECONDS`) before it calls its
+/// own lag a fault, because one silent tick is an unreachable peer and two is
+/// a block landing between two polls. The view reads silence with the node's
+/// own patience rather than a shorter one it would have to defend.
+///
+/// A `heard_at` unchanged across two readings cannot stand in for it: this
+/// view re-reads status on EVERY BLOCK, and a block lands between two polls,
+/// so a node following perfectly repeats the same `heard_at` most readings.
+const TIP_SILENT_AFTER: i64 = 36;
+
 /// How many log lines the timeline holds, and how many of them one frame
 /// draws. The ring on the node is 4,096 deep and its whole contents replay
 /// on subscribe; a tree wire carries text, not a virtual list, so the
@@ -54,8 +70,8 @@ pub struct HostError {
 // ---------- the session ----------
 
 /// What the kernel knows and this view cannot: whether there is a node,
-/// the colour mode, the app's own connection reading, the directory the
-/// daemon runs out of, and the clock. NOT this node's standing — the view
+/// the colour mode, the app's own connection reading, the local app data
+/// directory, and the clock. NOT this node's standing — the view
 /// folds that off the valset itself ([`standing`]).
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Session {
@@ -63,8 +79,8 @@ pub struct Session {
     pub dark: bool,
     /// the app's connection reading — `Live`, `Offline`, `Sync delayed`
     pub status: String,
-    /// the workspace directory this daemon runs out of; no `/v1` route
-    /// publishes it
+    /// the local app data directory supplied by the session host; no `/v1`
+    /// route publishes a remote node's data directory
     pub data_dir: String,
     pub wall_now: i64,
 }
@@ -232,6 +248,14 @@ pub struct NodeFacts {
     pub node_version: String,
     pub node_root_hash: String,
     pub sync_line: String,
+    /// the phase as the NODE spells it on the wire: `sync_line` has already
+    /// turned it into prose, and the sentences below are decided on the word
+    pub node_phase: String,
+    /// the gap to the tip this node last heard, and when that tip landed —
+    /// both [`UNMEASURED`] until a peer answers a tip poll, because a node
+    /// that has heard nothing is not a node that measured a zero gap
+    pub node_behind_by: i64,
+    pub node_heard_at: i64,
     pub node_phase_since: i64,
     pub node_sync_retries: i64,
     pub node_sync_failures: i64,
@@ -252,6 +276,9 @@ impl Default for NodeFacts {
             node_version: String::new(),
             node_root_hash: String::new(),
             sync_line: String::new(),
+            node_phase: String::new(),
+            node_behind_by: UNMEASURED,
+            node_heard_at: UNMEASURED,
             node_phase_since: UNMEASURED,
             node_sync_retries: 0,
             node_sync_failures: 0,
@@ -300,6 +327,7 @@ fn node_facts(status: &serde_json::Value) -> NodeFacts {
     let operations = &status["operations"];
     let consensus = &operations["consensus"];
     let sync = &operations["sync"];
+    let follow = &operations["follow"];
     let phase = operations["phase"].as_str().unwrap_or_default();
     let applied = sync["applied_height"].as_i64().unwrap_or(UNMEASURED);
     let target = sync["target_height"].as_i64().unwrap_or(UNMEASURED);
@@ -317,6 +345,9 @@ fn node_facts(status: &serde_json::Value) -> NodeFacts {
         node_version: status["version"].as_str().unwrap_or_default().to_owned(),
         node_root_hash: status["root_hash"].as_str().unwrap_or_default().to_owned(),
         sync_line: sync_label(phase, applied, target),
+        node_phase: phase.to_owned(),
+        node_behind_by: follow["behind_by"].as_i64().unwrap_or(UNMEASURED),
+        node_heard_at: follow["heard_at"].as_i64().unwrap_or(UNMEASURED),
         node_phase_since: operations["phase_since"].as_i64().unwrap_or(UNMEASURED),
         node_sync_retries: sync["retries"].as_i64().unwrap_or(0),
         node_sync_failures: sync["failures"].as_i64().unwrap_or(0),
@@ -365,6 +396,46 @@ fn sync_label(phase: &str, applied: i64, target: i64) -> String {
     )
 }
 
+/// What a node that stopped following owes its operator, in words: how far
+/// behind the tip it last heard it is, and how long its own height has stood
+/// still. Drawn ONLY on the phase the node itself calls `behind` — a gap on
+/// its own is a block landing between two polls, and the node has already
+/// waited out the window that tells the two apart.
+pub fn behind_line(facts: &NodeFacts, wall_now: i64) -> String {
+    // the node measures its own stall from the last block it finalized, and
+    // from the phase change while it has finalized none; this says the same
+    // seconds its phase was decided on.
+    let progressed_at = match facts.node_last_finalized >= 0 {
+        true => facts.node_last_finalized,
+        false => facts.node_phase_since,
+    };
+    let behind = facts.node_phase == "behind" && facts.node_behind_by >= 0;
+    if !behind || progressed_at < 0 {
+        return String::new();
+    }
+    format!(
+        "This node is {} blocks behind the network and has not advanced for {} seconds.",
+        grouped_digits(facts.node_behind_by),
+        grouped_digits(wall_now.saturating_sub(progressed_at))
+    )
+}
+
+/// The OTHER fault: the tip poll itself stopped answering, so whatever gap
+/// the node reports is the last one a peer confirmed and not what it is
+/// missing now. A node that has heard nothing at all publishes no `follow`
+/// and gets no sentence — silence from a poll that never answered once is
+/// not a poll that stopped.
+pub fn unheard_line(facts: &NodeFacts, wall_now: i64) -> String {
+    let silent_for = wall_now.saturating_sub(facts.node_heard_at);
+    if facts.node_heard_at < 0 || silent_for < TIP_SILENT_AFTER {
+        return String::new();
+    }
+    format!(
+        "This node has not heard from the network for {} seconds: its tip poll stopped answering.",
+        grouped_digits(silent_for)
+    )
+}
+
 /// The node spells its phases, roles and categories lowercase on the wire;
 /// a reader reads prose.
 pub fn capitalized(word: &str) -> String {
@@ -383,7 +454,7 @@ pub fn capitalized(word: &str) -> String {
 /// call it theirs.
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PeerRow {
-    /// the whole key: the row shows [`short_label`] of it and copies all of it
+    /// the whole key: the row shows the first 8 characters of it and copies all of it
     pub key: String,
     pub role: String,
     pub live: bool,
@@ -446,7 +517,7 @@ pub struct ModuleRow {
     /// `workspace` | `developer` | `automation` | `system` — the status
     /// projection's presentation category. Never consensus state.
     pub category: String,
-    /// the whole digests: a row shows [`short_digest`] of each and copies
+    /// the whole digests: a row shows the first 12 characters of each and copies
     /// all of it, because a digest is what an operator compares across nodes
     pub root: String,
     pub code_hash: String,
@@ -558,10 +629,10 @@ pub struct LogItem {
 }
 
 /// How many frames one item may carry. The ring's whole contents replay on
-/// subscribe, and one item per line would be one fold and one frame per
-/// line — 4,096 of each for a full ring. Chunking the frames that are
-/// ALREADY READY costs nothing when the stream is live (one line, one item)
-/// and turns the replay into a handful of folds.
+/// subscribe; chunking the frames that are ALREADY READY costs nothing when
+/// the stream is live (one line, one item). It does NOT batch a replay: the
+/// driver settles every host answer on its own, so a replay still reaches
+/// the fold one line per item — which is why [`push_logs`] costs the line.
 const LOG_FRAMES_PER_ITEM: usize = 512;
 
 /// The node's own log ring, as the `logs` topic: `rpc.stream` opens it under
@@ -665,23 +736,23 @@ fn clock_of(time: &str) -> String {
     format!("{secs}.{millis}")
 }
 
-/// A batch of lines onto the timeline, bounded and deduplicated by cursor:
-/// the ring replays on every re-subscribe, and a line already held is the
-/// same line.
-pub fn push_logs(lines: &[LogRow], arrived: &[LogRow]) -> Vec<LogRow> {
-    let mut next: Vec<LogRow> = lines.to_vec();
+/// A batch of lines onto the timeline IN PLACE, bounded and deduplicated by
+/// cursor: the ring replays on every re-subscribe, and a line already held
+/// is the same line. A replay reaches this fold one line at a time, up to
+/// 512 in one tick, so the fold costs the lines that arrived and never a
+/// copy of the timeline.
+pub fn push_logs(lines: &mut Vec<LogRow>, arrived: Vec<LogRow>) {
     for line in arrived {
         // ponytail: a bounded linear duplicate guard over 400 rows is
         // smaller than a second cursor index; revisit only if the window does
-        let duplicate = next.iter().any(|held| held.cursor == line.cursor);
+        let duplicate = lines.iter().any(|held| held.cursor == line.cursor);
         if duplicate {
             continue;
         }
-        next.push(line.clone());
+        lines.push(line);
     }
-    let overflow = next.len().saturating_sub(LOG_LINES_KEPT);
-    next.drain(..overflow);
-    next
+    let overflow = lines.len().saturating_sub(LOG_LINES_KEPT);
+    lines.drain(..overflow);
 }
 
 /// The tail of the timeline the frame draws, filtered by level and by text:
@@ -704,7 +775,7 @@ pub fn visible_log(lines: &[LogRow], filter: &str, level: &str) -> Vec<LogRow> {
 pub fn log_note(held: i64, shown: i64) -> String {
     match (shown > 0, held > 0) {
         (true, _) => String::new(),
-        (false, false) => "Waiting for the node's log ring…".into(),
+        (false, false) => "Waiting for log messages from the node…".into(),
         (false, true) => "No lines match this filter.".into(),
     }
 }
@@ -859,24 +930,6 @@ fn grouped_digits(value: i64) -> String {
         grouped.push(digit);
     }
     grouped
-}
-
-/// The first 12 characters of a digest, marked as cut.
-pub fn short_digest(digest: &str) -> String {
-    let mut short: String = digest.chars().take(12).collect();
-    if digest.chars().count() > 12 {
-        short.push('…');
-    }
-    short
-}
-
-/// The first 8 characters of a peer key, marked as cut.
-pub fn short_label(id: &str) -> String {
-    let mut label: String = id.chars().take(8).collect();
-    if id.chars().count() > 8 {
-        label.push('…');
-    }
-    label
 }
 
 fn hex_encode(bytes: &[u8]) -> String {

@@ -32,9 +32,9 @@ fn glyph(key: String, glyph: &str, label: &str, message: Message, disabled: bool
         *accessible = Some(label.into());
         *padding = Some(wire::Edges {
             top: 2.,
-            right: 6.,
+            right: native::spacing::XS as f32,
             bottom: 2.,
-            left: 6.,
+            left: native::spacing::XS as f32,
         });
     }
     button
@@ -46,6 +46,23 @@ fn primary(key: String, label: &str, message: Message, disabled: bool) -> wire::
         (!disabled).then(|| slots::message(message)),
         wire::ButtonPreset::Primary,
     )
+}
+/// A channel-creation control as a signing key with no account meets it:
+/// dead, and saying the step out of that where a reader hears its name. The
+/// same predicate that refuses every other write in the room (`may_write`),
+/// said on the button instead of in a sentence.
+fn account_gated(mut button: wire::Node, allowed: bool) -> wire::Node {
+    if let wire::Node::Button {
+        on_press,
+        description,
+        ..
+    } = &mut button
+        && !allowed
+    {
+        *on_press = None;
+        *description = Some("Create an account to create a channel".into());
+    }
+    button
 }
 fn field(
     key: String,
@@ -109,17 +126,35 @@ fn section_row(key: String, name: &str, control: Option<wire::Node>) -> wire::No
     children.extend(control);
     native::padded(
         native::sized(
-            native::spaced(native::centered_row(key, children), 4.),
+            native::spaced(
+                native::centered_row(key, children),
+                native::spacing::XXS as f32,
+            ),
             Some(wire::Length::Fill),
-            Some(wire::Length::Fixed(28.)),
+            Some(wire::Length::Fixed(native::height::CONTROL as f32)),
         ),
         wire::Edges {
             top: 0.,
-            right: 4.,
+            right: native::spacing::XXS as f32,
             bottom: 0.,
-            left: 8.,
+            left: native::spacing::SM as f32,
         },
     )
+}
+/// A one-line title that gives way to what stands beside it. The host keeps a
+/// one-line `Shrink` text at its whole width, so the title sits in a box sized
+/// to it that clips: the box shrinks to what its row leaves, and the title is
+/// cut to an ellipsis inside it. A short title keeps its own width.
+pub(super) fn gives_way(key: String, title: wire::Node) -> wire::Node {
+    let mut node = native::sized(
+        native::container(key, native::nowrap(title)),
+        Some(wire::Length::Shrink),
+        None,
+    );
+    if let wire::Node::Container { clip, .. } = &mut node {
+        *clip = true;
+    }
+    node
 }
 /// A pane's title row: a heading, what stands beside it, and its close.
 fn pane_header(key: String, children: impl IntoIterator<Item = wire::Node>) -> wire::Node {
@@ -131,7 +166,7 @@ fn pane_header(key: String, children: impl IntoIterator<Item = wire::Node>) -> w
         ),
         wire::Edges {
             top: 0.,
-            right: 8.,
+            right: native::spacing::SM as f32,
             bottom: 0.,
             left: 16.,
         },
@@ -147,14 +182,17 @@ impl ChatView {
             divider(format!("{key}/sidebar-resize"), Message::SidebarResized),
             self.room(&key),
         ];
+        // One side pane at a time: each pane's width is clamped as the only
+        // one beside the room. Opening a thread closes the details, so both
+        // are open only when Details was pressed over a thread; the details
+        // stand in front, and closing them brings the thread back.
         if self.channel_settings_open && !self.active_channel.is_empty() {
             panes.push(divider(
                 format!("{key}/details-resize"),
                 Message::DetailsResized,
             ));
             panes.push(self.channel_details(format!("{key}/details-pane")));
-        }
-        if self.active_thread_seq > 0 && !self.active_channel.is_empty() {
+        } else if self.active_thread_seq > 0 && !self.active_channel.is_empty() {
             panes.push(divider(
                 format!("{key}/thread-resize"),
                 Message::ThreadResized,
@@ -194,7 +232,7 @@ impl ChatView {
         }
         let top = vec![native::spaced(
             native::centered_row(format!("{key}/search-row"), field_row),
-            4.,
+            native::spacing::XXS as f32,
         )];
         let (mark, name) = if self.channel_create_open {
             ("✕", "Close")
@@ -204,12 +242,16 @@ impl ChatView {
         let mut rooms = vec![section_row(
             format!("{key}/channels-header"),
             "Channels",
-            Some(glyph(
-                format!("{key}/new-channel"),
-                mark,
-                name,
-                Message::ToggleChannelCreate,
-                self.loading || self.busy,
+            Some(account_gated(
+                glyph(
+                    format!("{key}/new-channel"),
+                    mark,
+                    name,
+                    Message::ToggleChannelCreate,
+                    self.loading || self.busy,
+                ),
+                // closing an open form is a read: only the door is gated
+                self.channel_create_open || self.may_write(),
             )),
         )];
         let (voice_rooms, text_rooms): (Vec<_>, Vec<_>) =
@@ -226,7 +268,7 @@ impl ChatView {
         // voice rooms sit under their own heading, the way a voice channel
         // does: a press joins the room's huddle instead of opening it
         if !voice_rooms.is_empty() {
-            rooms.push(native::gap(8.));
+            rooms.push(native::gap(native::spacing::SM as f32));
             rooms.push(section_row(
                 format!("{key}/voice-heading-row"),
                 "Voice",
@@ -241,7 +283,7 @@ impl ChatView {
             ));
         }
         if !self.dm_rows.is_empty() {
-            rooms.push(native::gap(8.));
+            rooms.push(native::gap(native::spacing::SM as f32));
             rooms.push(section_row(
                 format!("{key}/dm-heading-row"),
                 "Direct messages",
@@ -259,18 +301,21 @@ impl ChatView {
         }
         let children = vec![
             native::padded(
-                native::spaced(native::column(format!("{key}/sidebar-top"), top), 6.),
-                wire::Edges::all(8.),
+                native::spaced(
+                    native::column(format!("{key}/sidebar-top"), top),
+                    native::spacing::XS as f32,
+                ),
+                wire::Edges::all(native::spacing::SM as f32),
             ),
             native::scroll(
                 format!("{key}/rooms"),
                 native::padded(
                     native::spaced(native::column(format!("{key}/room-list"), rooms), 2.),
                     wire::Edges {
-                        top: 4.,
-                        right: 8.,
-                        bottom: 12.,
-                        left: 8.,
+                        top: native::spacing::XXS as f32,
+                        right: native::spacing::SM as f32,
+                        bottom: native::spacing::LG as f32,
+                        left: native::spacing::SM as f32,
                     },
                 ),
             ),
@@ -288,27 +333,75 @@ impl ChatView {
             wire::Length::Fixed(self.sidebar_width as f32),
         )
     }
+    /// The pane with no room open. Nothing here has a name, so nothing here
+    /// pretends to: no "#" without a channel behind it, no composer whose
+    /// buttons are dead for a reason the reader cannot see. The network
+    /// answering comes first, so "No channels yet" never flashes over rooms
+    /// about to arrive; a list with rooms in it means one is waiting to be
+    /// picked, not that the network is empty.
+    fn no_room(&self, key: String) -> wire::Node {
+        let plate = if self.loading {
+            native::empty_state(
+                &key,
+                "Loading channels…",
+                "Waiting for this network's channel list.",
+            )
+        } else if !self.rooms.is_empty() {
+            native::empty_state(
+                &key,
+                "No channel open",
+                "Pick a room from the list to read it.",
+            )
+        } else {
+            native::empty_state_action(
+                &key,
+                "No channels yet",
+                "This network has no channel to read. The first one you create is there for everyone on it.",
+                // the same door the sidebar's New channel opens; with no
+                // account behind the key it opens on a form the host would
+                // refuse, so the button says the step instead
+                account_gated(
+                    primary(
+                        format!("{key}/create"),
+                        "Create a channel",
+                        Message::ToggleChannelCreate,
+                        false,
+                    ),
+                    self.may_write(),
+                ),
+            )
+        };
+        native::sized(plate, Some(wire::Length::Fill), Some(wire::Length::Fill))
+    }
     fn room(&self, key: &str) -> wire::Node {
-        let mut header = Vec::new();
+        // a room is what the rest of this reads from; with none open there is
+        // no name for the header, no beginning for the intro and nowhere for
+        // the composer to post
+        if self.active_channel.is_empty() && self.active_dm.name.is_empty() {
+            return self.no_room(format!("{key}/no-room"));
+        }
+        // The title takes what Huddle and Details leave, and in it only the
+        // channel's name gives way: a long one is cut, never the buttons.
+        let mut title = Vec::new();
         if self.active_dm.name.is_empty() {
-            header.push(native::nowrap(native::colored(
+            title.push(native::nowrap(native::colored(
                 native::heading(format!("{key}/room-hash"), "#"),
                 native::palette().muted,
             )));
-            header.push(native::nowrap(native::heading(
-                format!("{key}/room-name"),
-                &self.active_channel_name,
-            )));
+            title.push(gives_way(
+                format!("{key}/room-name-box"),
+                native::heading(format!("{key}/room-name"), &self.active_channel_name),
+            ));
         } else {
-            header.push(self.direct_message_header(format!("{key}/dm-header")));
+            title.push(self.direct_message_header(format!("{key}/dm-header")));
         }
         if self.active_channel_archived {
-            header.push(self.archived_badge(format!("{key}/archived")));
+            title.push(self.archived_badge(format!("{key}/archived")));
         }
         if self.active_channel_members_only {
-            header.push(self.private_badge(format!("{key}/private")));
+            title.push(self.private_badge(format!("{key}/private")));
         }
-        header.push(native::spacer());
+        let mut header = vec![native::centered_row(format!("{key}/room-title"), title)];
         // the header speaks for THIS room's huddle: seated elsewhere (a voice
         // room), the room on screen still offers its own to join
         let seated_here = self.huddle_joined && self.huddle_channel == self.active_channel;
@@ -339,7 +432,7 @@ impl ChatView {
                     native::wrapping(native::text(format!("{key}/error-text"), &self.host_error)),
                     Tone::Danger,
                 ),
-                wire::Edges::all(12.),
+                wire::Edges::all(native::spacing::LG as f32),
             ));
         }
         let query_matches =
@@ -381,7 +474,7 @@ impl ChatView {
                         ),
                         wire::AlignX::Center,
                     ),
-                    wire::Edges::all(8.),
+                    wire::Edges::all(native::spacing::SM as f32),
                 ));
             }
             // an empty room has nothing to scroll; its intro keeps the space
@@ -414,9 +507,9 @@ impl ChatView {
                         wire::AlignX::Center,
                     ),
                     wire::Edges {
-                        top: 4.,
+                        top: native::spacing::XXS as f32,
                         right: 16.,
-                        bottom: 4.,
+                        bottom: native::spacing::XXS as f32,
                         left: 16.,
                     },
                 ));
@@ -431,11 +524,11 @@ impl ChatView {
         }
         // a room that refuses posts shows why where the composer would be;
         // a disabled composer under the reason would only repeat it
-        if !self.post_refusal.is_empty() {
+        if !self.write_refusal().is_empty() {
             children.push(native::padded(
                 self.composer_gate(format!("{key}/refusal")),
                 wire::Edges {
-                    top: 8.,
+                    top: native::spacing::SM as f32,
                     right: 16.,
                     bottom: 16.,
                     left: 16.,
@@ -455,9 +548,15 @@ impl ChatView {
                 self.composer(
                     format!("{key}/composer"),
                     crate::host::composer_scope(&self.endpoint, &self.active_channel),
-                    ducktape_view_composer::host::Target::Post { channel: self.active_channel.clone(), thread: None },
+                    ducktape_view_composer::host::Target::Post {
+                        channel: self.active_channel.clone(),
+                        thread: None,
+                    },
                     &self.composer_hint(),
-                    !self.loading && self.connected && !self.active_channel.is_empty() && self.post_refusal.is_empty(),
+                    !self.loading
+                        && self.connected
+                        && !self.active_channel.is_empty()
+                        && self.write_refusal().is_empty(),
                 ),
             ),
             COMPOSER_MARGIN,
@@ -505,10 +604,10 @@ impl ChatView {
                         ),
                     ),
                     wire::Edges {
-                        top: 8.,
-                        right: 8.,
-                        bottom: 4.,
-                        left: 8.,
+                        top: native::spacing::SM as f32,
+                        right: native::spacing::SM as f32,
+                        bottom: native::spacing::XXS as f32,
+                        left: native::spacing::SM as f32,
                     },
                 )];
                 rows.extend(self.search_hits.iter().map(|hit| {
@@ -526,7 +625,7 @@ impl ChatView {
             key.clone(),
             native::padded(
                 native::spaced(native::column(format!("{key}/rows"), children), 2.),
-                wire::Edges::all(8.),
+                wire::Edges::all(native::spacing::SM as f32),
             ),
         )
     }
@@ -567,16 +666,16 @@ impl ChatView {
                     [
                         native::title(format!("{key}/name"), name),
                         native::wrapping(native::secondary(format!("{key}/detail"), detail)),
-                        native::gap(4.),
+                        native::gap(native::spacing::XXS as f32),
                         native::divider(format!("{key}/rule")),
                     ],
                 ),
-                6.,
+                native::spacing::XS as f32,
             ),
             wire::Edges {
-                top: 24.,
+                top: native::spacing::XL as f32,
                 right: 16.,
-                bottom: 8.,
+                bottom: native::spacing::SM as f32,
                 left: 16.,
             },
         )
@@ -669,7 +768,7 @@ impl ChatView {
                     "👍",
                     "React with 👍",
                     Message::AddReactionAt(message.seq, "👍".into()),
-                    self.active_channel_archived,
+                    self.active_channel_archived || !self.may_write(),
                 ));
                 controls.extend([
                     glyph(
@@ -677,7 +776,7 @@ impl ChatView {
                         "😀",
                         "Manage reactions",
                         reaction,
-                        self.active_channel_archived,
+                        self.active_channel_archived || !self.may_write(),
                     ),
                     glyph(
                         format!("{scope}/more"),
@@ -711,8 +810,15 @@ impl ChatView {
                 children.push(hover);
                 let content =
                     native::spaced(native::column(format!("{scope}/content"), children), 0.);
+                // The right press is the pointer's way to the More action
+                // the row already announces, so the area adds no role.
                 rows.push(wire::Node::MouseArea {
                     key: scope,
+                    role: None,
+                    label: None,
+                    expanded: None,
+                    selected: None,
+                    checked: None,
                     on_press: None,
                     on_release: None,
                     on_double_click: None,
@@ -776,11 +882,14 @@ impl ChatView {
                     false,
                 );
                 let actions = native::padded(
-                    native::spaced(native::row(format!("{run_key}/actions"), [open, stop]), 6.),
+                    native::spaced(
+                        native::row(format!("{run_key}/actions"), [open, stop]),
+                        native::spacing::XS as f32,
+                    ),
                     wire::Edges {
                         top: 0.,
                         right: 16.,
-                        bottom: 4.,
+                        bottom: native::spacing::XXS as f32,
                         left: super::kit::RAIL,
                     },
                 );
@@ -796,9 +905,9 @@ impl ChatView {
             border: None,
             spacing: None,
             padding: Some(wire::Edges {
-                top: 8.,
+                top: native::spacing::SM as f32,
                 right: 0.,
-                bottom: 8.,
+                bottom: native::spacing::SM as f32,
                 left: 0.,
             }),
             width: Some(wire::Length::Fill),
@@ -883,7 +992,7 @@ impl ChatView {
             *height = Some(wire::Length::Fill);
             *padding = Some(wire::Edges {
                 top: 0.,
-                right: 12.,
+                right: native::spacing::LG as f32,
                 bottom: 0.,
                 left: 0.,
             });
@@ -909,12 +1018,12 @@ impl ChatView {
                         )),
                     ],
                 ),
-                8.,
+                native::spacing::SM as f32,
             ),
             wire::Edges {
-                top: 6.,
+                top: native::spacing::XS as f32,
                 right: 16.,
-                bottom: 6.,
+                bottom: native::spacing::XS as f32,
                 left: 16.,
             },
         )
@@ -955,9 +1064,9 @@ impl ChatView {
                 Tone::Accent,
             ),
             wire::Edges {
-                top: 4.,
+                top: native::spacing::XXS as f32,
                 right: 16.,
-                bottom: 4.,
+                bottom: native::spacing::XXS as f32,
                 left: 16.,
             },
         )
@@ -976,13 +1085,16 @@ impl ChatView {
                                         format!("{key}/title"),
                                         "Thread",
                                     )),
-                                    native::nowrap(native::caption(
-                                        format!("{key}/room"),
-                                        self.thread_room_label(),
-                                    )),
+                                    gives_way(
+                                        format!("{key}/room-box"),
+                                        native::caption(
+                                            format!("{key}/room"),
+                                            self.thread_room_label(),
+                                        ),
+                                    ),
                                 ],
                             ),
-                            8.,
+                            native::spacing::SM as f32,
                         ),
                         Some(wire::Length::Fill),
                         None,
@@ -1009,7 +1121,7 @@ impl ChatView {
                     Message::LoadMoreThread,
                     self.thread_loading || self.busy,
                 ),
-                wire::Edges::all(8.),
+                wire::Edges::all(native::spacing::SM as f32),
             ));
         }
         children.push(self.message_list(
@@ -1030,10 +1142,17 @@ impl ChatView {
                 format!("{key}/reply_composer-room"),
                 self.composer(
                     format!("{key}/reply_composer"),
-                    crate::host::thread_scope(&self.endpoint, &self.active_channel, self.active_thread_seq),
-                    ducktape_view_composer::host::Target::Post { channel: self.active_channel.clone(), thread: Some(self.active_thread_seq as u64) },
+                    crate::host::thread_scope(
+                        &self.endpoint,
+                        &self.active_channel,
+                        self.active_thread_seq,
+                    ),
+                    ducktape_view_composer::host::Target::Post {
+                        channel: self.active_channel.clone(),
+                        thread: Some(self.active_thread_seq as u64),
+                    },
                     "Reply in thread",
-                    !self.thread_loading && self.connected && self.post_refusal.is_empty(),
+                    !self.thread_loading && self.connected && self.write_refusal().is_empty(),
                 ),
             ),
             COMPOSER_MARGIN,
@@ -1061,22 +1180,25 @@ impl ChatView {
         if self.active_channel_members_only {
             title.push(self.private_badge(format!("{key}/private")));
         }
+        // no chain, no address: the item says so instead of copying nothing
+        let link = crate::host::duck_channel_link(
+            self.active_channel.clone(),
+            self.network_chain_id.clone(),
+        );
+        let unlinked = link.is_empty();
         let about = vec![
-            native::spaced(native::centered_row(format!("{key}/title-row"), title), 8.),
+            native::spaced(
+                native::centered_row(format!("{key}/title-row"), title),
+                native::spacing::SM as f32,
+            ),
             native::row(
                 format!("{key}/link-row"),
                 [glyph(
                     format!("{key}/link"),
                     "🔗 Copy link",
                     "Copy channel link",
-                    Message::CopyToClipboard(
-                        crate::host::duck_channel_link(
-                            self.active_channel.clone(),
-                            self.network_chain_id.clone(),
-                        ),
-                        "Channel link copied".into(),
-                    ),
-                    false,
+                    Message::CopyToClipboard(link, "Channel link copied".into()),
+                    unlinked,
                 )],
             ),
         ];
@@ -1325,38 +1447,40 @@ impl ChatView {
                         false,
                     ));
                 }
+                let link = crate::host::duck_channel_message_link(
+                    self.active_channel.clone(),
+                    seq,
+                    self.network_chain_id.clone(),
+                );
+                let unlinked = link.is_empty();
                 items.extend([
                     menu_item(
                         format!("{key}/{prefix}add-reaction"),
                         "😀",
                         "Add reaction",
                         reaction,
-                        self.active_channel_archived,
+                        self.active_channel_archived || !self.may_write(),
                     ),
                     menu_item(
                         format!("{key}/{prefix}copy-link"),
                         "🔗",
                         "Copy link",
-                        Message::CopyMessageLink(crate::host::duck_channel_message_link(
-                            self.active_channel.clone(),
-                            seq,
-                            self.network_chain_id.clone(),
-                        )),
-                        false,
+                        Message::CopyMessageLink(link),
+                        unlinked,
                     ),
                     menu_item(
                         format!("{key}/{prefix}edit"),
                         "✎",
                         "Edit message",
                         edit,
-                        self.active_channel_archived,
+                        self.active_channel_archived || !self.may_write(),
                     ),
                     menu_item(
                         format!("{key}/{prefix}delete"),
                         "🗑",
                         "Delete message",
                         delete,
-                        self.active_channel_archived,
+                        self.active_channel_archived || !self.may_write(),
                     ),
                 ]);
                 children.push(native::spaced(
@@ -1371,7 +1495,7 @@ impl ChatView {
                         format!("{key}/{prefix}reaction/{emoji}"),
                         &emoji,
                         Message::AddReactionAt(seq, emoji.clone()),
-                        self.active_channel_archived,
+                        self.active_channel_archived || !self.may_write(),
                     ));
                 }
                 // the host cuts cells from the grid's measured width, so the
@@ -1397,7 +1521,15 @@ impl ChatView {
                 children.push(self.composer(
                     format!("{key}/{prefix}edit-composer"),
                     crate::host::edit_scope(&self.endpoint, &self.active_channel, seq),
-                    ducktape_view_composer::host::Target::Edit { channel: self.active_channel.clone(), seq: seq as u64, base_rev: if thread { self.thread_selected_rev } else { self.selected_message_rev } as u32 },
+                    ducktape_view_composer::host::Target::Edit {
+                        channel: self.active_channel.clone(),
+                        seq: seq as u64,
+                        base_rev: if thread {
+                            self.thread_selected_rev
+                        } else {
+                            self.selected_message_rev
+                        } as u32,
+                    },
                     "Edit message",
                     !self.busy,
                 ));
@@ -1444,7 +1576,7 @@ impl ChatView {
                                 ),
                             ],
                         ),
-                        6.,
+                        native::spacing::XS as f32,
                     ),
                     wire::AlignX::Right,
                 ));
@@ -1453,22 +1585,25 @@ impl ChatView {
         // The frame is what the host focuses when the menu opens; only the
         // edit sits in the stream's flow and wears the stream's inset.
         let frame_key = format!("{key}/{prefix}{focus}");
-        let menu = native::spaced(native::column(format!("{key}/{prefix}menu"), children), 8.);
+        let menu = native::spaced(
+            native::column(format!("{key}/{prefix}menu"), children),
+            native::spacing::SM as f32,
+        );
         let mut frame = native::card(frame_key, menu);
         if let wire::Node::Container { padding, .. } = &mut frame {
             *padding = Some(wire::Edges::all(match mode {
                 MessageAction::Toolbar | MessageAction::More => MENU_INSET,
                 MessageAction::Reactions => PICKER_INSET,
-                MessageAction::Editing | MessageAction::Delete => 12.,
+                MessageAction::Editing | MessageAction::Delete => native::spacing::LG as f32,
             }));
         }
         match mode {
             MessageAction::Editing => native::padded(
                 frame,
                 wire::Edges {
-                    top: 4.,
+                    top: native::spacing::XXS as f32,
                     right: 16.,
-                    bottom: 4.,
+                    bottom: native::spacing::XXS as f32,
                     left: 16.,
                 },
             ),
@@ -1514,10 +1649,13 @@ impl ChatView {
                     ),
                 ],
             ),
-            8.,
+            native::spacing::SM as f32,
         );
         let body = self.preview_body(&key, &path);
-        let card = native::spaced(native::column(key.clone(), [header, body]), 10.);
+        let card = native::spaced(
+            native::column(key.clone(), [header, body]),
+            native::spacing::MD as f32,
+        );
         Some(native::padded(card, wire::Edges::all(14.)))
     }
     fn preview_body(&self, key: &str, path: &str) -> wire::Node {
@@ -1569,7 +1707,11 @@ impl ChatView {
             true => wire::Node::Surface {
                 key: format!("{key}/markdown"),
                 name: "markdown".into(),
-                args: vec![Str(preview.text.clone()), Str(String::new()), Bool(self.dark)],
+                args: vec![
+                    Str(preview.text.clone()),
+                    Str(String::new()),
+                    Bool(self.dark),
+                ],
                 on_event: Some(slots::handler::<wire::SurfaceValue, Message>(Box::new(
                     |value| match value {
                         Str(link) => Some(Message::OpenMessageLink(link)),
@@ -1600,7 +1742,10 @@ impl ChatView {
             ));
         }
         native::sized(
-            native::spaced(native::column(format!("{key}/document"), children), 6.),
+            native::spaced(
+                native::column(format!("{key}/document"), children),
+                native::spacing::XS as f32,
+            ),
             Some(wire::Length::Fixed(plate_width)),
             Some(wire::Length::Fixed(plate_height)),
         )
@@ -1612,20 +1757,20 @@ enum OpenMenu {
     Timeline(MessageAction),
     Thread(MessageAction),
 }
-const MENU_ITEM_HEIGHT: f32 = 28.;
+const MENU_ITEM_HEIGHT: f32 = native::height::CONTROL as f32;
 /// The room around a composer: the timeline's 16px sides, and air under it.
 const COMPOSER_MARGIN: wire::Edges = wire::Edges {
-    top: 4.,
+    top: native::spacing::XXS as f32,
     right: 16.,
-    bottom: 12.,
+    bottom: native::spacing::LG as f32,
     left: 16.,
 };
 const MENU_ITEM_GAP: f32 = 2.;
-const MENU_INSET: f32 = 6.;
+const MENU_INSET: f32 = native::spacing::XS as f32;
 const PICKER_COLUMNS: u32 = 8;
 pub(super) const PICKER_CELL: f32 = 32.;
 const PICKER_GAP: f32 = 2.;
-const PICKER_INSET: f32 = 8.;
+const PICKER_INSET: f32 = native::spacing::SM as f32;
 /// The "…" dropdown's box for `items` rows.
 fn menu_size(items: usize) -> (f64, f64) {
     let rows = items as f32;
@@ -1668,7 +1813,7 @@ fn menu_item(
                 native::nowrap(native::text(format!("{key}/label"), label)),
             ],
         ),
-        8.,
+        native::spacing::SM as f32,
     );
     let mut button = native::button_child(
         key,
@@ -1689,9 +1834,9 @@ fn menu_item(
         *height = Some(wire::Length::Fixed(MENU_ITEM_HEIGHT));
         *padding = Some(wire::Edges {
             top: 0.,
-            right: 8.,
+            right: native::spacing::SM as f32,
             bottom: 0.,
-            left: 8.,
+            left: native::spacing::SM as f32,
         });
     }
     button
@@ -1753,7 +1898,7 @@ impl super::ChatView {
             "Members only: Off"
         };
         let mut children = vec![
-            native::text(format!("{key}/title"), "Create a channel"),
+            native::heading(format!("{key}/title"), "Create a channel"),
             field(
                 format!("{key}/name"),
                 "Channel name",
@@ -1790,18 +1935,23 @@ impl super::ChatView {
                     Message::ToggleChannelCreate,
                     busy,
                 ),
-                primary(
-                    format!("{key}/create"),
-                    "Create channel",
-                    Message::CreateChannel,
-                    busy || !self.connected || self.session_busy,
+                account_gated(
+                    primary(
+                        format!("{key}/create"),
+                        "Create channel",
+                        Message::CreateChannel,
+                        busy || !self.connected || self.session_busy,
+                    ),
+                    self.may_write(),
                 ),
             ],
         ));
-        Some(native::sized(
-            native::column(key, children),
-            Some(wire::Length::Fixed(480.)),
-            None,
-        ))
+        // the dialog chrome the other views' dialogs wear: a card, padded
+        let mut card = native::card(format!("{key}/card"), native::column(key, children));
+        if let wire::Node::Container { padding, width, .. } = &mut card {
+            *padding = Some(wire::Edges::all(20.));
+            *width = Some(wire::Length::Fixed(480.));
+        }
+        Some(card)
     }
 }

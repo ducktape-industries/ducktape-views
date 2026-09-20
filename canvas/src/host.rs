@@ -1,5 +1,5 @@
 use boards_wire::{Board, Operation, Query, Reply};
-use ducktape_view_guest::{Subscription, host};
+use ducktape_view_guest::{Subscription, host, host::Refusal};
 use futures::{StreamExt, stream};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -67,13 +67,17 @@ pub fn watch(id: String, epoch: u64) -> Subscription<(u64, String, Result<Readin
     })
 }
 pub async fn mint() -> Result<String, String> {
-    let bytes = host::request("host.id", b"board").await.map_err(host::said)?;
-    String::from_utf8(bytes).map_err(|error| error.to_string())
-}
-pub async fn submit(operation: Operation) -> Result<(), String> {
-    let request = serde_json::json!({ "target": "boards", "payload": operation });
-    host::request("op.submit", &serde_json::to_vec(&request).unwrap())
+    let bytes = host::request("host.id", b"board")
         .await
         .map_err(host::said)?;
+    String::from_utf8(bytes).map_err(|error| error.to_string())
+}
+/// The refusal comes back whole, and not as the sentence alone: two of the
+/// module's tokens mean the words in this edit are still on somebody's screen,
+/// and the view has a banner for each. `host::said` would flatten exactly the
+/// thing the branch reads.
+pub async fn submit(operation: Operation) -> Result<(), Refusal> {
+    let request = serde_json::json!({ "target": "boards", "payload": operation });
+    host::request("op.submit", &serde_json::to_vec(&request).unwrap()).await?;
     Ok(())
 }

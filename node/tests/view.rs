@@ -5,16 +5,27 @@
 //! `rpc.stream`, and retunes the running node's tracing filter with one
 //! `rpc.admin` POST. The clipboard is the one intent left.
 
-use ducktape_view_guest::testing::{answer, has_text, item, press, refuse, texts, type_into};
+use ducktape_view_guest::testing::{answer, find, has_text, item, press, refuse, texts, type_into};
 use ducktape_view_guest::wire::{Event, Frame, Length, Node, Request, Wrapping};
+use node_view::boot_native;
 use node_view::host::{Copy, Session};
-use node_view::{boot_native, tick_native};
+
+/// The view's own tick, refusing a frame assistive technology cannot read:
+/// every tree these tests render is checked.
+fn tick_native(events: Vec<ducktape_view_guest::wire::Event>) -> ducktape_view_guest::wire::Frame {
+    let frame = node_view::tick_native(events);
+    frame
+        .root
+        .iter()
+        .for_each(ducktape_view_guest::testing::assert_accessible);
+    frame
+}
 use serde_json::{Value, json};
 
 // ---------- what the node answers ----------
 
 fn status() -> Value {
-    json!({
+    let mut status = json!({
         "public_key": "ab12cd34",
         "version": "0.4.2",
         "root_hash": "c0ffee",
@@ -34,7 +45,14 @@ fn status() -> Value {
             "storage": { "checkpoint_height": 84_900 },
             "sync": { "retries": 0, "failures": 0 },
         },
-    })
+    });
+    // a node that has heard no tip publishes no `follow` at all, which is
+    // what the fixture above is; a test that has one says so.
+    if let Some((phase, follow)) = FOLLOWING.with(|held| held.borrow().clone()) {
+        status["operations"]["phase"] = phase.into();
+        status["operations"]["follow"] = follow;
+    }
+    status
 }
 
 fn peers() -> Value {
@@ -73,6 +91,12 @@ fn module_status() -> Value {
 }
 
 thread_local! {
+    /// The phase and the `operations.follow` section `status()` serves, for
+    /// the tests that drive a node off its own tip poll. Unset is the wire of
+    /// a node that has never heard a tip.
+    static FOLLOWING: std::cell::RefCell<Option<(String, Value)>> =
+        const { std::cell::RefCell::new(None) };
+
     /// Whether the valset below seats THIS node. It is the only thing that
     /// decides what the card calls this device and whether the live filter
     /// may be retuned — the session carries no standing at all.
@@ -172,6 +196,13 @@ fn connected_as(seated: bool) -> (Frame, Vec<Request>) {
     SEATED.with(|held| held.set(seated));
     let props = request(&boot(), "node.props").id;
     settle(tick_native(vec![item(props, &session())]))
+}
+
+/// Boots connected to a node whose status carries `operations.follow` and
+/// the phase the node itself settled on.
+fn following(phase: &str, follow: Value) -> Frame {
+    FOLLOWING.with(|held| *held.borrow_mut() = Some((phase.to_owned(), follow)));
+    connected().0
 }
 
 /// The one `node.copy` intent a frame carries.
@@ -293,6 +324,24 @@ fn a_connected_view_reads_the_node_for_itself() {
     );
 }
 
+/// A connected session may be viewing a remote node; its `node.props` path is
+/// still local app state, so the overview must not present it as node data.
+#[test]
+fn a_remote_connection_does_not_claim_the_local_app_directory_for_the_node() {
+    let (frame, _) = connected();
+    assert!(
+        has_text(&frame, "Local app data directory"),
+        "{:?}",
+        texts(&frame)
+    );
+    assert!(!has_text(&frame, "Data directory"), "{:?}", texts(&frame));
+    assert!(
+        has_text(&frame, "/var/ducktape/demo"),
+        "{:?}",
+        texts(&frame)
+    );
+}
+
 /// The node key leaves as the one intent the app still hears — the
 /// clipboard is an OS door, not a write.
 #[test]
@@ -349,6 +398,99 @@ fn an_unreported_identity_reads_not_reported_and_offers_no_copy() {
     assert!(has_text(&frame, "/var/ducktape/demo"), "{shown:?}");
 }
 
+// ---------- a node that stopped following ----------
+
+/// The whole point of `operations.follow`: a node the network left behind
+/// says so in words, with the gap and the seconds its own height has stood
+/// still. `last_finalized_at` is 1_700_000_000 and the session's clock reads
+/// 1_700_000_030, so the stall is 30 seconds.
+#[test]
+fn a_node_behind_the_network_says_by_how_much_and_for_how_long() {
+    let frame = following(
+        "behind",
+        json!({ "network_height": 85_513, "behind_by": 601, "heard_at": 1_700_000_030i64 }),
+    );
+    assert!(
+        has_text(
+            &frame,
+            "This node is 601 blocks behind the network and has not advanced for 30 seconds."
+        ),
+        "{:?}",
+        texts(&frame)
+    );
+    // the poll is answering; the gap is the fault, not the silence
+    assert!(
+        !texts(&frame)
+            .iter()
+            .any(|text| text.starts_with("This node has not heard")),
+        "{:?}",
+        texts(&frame)
+    );
+}
+
+/// A tip poll that stopped answering is a DIFFERENT fault from a gap: the
+/// last gap a peer confirmed may read zero while the node hears nothing at
+/// all. The silence is measured from `heard_at` — 200 seconds here, past the
+/// three 12-second polls the node itself waits out.
+#[test]
+fn a_tip_poll_that_stopped_answering_is_its_own_sentence() {
+    let frame = following(
+        "serving",
+        json!({ "network_height": 84_912, "behind_by": 0, "heard_at": 1_699_999_830i64 }),
+    );
+    assert!(
+        has_text(
+            &frame,
+            "This node has not heard from the network for 200 seconds: its tip poll stopped \
+             answering."
+        ),
+        "{:?}",
+        texts(&frame)
+    );
+    assert!(
+        !texts(&frame)
+            .iter()
+            .any(|text| text.starts_with("This node is")),
+        "{:?}",
+        texts(&frame)
+    );
+}
+
+/// A node that has heard NO tip publishes no `follow`, and a poll that never
+/// answered once is not a poll that stopped: the screen says neither
+/// sentence rather than inventing a gap of zero.
+#[test]
+fn a_status_without_follow_draws_neither_sentence() {
+    let (frame, _) = connected();
+    let shown = texts(&frame);
+    assert!(
+        !shown
+            .iter()
+            .any(|text| text.starts_with("This node is")
+                || text.starts_with("This node has not heard")),
+        "{shown:?}"
+    );
+}
+
+/// `follow` is present on every healthy node too. A node level with the tip
+/// it just heard is not a fault, and saying so on every screen would train
+/// the one operator who can act on it to ignore the sentence.
+#[test]
+fn a_node_level_with_a_tip_it_just_heard_draws_neither_sentence() {
+    let frame = following(
+        "serving",
+        json!({ "network_height": 84_912, "behind_by": 0, "heard_at": 1_700_000_030i64 }),
+    );
+    let shown = texts(&frame);
+    assert!(
+        !shown
+            .iter()
+            .any(|text| text.starts_with("This node is")
+                || text.starts_with("This node has not heard")),
+        "{shown:?}"
+    );
+}
+
 // ---------- the registry ----------
 
 /// The Modules tab reads the code registry itself: the status document's
@@ -396,7 +538,7 @@ fn the_activity_tab_streams_the_node_log_ring() {
     let asked: Value = serde_json::from_slice(&stream.payload).expect("the ask decodes");
     assert_eq!(asked["topic"], "logs");
     assert!(
-        has_text(&frame, "Waiting for the node's log ring…"),
+        has_text(&frame, "Waiting for log messages from the node…"),
         "{:?}",
         texts(&frame)
     );
@@ -486,6 +628,78 @@ fn the_activity_tab_streams_the_node_log_ring() {
     );
 }
 
+/// Counts the allocations made on the calling thread, so a test can weigh a
+/// tick natively: a wasm view has a fixed instruction budget per tick, and
+/// copying a string is an allocation here and a charge there.
+struct Counting;
+
+thread_local! {
+    static ALLOCATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+// SAFETY: every call goes straight to the system allocator; the counter is
+// a const-initialized thread local, which allocates nothing itself.
+unsafe impl std::alloc::GlobalAlloc for Counting {
+    unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+        let _ = ALLOCATIONS.try_with(|count| count.set(count.get() + 1));
+        unsafe { std::alloc::System.alloc(layout) }
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+        unsafe { std::alloc::System.dealloc(ptr, layout) }
+    }
+}
+
+#[global_allocator]
+static ALLOCATOR: Counting = Counting;
+
+/// The ring replays WHOLE on subscribe — 4,096 frames on a busy node — and
+/// the app hands a view up to 512 stream items in ONE tick (its stream
+/// backlog), each settled on its own. The tick's budget is fixed, so folding
+/// a line must cost the line and never what the timeline already holds: a
+/// fold that copied the held window for every line made that tick hundreds
+/// of window copies, and the app stopped the whole view for running out of
+/// fuel the moment the Activity tab opened.
+#[test]
+fn a_replayed_ring_folds_each_line_without_copying_the_timeline() {
+    const BACKLOG: u64 = 512;
+    let (frame, _) = connected();
+    let (_, left) = settle(tick_native(press(&frame, "Node activity")));
+    let stream = left
+        .iter()
+        .find(|request| request.kind == "rpc.stream")
+        .unwrap_or_else(|| panic!("no `rpc.stream` request in {left:?}"))
+        .id;
+    let replay = |from: u64| -> Vec<Event> {
+        (from..from + BACKLOG)
+            .map(|cursor| {
+                let line = format!(
+                    "2026-09-18T14:03:29.{cursor:06}Z  INFO ducktape::consensus: finalized height={}",
+                    200_000 + cursor
+                );
+                item(stream, log_frame(cursor, &line).to_string().as_bytes())
+            })
+            .collect()
+    };
+    // the first backlog fills the timeline past what it keeps
+    tick_native(replay(1));
+    let events = replay(1 + BACKLOG);
+    let before = ALLOCATIONS.with(std::cell::Cell::get);
+    let frame = tick_native(events);
+    let per_line = (ALLOCATIONS.with(std::cell::Cell::get) - before) / BACKLOG as usize;
+    // the frame, its row and the render share are a few dozen; a fold that
+    // copies the timeline pays four strings for every row it holds
+    assert!(
+        per_line < 200,
+        "{per_line} allocations per replayed line: the fold copies the timeline"
+    );
+    let tail = format!(
+        "ducktape::consensus: finalized height={}",
+        200_000 + 2 * BACKLOG
+    );
+    assert!(has_text(&frame, &tail), "{:?}", texts(&frame));
+}
+
 /// Every cell of a fixed-height row keeps ONE LINE, on every tab. A reading
 /// is 24px, a list row 28px and a module row 32px, and the panel is as
 /// narrow as the pane: a height, a count, a digest, a capability name or a
@@ -545,7 +759,7 @@ fn every_row_cell_keeps_one_line() {
     wrapping.sort_unstable();
     wrapping.dedup();
     // Three families, sorted together: the readings a copy control sits
-    // beside (a workspace path, a node key, a root hash, a module's two
+    // beside (a local app path, a node key, a root hash, a module's two
     // digests — read in full, so the row grows instead of clipping), the
     // console's message column, and the sentences under the standing and
     // the retune.
@@ -566,6 +780,45 @@ fn every_row_cell_keeps_one_line() {
         ],
         "the texts that may wrap, and no others"
     );
+}
+
+/// In a narrow pane nothing runs past the edge: a reading's text takes its
+/// row's rest and truncates, a module's name gives way to its badges, and
+/// the pending swap's parts and the console's controls wrap onto further
+/// lines instead of sitting on one that cannot hold them.
+#[test]
+fn a_narrow_pane_truncates_long_text_and_wraps_the_controls() {
+    let (overview, _) = connected();
+    let (permissions, _) = settle(tick_native(press(&overview, "Node permissions")));
+    let (modules, _) = settle(tick_native(press(&permissions, "Node modules")));
+    let (activity, _) = settle(tick_native(press(&modules, "Node activity")));
+    let text = |frame: &Frame, key: &str| match find(frame, key) {
+        Some(Node::Text { width, options, .. }) => (*width, options.wrapping),
+        other => panic!("{key}: {other:?}"),
+    };
+    for (frame, key) in [
+        (&overview, "node/sync/value"),
+        (&overview, "node/finalized/value"),
+        (&permissions, "node/admin/value"),
+        (&modules, "node/module/governance/name"),
+    ] {
+        assert_eq!(
+            text(frame, key),
+            (Some(Length::Fill), Some(Wrapping::None)),
+            "{key} truncates"
+        );
+    }
+    let wraps = |frame: &Frame, key: &str| {
+        matches!(find(frame, key), Some(Node::Linear { wrap: Some(_), .. }))
+    };
+    for (frame, key) in [
+        (&modules, "node/module/governance/pending/row"),
+        (&activity, "node/filters"),
+        (&activity, "node/level"),
+        (&activity, "node/retune"),
+    ] {
+        assert!(wraps(frame, key), "{key} wraps: {:?}", find(frame, key));
+    }
 }
 
 #[test]
@@ -655,4 +908,15 @@ fn a_seat_without_administration_is_told_the_retune_is_closed() {
         panic!("no retune button in {:?}", texts(&frame));
     };
     assert!(on_press.is_none(), "the retune is closed to this seat");
+}
+
+/// `tick_native` asserts every frame it returns; this walks every tab,
+/// seated and not, the states that hold the view's controls.
+#[test]
+fn accessibility_every_node_tab_names_its_controls() {
+    connected_as(false);
+    let (frame, _) = connected();
+    let (frame, _) = settle(tick_native(press(&frame, "Node permissions")));
+    let (frame, _) = settle(tick_native(press(&frame, "Node modules")));
+    settle(tick_native(press(&frame, "Node activity")));
 }

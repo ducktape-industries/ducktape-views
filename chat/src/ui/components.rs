@@ -7,10 +7,7 @@ use ducktape_view_guest::slots;
 pub(super) fn unread_dot(key: String) -> wire::Node {
     let mut dot = native::container(
         key,
-        native::space(
-            Some(wire::Length::Fixed(8.)),
-            Some(wire::Length::Fixed(8.)),
-        ),
+        native::space(Some(wire::Length::Fixed(8.)), Some(wire::Length::Fixed(8.))),
     );
     if let wire::Node::Container {
         background,
@@ -43,12 +40,12 @@ pub(super) fn sidebar_row(mut button: wire::Node, name: String) -> wire::Node {
     } = &mut button
     {
         *label = Some(name);
-        *height = Some(wire::Length::Fixed(28.));
+        *height = Some(wire::Length::Fixed(native::height::CONTROL as f32));
         *padding = Some(wire::Edges {
             top: 0.,
-            right: 8.,
+            right: native::spacing::SM as f32,
             bottom: 0.,
-            left: 8.,
+            left: native::spacing::SM as f32,
         });
     }
     button
@@ -76,7 +73,8 @@ impl ChatView {
                 native::text(format!("{key}/hash"), "#"),
                 p.muted,
             )),
-            native::nowrap(name),
+            // a long name is cut, never the marks and the unread dot after it
+            super::chat::gives_way(format!("{key}/name-box"), name),
         ];
         if channel.huddle_count > 0 {
             children.push(native::nowrap(native::colored(
@@ -111,7 +109,10 @@ impl ChatView {
         } else {
             Some(slots::message(choose(channel.id)))
         };
-        let content = native::spaced(native::centered_row(format!("{key}/row"), children), 6.);
+        let content = native::spaced(
+            native::centered_row(format!("{key}/row"), children),
+            native::spacing::XS as f32,
+        );
         let row = sidebar_row(
             native::list_row(key.clone(), content, selected, action),
             channel.name,
@@ -144,7 +145,10 @@ impl ChatView {
         }
         let can_join = !(self.busy || channel.archived);
         let action = can_join.then(|| slots::message(Message::JoinVoice(channel.id)));
-        let content = native::spaced(native::centered_row(format!("{key}/row"), children), 6.);
+        let content = native::spaced(
+            native::centered_row(format!("{key}/row"), children),
+            native::spacing::XS as f32,
+        );
         let row = sidebar_row(
             native::list_row(key.clone(), content, joined, action),
             channel.name,
@@ -195,10 +199,10 @@ impl ChatView {
             spacing, padding, ..
         } = &mut row
         {
-            *spacing = Some(8.);
+            *spacing = Some(native::spacing::SM as f32);
             *padding = Some(wire::Edges {
                 top: 2.,
-                right: 8.,
+                right: native::spacing::SM as f32,
                 bottom: 2.,
                 left: 28.,
             });
@@ -207,13 +211,7 @@ impl ChatView {
     }
 
     pub(super) fn loading_messages(&self, key: String) -> wire::Node {
-        native::padded(
-            native::column(
-                key.clone(),
-                [native::caption(format!("{key}/text"), "Loading messages…")],
-            ),
-            wire::Edges::all(16.),
-        )
+        native::empty_state(key, "Loading messages…", "The newest arrive first.")
     }
 
     pub(super) fn search_result(
@@ -245,7 +243,7 @@ impl ChatView {
                                 native::nowrap(native::caption(format!("{key}/meta"), hit.meta)),
                             ],
                         ),
-                        6.,
+                        native::spacing::XS as f32,
                     ),
                     native::wrapping(native::secondary(format!("{key}/text"), hit.text.clone())),
                 ],
@@ -257,17 +255,35 @@ impl ChatView {
             *label = Some(hit.text);
             // two lines a hit: more air than a one-line room row
             *padding = Some(wire::Edges {
-                top: 6.,
-                right: 8.,
-                bottom: 6.,
-                left: 8.,
+                top: native::spacing::XS as f32,
+                right: native::spacing::SM as f32,
+                bottom: native::spacing::XS as f32,
+                left: native::spacing::SM as f32,
             });
         }
         button
     }
 
+    /// Whether this reader may write in chat at all. Read live from the
+    /// handle, never stored: an account made mid-session is hers at once, and
+    /// nothing re-reads the room to say so.
+    pub(super) fn may_write(&self) -> bool {
+        crate::host::holds_account(&self.me)
+    }
+
+    /// Why the reader may not write here, as a reason token — empty when she
+    /// may. The account comes first: with none, every write in the room is
+    /// refused, and offering to unarchive the room would only refuse again.
+    pub(super) fn write_refusal(&self) -> &str {
+        match self.may_write() {
+            false => "no_account",
+            true => &self.post_refusal,
+        }
+    }
+
     pub(super) fn composer_gate(&self, key: String) -> wire::Node {
-        match self.post_refusal.as_str() {
+        match self.write_refusal() {
+            "no_account" => self.account_notice(key),
             "channel_archived" => self.archived_notice(key),
             "members_only" => self.private_notice(key),
             _ => native::column(key, []),
@@ -306,5 +322,4 @@ impl ChatView {
             ],
         )
     }
-
 }

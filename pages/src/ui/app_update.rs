@@ -943,7 +943,8 @@ impl PagesView {
             // The picker is the host's, and the upload after it is a round
             // trip to the node: the line waits empty until both are done.
             let page = self.active_page.clone();
-            return Task::perform(crate::host::pick_picture(page), move |item| {
+            let chain = self.chain.clone();
+            return Task::perform(crate::host::pick_picture(page, chain), move |item| {
                 Message::PictureReady(picture_line, item)
             });
         }

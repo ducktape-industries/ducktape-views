@@ -14,6 +14,34 @@ fn card(view: &mut BoardsView, id: &str, x: i32) -> Task<Message> {
         },
     })
 }
+/// Words written onto a card, naming the revision the card is at on this
+/// board — which is what the editor sends and what the reducer compares
+/// against. Every test but the ones ABOUT a stale revision means "write over
+/// the card as it stands", so they say that once here instead of carrying a
+/// number each.
+fn writes(board: &Board, id: &str, text: &str) -> Change {
+    Change::Text {
+        id: id.into(),
+        text: text.into(),
+        base_revision: board.shapes[id].revision,
+    }
+}
+/// The same, over the board this view can see.
+fn writing(view: &BoardsView, id: &str, text: &str) -> Change {
+    writes(&view.visible().expect("the view is on no board"), id, text)
+}
+/// A refusal as one reaches a view: a stable token to branch on and the
+/// refusing module's own sentence to show.
+fn refusal(reason: &str, sentence: &str) -> ducktape_view_guest::host::Refusal {
+    ducktape_view_guest::host::Refusal::new(reason, sentence)
+}
+/// The board the module hands back with its answer.
+fn read(board: Board) -> Result<host::Reading, String> {
+    Ok(host::Reading {
+        catalog: BTreeMap::new(),
+        board: Some(board),
+    })
+}
 /// An end bound to a card at its middle — what dropping an arrow anywhere near
 /// the middle of one comes to, and the only anchor a test needs unless it is
 /// about anchors.
@@ -54,10 +82,7 @@ fn optimistic_edits_remain_visible_while_waiting_for_consensus() {
         x: 250,
         y: 40,
     });
-    view.edit(Change::Text {
-        id: "a".into(),
-        text: "공유 캔버스".into(),
-    });
+    view.edit(writing(&view, "a", "공유 캔버스"));
     assert!(view.confirmed.as_ref().unwrap().shapes.is_empty());
     let board = view.visible().unwrap();
     assert_eq!(board.shapes["a"].shape.x, 250);
@@ -82,12 +107,7 @@ fn remote_change_is_rebased_under_pending_local_fields() {
         x: 500,
         y: 50,
     });
-    let remote = board
-        .changed(&Change::Text {
-            id: "a".into(),
-            text: "Remote text".into(),
-        })
-        .unwrap();
+    let remote = board.changed(&writes(&board, "a", "Remote text")).unwrap();
     view.on_read(
         0,
         "room".into(),
@@ -119,14 +139,11 @@ fn acknowledgement_does_not_invent_a_revision_and_failed_saves_keep_drafts() {
         view.confirmed.as_ref().unwrap().revision,
         committed.revision
     );
-    view.edit(Change::Text {
-        id: "a".into(),
-        text: "Keep me".into(),
-    });
+    view.edit(writing(&view, "a", "Keep me"));
     view.on_delivered(
         0,
         "room".into(),
-        Err("offline".into()),
+        Err(refusal("rejected", "offline")),
         Err("offline".into()),
     );
     assert_eq!(view.pending.len(), 1);
@@ -410,6 +427,36 @@ fn editing_clicks_do_not_close_text_and_network_switch_preserves_the_draft() {
         "Keep my draft"
     );
     assert!(view.session.chain.is_empty());
+}
+
+/// `view()` asserts every tree it renders; this walks the board through the
+/// states that hold its controls: the tool bar and islands, a selection's
+/// inspector, a card being written in, the menu, the board list and help.
+#[test]
+fn accessibility_every_board_state_names_its_controls() {
+    let mut view = BoardsView::boot().0;
+    view.catalog.insert("plans".into(), "Plans".into());
+    view.view();
+    let mut view = self::view();
+    view.catalog.insert("plans".into(), "Plans".into());
+    view.camera = [0., 0.];
+    card(&mut view, "a", 0);
+    view.view();
+    view.selected = ["a".into()].into();
+    view.view();
+    view.begin_text();
+    view.on_press(40., 30.);
+    assert!(view.inline.is_some());
+    view.view();
+    view.inline = None;
+    view.menu = Some([40., 30.]);
+    view.view();
+    view.menu = None;
+    view.board_picker = true;
+    view.view();
+    view.board_picker = false;
+    view.help = true;
+    view.view();
 }
 
 #[test]
@@ -923,10 +970,7 @@ fn loose_arrow(run: [[i32; 2]; 2]) -> BoardsView {
             y: low[1],
             width: (run[1][0] - run[0][0]).abs(),
             height: (run[1][1] - run[0][1]).abs(),
-            points: run
-                .iter()
-                .map(|p| [p[0] - low[0], p[1] - low[1]])
-                .collect(),
+            points: run.iter().map(|p| [p[0] - low[0], p[1] - low[1]]).collect(),
             ..Default::default()
         },
     });
@@ -983,8 +1027,7 @@ fn an_arrows_start_takes_a_card_exactly_where_its_end_would() {
              at {by_the_end:?} by its end and {by_the_start:?} by its start"
         );
         assert!(
-            (by_the_end[0] - expected[0]).abs() < 1.
-                && (by_the_end[1] - expected[1]).abs() < 1.,
+            (by_the_end[0] - expected[0]).abs() < 1. && (by_the_end[1] - expected[1]).abs() < 1.,
             "an arrow standing at {standing:?} should reach the card at \
              {expected:?}, not {by_the_end:?}"
         );
@@ -1221,10 +1264,7 @@ fn words_on_an_arrow_take_the_middle_and_the_bend_handle_steps_aside() {
     );
     // Write on it and the handle moves off the plate: two things to take hold
     // of in one place is one of them unreachable.
-    view.edit(Change::Text {
-        id: "edge".into(),
-        text: "blocks".into(),
-    });
+    view.edit(writing(&view, "edge", "blocks"));
     let board = view.visible().unwrap();
     let written = board.shapes["edge"].shape.clone();
     let run = super::interaction::stroke(&board, &written);
@@ -1299,10 +1339,7 @@ fn a_bent_arrows_words_ride_its_curve_and_not_the_box_around_it() {
         from: on("a"),
         to: on("b"),
     });
-    view.edit(Change::Text {
-        id: "edge".into(),
-        text: "waits for".into(),
-    });
+    view.edit(writing(&view, "edge", "waits for"));
     let board = view.visible().unwrap();
     let edge = &board.shapes["edge"].shape;
     let run = super::interaction::stroke(&board, edge);
@@ -1359,10 +1396,7 @@ fn bending_an_arrow_by_hand_leaves_a_run_the_words_can_ride() {
             [middle[0], middle[1] + 170.],
         ],
     );
-    view.edit(Change::Text {
-        id: "edge".into(),
-        text: "waits for".into(),
-    });
+    view.edit(writing(&view, "edge", "waits for"));
     let board = view.visible().unwrap();
     let edge = &board.shapes["edge"].shape;
     let run = super::interaction::stroke(&board, edge);
@@ -2123,12 +2157,7 @@ fn writing_in(board: &Board) -> BoardsView {
 /// Somebody else finishes their own sitting in the card while ours stands open,
 /// arriving the way any live update does.
 fn someone_else_writes(view: &mut BoardsView, board: &Board, words: &str) {
-    let theirs = board
-        .changed(&Change::Text {
-            id: "a".into(),
-            text: words.into(),
-        })
-        .unwrap();
+    let theirs = board.changed(&writes(board, "a", words)).unwrap();
     view.on_read(
         0,
         "room".into(),
@@ -2183,6 +2212,782 @@ fn a_card_written_in_under_an_open_editor_is_not_silently_replaced() {
     assert_eq!(clash.visible().unwrap().shapes["a"].shape.text, "ONE");
 }
 
+/// A save writes the card's WHOLE text, so the board can only tell a writer who
+/// read the card from one who did not if the edit says which version it was
+/// written over. The close names that revision; the module compares it and
+/// refuses the second of two closes rather than letting it win by being later.
+#[test]
+fn a_close_names_the_revision_the_card_was_written_over() {
+    let board = one_card_saying("AAA");
+    let mut view = writing_in(&board);
+    view.inline.as_mut().unwrap().document = Editor::new("BBB");
+    view.finish_text();
+    let Some(Operation::Batch { changes, .. }) = view.pending.front() else {
+        panic!("the close sent no edit: {:?}", view.pending)
+    };
+    assert_eq!(
+        changes.as_slice(),
+        [Change::Text {
+            id: "a".into(),
+            text: "BBB".into(),
+            base_revision: board.shapes["a"].revision,
+        }],
+        "the close did not name the revision it was written over"
+    );
+    // Which is a revision the card is actually at, so the board takes it.
+    assert!(board.changed_many(changes).is_ok());
+}
+
+/// The clash this view CANNOT see: the other writer's edit and ours crossed on
+/// the wire, so the revision this close named was one old by the time it
+/// arrived. The module refuses it and hands back the card's words verbatim —
+/// and the writer is owed what the clash caught at the close already gets, one
+/// round trip later. The draft goes back in the card, their words are quoted
+/// beside it and taken as the baseline, and the second close is the consent.
+#[test]
+fn a_close_refused_as_stale_hands_the_draft_back_with_their_words_beside_it() {
+    let board = one_card_saying("AAA");
+    let mut view = writing_in(&board);
+    view.inline.as_mut().unwrap().document = Editor::new("MINE");
+    view.finish_text();
+    assert_eq!(view.pending.len(), 1, "the close sent nothing");
+
+    let theirs = board.changed(&writes(&board, "a", "THEIRS")).unwrap();
+    view.on_delivered(
+        0,
+        "room".into(),
+        Err(refusal(STALE, "THEIRS")),
+        read(theirs),
+    );
+    // The refused edit leaves the queue: nothing can come of it as written, and
+    // anything behind it would wait on it for good.
+    assert!(view.pending.is_empty(), "the refused edit is still queued");
+    let inline = view.inline.as_ref().expect("the draft was dropped");
+    assert_eq!(
+        inline.document.text(),
+        "MINE",
+        "the draft came back changed"
+    );
+    assert!(
+        view.error.contains("THEIRS"),
+        "the writer was not shown what they are about to replace: {}",
+        view.error
+    );
+    assert_ne!(view.status(), "Saved");
+
+    // Closing it again is the writer saying they have read that and mean it —
+    // over the revision the card is at NOW, so the board takes it.
+    view.finish_text();
+    assert!(
+        view.inline.is_none(),
+        "the second close was refused as well"
+    );
+    assert_eq!(view.visible().unwrap().shapes["a"].shape.text, "MINE");
+    assert!(
+        view.error.is_empty(),
+        "the banner outlived what it was about"
+    );
+}
+
+/// The same crossing, with the card removed rather than written in. There is
+/// nowhere to put the draft back into, so it is kept beside the board in the
+/// card's own place and is one press from a card of its own — and the chip may
+/// not call words that reached nothing saved.
+#[test]
+fn a_close_refused_onto_a_card_that_is_gone_keeps_the_words() {
+    let board = one_card_saying("AAA");
+    let mut view = writing_in(&board);
+    view.inline.as_mut().unwrap().document = Editor::new("HALF WRITTEN");
+    view.finish_text();
+
+    let theirs = board.changed(&Change::Delete { id: "a".into() }).unwrap();
+    view.on_delivered(
+        0,
+        "room".into(),
+        Err(refusal(TARGET_GONE, "That card is no longer on the board.")),
+        read(theirs),
+    );
+    assert!(view.pending.is_empty(), "the refused edit is still queued");
+    assert!(
+        view.error.contains("HALF WRITTEN"),
+        "the words went without a word: {}",
+        view.error
+    );
+    assert_eq!(view.status(), "Not saved");
+    let kept = view.lost.clone().expect("the draft was dropped in silence");
+    assert_eq!(kept.text, "HALF WRITTEN");
+
+    view.on_keep_lost_words();
+    view.on_minted(0, "room".into(), kept, Ok("b".into()));
+    assert_eq!(
+        view.visible().unwrap().shapes["b"].shape.text,
+        "HALF WRITTEN"
+    );
+}
+
+/// The same refusal as it actually arrives with two people on the board: the
+/// other client's delete lands on this view's own live read FIRST, and the
+/// refusal for the close that was already in flight lands after it. By then
+/// nothing here has the card or its place — not the fresh board, not the board
+/// our own edits left. The words are the writer's either way, and a place a
+/// race took is no reason to drop them: they are kept, quoted, and one press
+/// from a card of their own, and the chip may not call them saved.
+#[test]
+fn a_close_refused_after_the_delete_already_arrived_keeps_the_words() {
+    let board = one_card_saying("AAA");
+    let mut view = writing_in(&board);
+    view.inline.as_mut().unwrap().document = Editor::new("HALF WRITTEN");
+    view.finish_text();
+    assert_eq!(view.pending.len(), 1, "the close was never queued");
+
+    // Their delete, arriving the way any live update does — before the answer
+    // to our own edit, which is what the two-client run reproduces.
+    someone_else_deletes(&mut view, &board);
+    assert!(
+        view.lost.is_none(),
+        "the editor was closed, not the words lost"
+    );
+
+    let theirs = board.changed(&Change::Delete { id: "a".into() }).unwrap();
+    view.on_delivered(
+        0,
+        "room".into(),
+        Err(refusal(TARGET_GONE, "That card is no longer on the board.")),
+        read(theirs),
+    );
+    assert!(view.pending.is_empty(), "the refused edit is still queued");
+    assert!(
+        view.error.contains("HALF WRITTEN"),
+        "the words went without a word: {}",
+        view.error
+    );
+    assert_eq!(view.status(), "Not saved");
+    let kept = view.lost.clone().expect("the draft was dropped in silence");
+    assert_eq!(kept.text, "HALF WRITTEN");
+    let drawn = serde_json::to_string(&view.view()).unwrap();
+    assert!(
+        drawn.contains("boards/lost-keep"),
+        "the words were kept with nothing to be done about them"
+    );
+
+    // One press puts them down, where this view puts any new card: over the
+    // middle of what the writer is looking at, so they land in sight.
+    view.on_keep_lost_words();
+    view.on_minted(0, "room".into(), kept, Ok("b".into()));
+    let now = view.visible().unwrap();
+    let put = now.shapes["b"].shape.clone();
+    assert_eq!(put.text, "HALF WRITTEN");
+    let middle = view.world([view.viewport[0] / 2., view.viewport[1] / 2.]);
+    let covers = |low: i32, span: i32, at: f32| (low as f32) < at && at < (low + span) as f32;
+    assert!(
+        covers(put.x, put.width, middle[0]) && covers(put.y, put.height, middle[1]),
+        "the words came back where nobody is looking: {} {} {}x{}",
+        put.x,
+        put.y,
+        put.width,
+        put.height
+    );
+}
+
+/// A refusal this view has no banner for — including the fixed token an app or
+/// a node too old to forward the module's own puts in its place — takes the
+/// path every refusal took before there were tokens to tell them apart: the
+/// edit stands in the queue for Retry, the chip says it is not saved, and the
+/// refusing module's own sentence is what is shown. Reading a token nobody
+/// wrote is how a view comes to answer a refusal with the wrong banner.
+#[test]
+fn a_refusal_with_no_banner_of_its_own_is_still_not_saved() {
+    let board = one_card_saying("AAA");
+    let mut view = writing_in(&board);
+    view.inline.as_mut().unwrap().document = Editor::new("MINE");
+    view.finish_text();
+
+    view.on_delivered(
+        0,
+        "room".into(),
+        Err(refusal("rejected", "The board would not take that.")),
+        read(board),
+    );
+    assert_eq!(view.pending.len(), 1, "the edit was dropped");
+    assert_eq!(view.status(), "Not saved");
+    assert!(
+        matches!(&view.delivery, Delivery::Failed(said) if said == "The board would not take that."),
+        "the module's own words did not survive the trip: {:?}",
+        view.delivery
+    );
+    assert!(
+        view.inline.is_none() && view.lost.is_none(),
+        "a refusal nobody read was answered with somebody else's banner"
+    );
+}
+
+/// Not the card but the whole board, removed by somebody else while this
+/// writer was on it. Every edit queued names that board, so not one of them can
+/// land and a retry has nowhere to send them: the writer is told, keeps the
+/// words, and is left at the list of the boards there still are.
+#[test]
+fn an_edit_refused_because_the_board_is_gone_leaves_the_writer_at_the_list() {
+    let board = one_card_saying("AAA");
+    let mut view = writing_in(&board);
+    view.catalog = [
+        ("room".to_owned(), "Planning".to_owned()),
+        ("other".to_owned(), "Elsewhere".to_owned()),
+    ]
+    .into();
+    view.inline.as_mut().unwrap().document = Editor::new("HALF WRITTEN");
+    view.finish_text();
+    view.edit(Change::Move {
+        id: "a".into(),
+        x: 40,
+        y: 40,
+    });
+    assert_eq!(view.pending.len(), 2, "the test sent nothing to refuse");
+
+    // What the board answers once it is not there to answer for itself, with
+    // the list as it now stands read back beside it.
+    let elsewhere: BTreeMap<String, String> = [("other".to_owned(), "Elsewhere".to_owned())].into();
+    view.on_delivered(
+        0,
+        "room".into(),
+        Err(refusal(NOT_FOUND, "That board is no longer here.")),
+        Ok(host::Reading {
+            catalog: elsewhere.clone(),
+            board: None,
+        }),
+    );
+
+    assert!(
+        view.pending.is_empty(),
+        "edits stood queued for a board that is gone: {:?}",
+        view.pending
+    );
+    assert!(
+        matches!(view.delivery, Delivery::Idle),
+        "something is still in flight to a board that is gone: {:?}",
+        view.delivery
+    );
+    assert!(
+        view.current.is_empty() && view.confirmed.is_none(),
+        "the writer was left standing on a board that is gone"
+    );
+    assert!(
+        !view.catalog.contains_key("room") && view.picking_a_board(),
+        "the list still offers the board that is gone: {:?}",
+        view.catalog
+    );
+    assert!(
+        view.error.contains("HALF WRITTEN"),
+        "the words went without a word: {}",
+        view.error
+    );
+    assert_eq!(view.status(), "Not saved");
+    let drawn = serde_json::to_string(&view.view()).unwrap();
+    assert!(
+        !drawn.contains("boards/retry"),
+        "a retry was offered to a board that cannot take it"
+    );
+    assert!(
+        !drawn.contains("boards/lost-keep"),
+        "the words were offered a card with no board to put it on"
+    );
+
+    // The live feed reads again a moment later, as it does after every
+    // delivery. It may not walk the writer into somebody else's board over the
+    // banner saying why they are not on one.
+    view.on_read(
+        0,
+        String::new(),
+        Ok(host::Reading {
+            catalog: elsewhere.clone(),
+            board: None,
+        }),
+    );
+    assert!(
+        view.current.is_empty(),
+        "the next read opened a board the writer did not pick"
+    );
+    assert!(
+        view.error.contains("HALF WRITTEN"),
+        "the banner was cleared before it could be read: {}",
+        view.error
+    );
+
+    // The same refusal to an edit carrying no words of its own — a card moved,
+    // a colour picked. There is nothing to keep and nothing to quote, and the
+    // chip may no more call THAT saved: it was headed for the same board.
+    let mut moving = self::view();
+    moving.confirmed = Some(board);
+    moving.catalog = [
+        ("room".to_owned(), "Planning".to_owned()),
+        ("other".to_owned(), "Elsewhere".to_owned()),
+    ]
+    .into();
+    moving.edit(Change::Move {
+        id: "a".into(),
+        x: 40,
+        y: 40,
+    });
+    moving.on_delivered(
+        0,
+        "room".into(),
+        Err(refusal(NOT_FOUND, "That board is no longer here.")),
+        Ok(host::Reading {
+            catalog: elsewhere,
+            board: None,
+        }),
+    );
+    assert!(moving.pending.is_empty() && moving.current.is_empty());
+    assert!(
+        moving.error.contains("removed this board"),
+        "the move went without a word: {}",
+        moving.error
+    );
+    assert_eq!(
+        moving.status(),
+        "Not saved",
+        "an edit that went with the board was called saved"
+    );
+    let drawn = serde_json::to_string(&moving.view()).unwrap();
+    assert!(
+        !drawn.contains("boards/retry"),
+        "a retry was offered to a board that cannot take it"
+    );
+}
+
+/// The board removed under a note the writer has only just added, with the
+/// words still being typed into it. The refused edit is the note's own Create,
+/// which carries no words, so the draft in the open editor is all there is to
+/// keep — and the only place it has ever had is the one that Create put it in,
+/// in a queue that goes with the board. Read after the queue, there is no
+/// card, no place, and the words go without a word.
+#[test]
+fn a_board_removed_under_a_new_note_keeps_the_words_typed_into_it() {
+    let mut view = view();
+    view.catalog = [("room".to_owned(), "Planning".to_owned())].into();
+    view.on_quick_note();
+    view.on_minted(
+        0,
+        "room".into(),
+        Shape {
+            kind: Kind::Note,
+            width: 220,
+            height: 180,
+            ..Default::default()
+        },
+        Ok("b".into()),
+    );
+    view.inline
+        .as_mut()
+        .expect("the note opened no editor")
+        .document = Editor::new("HALF WRITTEN");
+    view.on_delivered(
+        0,
+        "room".into(),
+        Err(refusal(NOT_FOUND, "That board is no longer here.")),
+        Ok(host::Reading {
+            catalog: BTreeMap::new(),
+            board: None,
+        }),
+    );
+    assert!(
+        view.error.contains("HALF WRITTEN"),
+        "the words went without a word: {}",
+        view.error
+    );
+    assert_eq!(
+        view.lost.as_ref().map(|card| card.text.as_str()),
+        Some("HALF WRITTEN"),
+        "the words the banner quotes were not kept"
+    );
+    assert_eq!(view.status(), "Not saved");
+}
+
+/// A note can close and queue its text before the note's Create is answered.
+/// If that Create learns the board is gone, the final queued words still need
+/// the same recovery action as words left in the editor.
+#[test]
+fn a_closed_note_draft_behind_create_refusal_keeps_its_latest_words() {
+    let mut view = view();
+    view.catalog = [
+        ("room".to_owned(), "Planning".to_owned()),
+        ("other".to_owned(), "Elsewhere".to_owned()),
+    ]
+    .into();
+    view.on_quick_note();
+    view.on_minted(
+        0,
+        "room".into(),
+        Shape {
+            kind: Kind::Note,
+            width: 220,
+            height: 180,
+            ..Default::default()
+        },
+        Ok("b".into()),
+    );
+    view.inline
+        .as_mut()
+        .expect("the note opened no editor")
+        .document = Editor::new("FIRST FRAGMENT");
+    view.finish_text();
+    view.begin_text();
+    view.inline
+        .as_mut()
+        .expect("the saved note could not be reopened")
+        .document = Editor::new("LATEST COMPLETE WORDS");
+    view.finish_text();
+    assert_eq!(
+        view.pending.len(),
+        3,
+        "the Create and both closes were not queued"
+    );
+
+    view.on_delivered(
+        0,
+        "room".into(),
+        Err(refusal(NOT_FOUND, "That board is no longer here.")),
+        Ok(host::Reading {
+            catalog: [("other".to_owned(), "Elsewhere".to_owned())].into(),
+            board: None,
+        }),
+    );
+
+    assert!(view.pending.is_empty());
+    assert_eq!(view.status(), "Not saved");
+    let kept = view.lost.clone().expect("the closed draft was dropped");
+    assert_eq!(kept.text, "LATEST COMPLETE WORDS");
+    assert!(view.error.contains("LATEST COMPLETE WORDS"));
+
+    view.on_open("other".into());
+    view.on_read(
+        0,
+        "other".into(),
+        read(Board::new("Elsewhere".into(), "owner".into()).unwrap()),
+    );
+    view.on_keep_lost_words();
+    view.on_minted(0, "other".into(), kept, Ok("recovered".into()));
+    assert_eq!(
+        view.visible().unwrap().shapes["recovered"].shape.text,
+        "LATEST COMPLETE WORDS"
+    );
+}
+
+#[test]
+fn an_open_note_draft_behind_create_refusal_keeps_its_latest_words() {
+    let mut view = view();
+    view.catalog = [
+        ("room".to_owned(), "Planning".to_owned()),
+        ("other".to_owned(), "Elsewhere".to_owned()),
+    ]
+    .into();
+    view.on_quick_note();
+    view.on_minted(
+        0,
+        "room".into(),
+        Shape {
+            kind: Kind::Note,
+            width: 220,
+            height: 180,
+            ..Default::default()
+        },
+        Ok("b".into()),
+    );
+    view.inline
+        .as_mut()
+        .expect("the note opened no editor")
+        .document = Editor::new("FIRST FRAGMENT");
+    view.finish_text();
+    view.begin_text();
+    view.inline
+        .as_mut()
+        .expect("the saved note could not be reopened")
+        .document = Editor::new("LATEST COMPLETE WORDS");
+    assert_eq!(
+        view.pending.len(),
+        2,
+        "the Create and both closes were not queued"
+    );
+
+    view.on_delivered(
+        0,
+        "room".into(),
+        Err(refusal(NOT_FOUND, "That board is no longer here.")),
+        Ok(host::Reading {
+            catalog: [("other".to_owned(), "Elsewhere".to_owned())].into(),
+            board: None,
+        }),
+    );
+
+    assert!(view.pending.is_empty());
+    assert_eq!(view.status(), "Not saved");
+    let kept = view.lost.clone().expect("the closed draft was dropped");
+    assert_eq!(kept.text, "LATEST COMPLETE WORDS");
+    assert!(view.error.contains("LATEST COMPLETE WORDS"));
+
+    view.on_open("other".into());
+    view.on_read(
+        0,
+        "other".into(),
+        read(Board::new("Elsewhere".into(), "owner".into()).unwrap()),
+    );
+    view.on_keep_lost_words();
+    view.on_minted(0, "other".into(), kept, Ok("recovered".into()));
+    assert_eq!(
+        view.visible().unwrap().shapes["recovered"].shape.text,
+        "LATEST COMPLETE WORDS"
+    );
+}
+
+#[test]
+fn a_refused_text_draft_yields_to_a_later_queued_text_for_the_same_card() {
+    let board = one_card_saying("ORIGINAL");
+    let mut view = writing_in(&board);
+    view.inline
+        .as_mut()
+        .expect("the card did not open")
+        .document = Editor::new("FIRST FRAGMENT");
+    view.finish_text();
+    view.begin_text();
+    view.inline
+        .as_mut()
+        .expect("the card could not be reopened")
+        .document = Editor::new("LATEST COMPLETE WORDS");
+    view.finish_text();
+    assert_eq!(view.pending.len(), 2, "both text closes were not queued");
+
+    view.on_delivered(
+        0,
+        "room".into(),
+        Err(refusal(NOT_FOUND, "That board is no longer here.")),
+        Ok(host::Reading {
+            catalog: BTreeMap::new(),
+            board: None,
+        }),
+    );
+
+    let kept = view.lost.clone().expect("the latest draft was dropped");
+    assert_eq!(kept.text, "LATEST COMPLETE WORDS");
+    assert!(view.error.contains("LATEST COMPLETE WORDS"));
+    assert_eq!(view.status(), "Not saved");
+}
+
+#[test]
+fn a_refused_text_draft_yields_to_the_open_editor_for_the_same_card() {
+    let board = one_card_saying("ORIGINAL");
+    let mut view = writing_in(&board);
+    view.inline
+        .as_mut()
+        .expect("the card did not open")
+        .document = Editor::new("FIRST FRAGMENT");
+    view.finish_text();
+    view.begin_text();
+    view.inline
+        .as_mut()
+        .expect("the card could not be reopened")
+        .document = Editor::new("LATEST COMPLETE WORDS");
+    assert_eq!(view.pending.len(), 1, "both text closes were not queued");
+
+    view.on_delivered(
+        0,
+        "room".into(),
+        Err(refusal(NOT_FOUND, "That board is no longer here.")),
+        Ok(host::Reading {
+            catalog: BTreeMap::new(),
+            board: None,
+        }),
+    );
+
+    let kept = view.lost.clone().expect("the latest draft was dropped");
+    assert_eq!(kept.text, "LATEST COMPLETE WORDS");
+    assert!(view.error.contains("LATEST COMPLETE WORDS"));
+    assert_eq!(view.status(), "Not saved");
+}
+
+#[test]
+fn a_saved_editor_does_not_turn_a_later_move_into_a_lost_draft() {
+    let board = one_card_saying("BEFORE");
+    let mut view = writing_in(&board);
+    view.inline.as_mut().unwrap().document = Editor::new("SAVED");
+    view.finish_text();
+    let saved = view.settled().unwrap();
+    view.on_delivered(0, "room".into(), Ok(()), read(saved));
+    assert!(view.lost.is_none());
+    view.edit(Change::Move {
+        id: "a".into(),
+        x: 30,
+        y: 40,
+    });
+    let moved = view.settled().unwrap();
+    view.on_delivered(0, "room".into(), Ok(()), read(moved));
+    assert!(
+        view.lost.is_none(),
+        "a saved note became a false lost draft"
+    );
+    assert!(view.error.is_empty(), "{}", view.error);
+}
+
+#[test]
+fn removed_board_words_survive_reopen_and_can_be_put_on_another_board() {
+    let mut view = view();
+    let words = "A long draft that must survive beyond the banner preview. ".repeat(5);
+    view.lost = Some(Shape {
+        text: words.clone(),
+        ..Default::default()
+    });
+    view.error = "This board was removed.".into();
+    view = BoardsView::restore(&view.snapshot().unwrap()).unwrap();
+    view.on_open("other".into());
+    view.on_read(
+        0,
+        "other".into(),
+        read(Board::new("Other".into(), "owner".into()).unwrap()),
+    );
+    let kept = view
+        .lost
+        .clone()
+        .expect("opening a board discarded the recovered words");
+    assert_eq!(kept.text, words);
+    assert!(
+        serde_json::to_string(&view.view())
+            .unwrap()
+            .contains("Put it on a new card")
+    );
+    view.on_keep_lost_words();
+    view.on_minted(0, "other".into(), kept, Ok("recovered".into()));
+    assert_eq!(
+        view.settled().unwrap().shapes["recovered"].shape.text,
+        words
+    );
+}
+
+/// The host can settle the Create refusal before the editor's queued commit
+/// event in the same frame. Drive that ordering through the real guest
+/// driver: the old handler had already left the board and dropped the queued
+/// words, while the view must keep the complete draft and stay Not saved.
+#[test]
+fn a_queued_editor_commit_after_board_refusal_stays_recoverable() {
+    use boards_wire::Reply;
+    use ducktape_view_guest::testing::{answer, edit};
+    use ducktape_view_guest::wire::{Event, Frame, Request};
+
+    fn request(frame: &Frame, kind: &str) -> Request {
+        frame
+            .requests
+            .iter()
+            .find(|request| request.kind == kind)
+            .cloned()
+            .unwrap_or_else(|| panic!("missing {kind}: {:?}", frame.requests))
+    }
+    fn answer_kind(
+        driver: &mut ducktape_view_guest::Driver<BoardsView>,
+        frame: &Frame,
+        kind: &str,
+        payload: &[u8],
+    ) -> Frame {
+        let request = request(frame, kind);
+        driver.tick(vec![answer(request.id, payload)])
+    }
+
+    let mut driver = ducktape_view_guest::Driver::<BoardsView>::new();
+    let mut frame = driver.tick(Vec::new());
+    frame = answer_kind(
+        &mut driver,
+        &frame,
+        "canvas.props",
+        br#"{"connected":true,"dark":false,"chain":"test"}"#,
+    );
+    let list = serde_json::to_vec(&Reply::List(
+        [("room".to_owned(), "Planning".to_owned())].into(),
+    ))
+    .unwrap();
+    frame = answer_kind(&mut driver, &frame, "rpc.query", &list);
+    frame = answer_kind(&mut driver, &frame, "rpc.query", &list);
+    frame = answer_kind(
+        &mut driver,
+        &frame,
+        "rpc.query",
+        &serde_json::to_vec(&Reply::Board(Some(
+            Board::new("Planning".into(), "owner".into()).unwrap(),
+        )))
+        .unwrap(),
+    );
+
+    frame = driver.tick(ducktape_view_guest::testing::press(&frame, "Note"));
+    let wire::Node::MouseArea {
+        on_press_at: Some(position),
+        on_press: Some(press),
+        on_release: Some(release),
+        ..
+    } = ducktape_view_guest::testing::find(&frame, "boards/canvas").unwrap()
+    else {
+        panic!("canvas mouse area")
+    };
+    frame = driver.tick(vec![
+        Event::Pointer {
+            handler: *position,
+            x: 200.,
+            y: 200.,
+        },
+        Event::Message(*press),
+        Event::Message(*release),
+    ]);
+    frame = answer_kind(&mut driver, &frame, "host.id", b"note-1");
+    let queued_input = edit(&frame, "boards/editor/note-1", "", "ALL THE QUEUED WORDS");
+    let submit = request(&frame, "op.submit");
+    frame = driver.tick(vec![Event::Response {
+        id: submit.id,
+        result: Err(wire::Refusal::new(
+            NOT_FOUND,
+            "That board is no longer here.",
+        )),
+        done: true,
+    }]);
+    frame = answer_kind(&mut driver, &frame, "rpc.query", &list);
+    let board_read = request(&frame, "rpc.query");
+    let mut events = vec![Event::Response {
+        id: board_read.id,
+        result: Ok(serde_json::to_vec(&Reply::Board(None)).unwrap()),
+        done: true,
+    }];
+    events.extend(queued_input);
+    frame = driver.tick(events);
+
+    let shown = ducktape_view_guest::testing::texts(&frame);
+    assert!(
+        shown
+            .iter()
+            .any(|text| text.contains("ALL THE QUEUED WORDS")),
+        "the queued editor commit was lost: {shown:?}"
+    );
+    assert!(shown.iter().any(|text| text == "Not saved"), "{shown:?}");
+}
+
+/// Undo restates a card's old words, and a step sits on the stack for as long
+/// as the writer leaves it there — by the time it is taken the card is several
+/// revisions past the one the step was recorded at, our own edit included. A
+/// step that named that revision would be refused as stale and the undo would
+/// do nothing at all.
+#[test]
+fn undoing_a_text_edit_writes_over_the_card_as_it_stands_now() {
+    let board = one_card_saying("AAA");
+    let mut view = view();
+    view.confirmed = Some(board.clone());
+    view.edit(writing(&view, "a", "BBB"));
+    // The edit is agreed. The card is now at a revision its own undo, recorded
+    // before the edit, has never seen.
+    view.confirmed = view.settled();
+    view.pending.clear();
+
+    view.on_undo();
+    assert_eq!(
+        view.pending.len(),
+        1,
+        "the undo never reached the queue: {}",
+        view.error
+    );
+    assert_eq!(view.visible().unwrap().shapes["a"].shape.text, "AAA");
+}
+
 /// The card nobody else touched saves in one press, and so does the one they
 /// happened to write the same words into. A warning that fires when no words
 /// are at stake is a warning people learn to click through.
@@ -2218,6 +3023,154 @@ fn an_undisturbed_card_still_saves_in_one_press() {
     );
     assert!(untouched.error.is_empty());
     assert_eq!(untouched.visible().unwrap().shapes["a"].shape.text, "ONE");
+}
+
+/// Somebody else deletes the card, arriving the way any live update does.
+fn someone_else_deletes(view: &mut BoardsView, board: &Board) {
+    let theirs = board.changed(&Change::Delete { id: "a".into() }).unwrap();
+    view.on_read(
+        0,
+        "room".into(),
+        Ok(host::Reading {
+            catalog: BTreeMap::new(),
+            board: Some(theirs),
+        }),
+    );
+}
+
+/// The properties panel describes the selection, so a selection naming a shape
+/// the board no longer has is a panel offering Delete, Duplicate, the stacking
+/// row and a colour for nothing. The board that arrives without the card is
+/// where that stops — not the next press somewhere on the canvas, which is all
+/// that ever reconciled it.
+#[test]
+fn a_card_deleted_under_you_leaves_the_selection_when_the_board_arrives() {
+    let board = one_card_saying("AAA");
+    let mut view = view();
+    view.confirmed = Some(board.clone());
+    view.selected = ["a".into()].into();
+    someone_else_deletes(&mut view, &board);
+    assert!(
+        view.selected.is_empty(),
+        "the panel is still acting on a shape that is gone"
+    );
+}
+
+/// The words in an open editor are nobody else's to have seen: the board has
+/// never held them, and the card that was going to is gone. Dropping them with
+/// it is the one outcome that cannot be undone, so they are kept, said out
+/// loud, and one press away from a card of their own.
+#[test]
+fn words_written_into_a_card_somebody_else_removed_are_kept_and_can_be_put_down() {
+    let board = one_card_saying("AAA");
+    let mut view = writing_in(&board);
+    view.inline.as_mut().unwrap().document = Editor::new("HALF WRITTEN");
+    someone_else_deletes(&mut view, &board);
+    assert!(
+        view.inline.is_none(),
+        "the view still believes it is writing on a card that is gone"
+    );
+    assert!(
+        view.error.contains("HALF WRITTEN"),
+        "the words went without a word: {}",
+        view.error
+    );
+    // Nothing was kept, so nothing may claim to have been.
+    assert_ne!(view.status(), "Saved");
+    let kept = view.lost.clone().expect("the draft was dropped in silence");
+
+    // One press puts them down where the card stood, through the same minting
+    // every other new shape goes through — so the board names it, and undo
+    // holds it like any other edit of ours.
+    view.on_keep_lost_words();
+    view.on_minted(0, "room".into(), kept.clone(), Ok("b".into()));
+    let now = view.visible().unwrap();
+    assert_eq!(now.shapes["b"].shape.text, "HALF WRITTEN");
+    assert_eq!(
+        [now.shapes["b"].shape.x, now.shapes["b"].shape.y],
+        [kept.x, kept.y],
+        "the words came back somewhere else"
+    );
+    assert!(view.lost.is_none(), "the banner outlived what it was about");
+    view.on_undo();
+    assert!(!view.visible().unwrap().shapes.contains_key("b"));
+}
+
+/// `Board::text` and every field change beside it answer `Ok(())` on a shape
+/// the board does not have, so an edit to a card somebody else removed comes
+/// back acknowledged exactly like one that landed — and the chip beside the
+/// board's name read `Saved` for words that reached nothing.
+#[test]
+fn an_edit_acknowledged_against_a_card_that_is_gone_is_not_saved() {
+    let board = one_card_saying("AAA");
+    let mut view = view();
+    view.confirmed = Some(board.clone());
+    view.selected = ["a".into()].into();
+    view.edit(writing(&view, "a", "HALF WRITTEN"));
+    // The board that comes back with the acknowledgement no longer has the
+    // card: somebody else removed it while the edit was in flight.
+    let theirs = board.changed(&Change::Delete { id: "a".into() }).unwrap();
+    view.on_delivered(
+        0,
+        "room".into(),
+        Ok(()),
+        Ok(host::Reading {
+            catalog: BTreeMap::new(),
+            board: Some(theirs),
+        }),
+    );
+    assert!(view.pending.is_empty(), "the edit was acknowledged");
+    assert_ne!(
+        view.status(),
+        "Saved",
+        "the chip called an edit that went nowhere saved"
+    );
+    assert!(
+        view.error.contains("HALF WRITTEN"),
+        "the words that did not land were not shown: {}",
+        view.error
+    );
+    assert_eq!(
+        view.lost.as_ref().map(|card| card.text.as_str()),
+        Some("HALF WRITTEN"),
+        "there is nothing to put the words back on"
+    );
+}
+
+/// The same acknowledgement, with their delete already through the live read —
+/// an older node, which refuses nothing and answers `Ok` to an edit for a card
+/// it does not have. The card's place went with the delete before the answer
+/// came back, and the words are no less the writer's for it.
+#[test]
+fn an_edit_acknowledged_after_the_delete_already_arrived_is_not_saved() {
+    let board = one_card_saying("AAA");
+    let mut view = view();
+    view.confirmed = Some(board.clone());
+    view.selected = ["a".into()].into();
+    view.edit(writing(&view, "a", "HALF WRITTEN"));
+    someone_else_deletes(&mut view, &board);
+
+    let theirs = board.changed(&Change::Delete { id: "a".into() }).unwrap();
+    view.on_delivered(0, "room".into(), Ok(()), read(theirs));
+    assert!(view.pending.is_empty(), "the edit was acknowledged");
+    assert_ne!(
+        view.status(),
+        "Saved",
+        "the chip called an edit that went nowhere saved"
+    );
+    assert!(
+        view.error.contains("HALF WRITTEN"),
+        "the words that did not land were not shown: {}",
+        view.error
+    );
+    let kept = view.lost.clone().expect("the draft was dropped in silence");
+    assert_eq!(kept.text, "HALF WRITTEN");
+    view.on_keep_lost_words();
+    view.on_minted(0, "room".into(), kept, Ok("b".into()));
+    assert_eq!(
+        view.visible().unwrap().shapes["b"].shape.text,
+        "HALF WRITTEN"
+    );
 }
 
 #[test]
@@ -2320,7 +3273,10 @@ fn every_way_out_of_a_card_keeps_what_you_wrote() {
     view.finish_text();
     assert!(view.inline.is_some(), "the board refuses text this long");
     view.on_cancel();
-    assert!(view.inline.is_none(), "an unsaveable card could not be left");
+    assert!(
+        view.inline.is_none(),
+        "an unsaveable card could not be left"
+    );
     assert_eq!(
         view.visible().unwrap().shapes["a"].shape.text,
         "written",
@@ -2463,7 +3419,10 @@ fn the_box_you_type_in_wraps_where_the_card_wraps_whatever_the_words_measured() 
     view.begin_text();
     let board = view.visible().unwrap();
     let shape = board.shapes["a"].shape.clone();
-    let room = [shape.width as f32 * view.zoom, shape.height as f32 * view.zoom];
+    let room = [
+        shape.width as f32 * view.zoom,
+        shape.height as f32 * view.zoom,
+    ];
     let pos = view.screen(shape.x as f32, shape.y as f32);
     let letters = view.lettering(&shape, room);
     let column = super::presentation::column(shape.kind, room[0], &letters, view.zoom);
@@ -2761,14 +3720,8 @@ fn an_arrows_words_ride_a_plate_and_a_cards_sit_in_the_middle_of_it() {
     let mut view = linked();
     view.on_size(1400., 900.);
     view.selected = Default::default();
-    view.edit(Change::Text {
-        id: "edge".into(),
-        text: "depends on".into(),
-    });
-    view.edit(Change::Text {
-        id: "a".into(),
-        text: "a thought".into(),
-    });
+    view.edit(writing(&view, "edge", "depends on"));
+    view.edit(writing(&view, "a", "a thought"));
     view.edit(Change::Create {
         id: "t".into(),
         shape: Shape {
@@ -3864,6 +4817,127 @@ fn node_at<'a>(node: &'a wire::Node, key: &str) -> Option<&'a wire::Node> {
     node.children().iter().find_map(|child| node_at(child, key))
 }
 
+fn named_dialogs(node: &wire::Node) -> Vec<String> {
+    fn walk(node: &wire::Node, dialogs: &mut Vec<String>) {
+        if let wire::Node::Overlay {
+            key,
+            label,
+            children,
+            ..
+        } = node
+            && label.is_some()
+            && children.len() > 1
+        {
+            dialogs.push(key.clone());
+        }
+        for child in node.children() {
+            walk(child, dialogs);
+        }
+    }
+
+    let mut dialogs = Vec::new();
+    walk(node, &mut dialogs);
+    dialogs
+}
+
+fn unnamed_overlays(node: &wire::Node) -> Vec<String> {
+    fn walk(node: &wire::Node, overlays: &mut Vec<String>) {
+        if let wire::Node::Overlay {
+            key,
+            label: None,
+            children,
+            ..
+        } = node
+            && children.len() > 1
+        {
+            overlays.push(key.clone());
+        }
+        for child in node.children() {
+            walk(child, overlays);
+        }
+    }
+
+    let mut overlays = Vec::new();
+    walk(node, &mut overlays);
+    overlays
+}
+
+#[test]
+fn overlays_are_named_only_when_blocking() {
+    let mut ordinary = view();
+    ordinary.on_size(1400., 900.);
+    card(&mut ordinary, "a", 40);
+    assert_eq!(
+        named_dialogs(&ordinary.view()),
+        Vec::<String>::new(),
+        "persistent board islands must not be named dialogs"
+    );
+    assert_eq!(
+        unnamed_overlays(&ordinary.view()),
+        Vec::<String>::new(),
+        "persistent board islands must be ordinary layout, not unnamed overlays"
+    );
+
+    let mut menu = view();
+    menu.on_size(1400., 900.);
+    card(&mut menu, "a", 40);
+    menu.cursor = menu.screen(400., 300.);
+    menu.on_open_menu();
+    assert_eq!(named_dialogs(&menu.view()), ["boards/menu-overlay"]);
+    let mut menu_overlays = 0;
+    let mut old_backdrops = 0;
+    menu.view().for_each_mut(&mut |node| match node {
+        wire::Node::Overlay {
+            key,
+            label,
+            backdrop,
+            on_dismiss,
+            children,
+            ..
+        } if key == "boards/menu-overlay" => {
+            assert_eq!(label.as_deref(), Some("Board menu"));
+            assert_eq!(*backdrop, wire::Rgba([0.; 4]));
+            assert!(on_dismiss.is_some());
+            assert_eq!(children.len(), 2);
+            assert_eq!(children[0].key(), Some("boards/stage"));
+            let mut floats = 0;
+            children[1].for_each_mut(&mut |child| {
+                if matches!(child, wire::Node::Float { key, .. } if key == "boards/menu-card") {
+                    floats += 1;
+                }
+            });
+            assert_eq!(floats, 1, "the board menu dialog carries its Float");
+            menu_overlays += 1;
+        }
+        wire::Node::MouseArea { key, .. } if key == "boards/menu-backdrop" => {
+            old_backdrops += 1;
+        }
+        _ => {}
+    });
+    assert_eq!(menu_overlays, 1, "one named board menu dialog is open");
+    assert_eq!(old_backdrops, 0, "the old actionable backdrop remains");
+    menu.on_close_menu();
+    assert_eq!(named_dialogs(&menu.view()), Vec::<String>::new());
+
+    let mut picker = view();
+    picker.on_size(1400., 900.);
+    picker.on_board_picker();
+    assert_eq!(
+        named_dialogs(&picker.view()),
+        ["boards/menu-float"],
+        "the open board picker is the only blocking overlay"
+    );
+
+    let mut help = view();
+    help.on_size(1400., 900.);
+    help.on_help();
+    assert_eq!(
+        named_dialogs(&help.view()),
+        ["boards/help-modal"],
+        "the open Help sheet is the only blocking overlay"
+    );
+}
+
 /// A connector's plate exists to rub the run out from under its words, and only
 /// the paper's own colour does that. Anything else is a chip printed over the
 /// line — which is what a canvas must never look like, and what a second colour
@@ -4027,24 +5101,192 @@ fn picking_a_shape_takes_up_the_whole_pen_it_was_drawn_with() {
 fn the_save_chip_counts_one_change_in_the_singular() {
     let mut view = view();
     card(&mut view, "a", 0);
+    // The card is agreed, so the count starts at nothing and the writes below
+    // are the only changes waiting.
+    view.confirmed = view.settled();
     view.pending.clear();
 
-    view.edit(Change::Text {
-        id: "a".into(),
-        text: "one".into(),
-    });
+    view.edit(writing(&view, "a", "one"));
     assert_eq!(view.pending.len(), 1);
     let one = view.status();
     assert!(one.contains("1 change"), "{one}");
     assert!(!one.contains("1 changes"), "{one}");
 
-    view.edit(Change::Text {
-        id: "a".into(),
-        text: "two".into(),
-    });
+    view.edit(writing(&view, "a", "two"));
     assert_eq!(view.pending.len(), 2);
     let two = view.status();
     assert!(two.contains("2 changes"), "{two}");
+}
+/// Below a 960-wide stage the tool bar leaves the top for the bottom edge,
+/// where the camera island (bottom-left) and help (bottom-right) already
+/// stand. A centred bar 468 wide and a camera island about 280 wide meet on
+/// every such stage, and the camera, drawn later, covered Lock, Select and
+/// Pan. So the bar stands one island higher: an island is at most a tool
+/// square and its 4 + 1 chrome each side, and the bar's inset must clear that
+/// over the corner islands' inset, while still leaving the bar its width.
+#[test]
+fn a_compact_stage_stands_the_tool_bar_clear_of_the_bottom_islands() {
+    let mut view = view();
+    view.confirmed = Some(Board::new("Board".into(), "owner".into()).unwrap());
+    let island = presentation::TOOL + 2. * (4. + 1.);
+    for width in [640., 800., 959.] {
+        view.on_size(width, 700.);
+        let tree = view.view();
+        let inset = |key: &str| match node_at(&tree, &format!("{key}/position")) {
+            Some(wire::Node::Container {
+                padding: Some(padding),
+                align_y: Some(align_y),
+                ..
+            }) => (padding.bottom, *align_y),
+            other => panic!("{key} is an aligned island: {other:?}"),
+        };
+        let (bar, bar_y) = inset("boards/tools-float");
+        assert_eq!(
+            bar_y,
+            wire::AlignY::Bottom,
+            "at {width} the bar is on the bottom edge"
+        );
+        for corner in ["boards/camera-float", "boards/help-float"] {
+            let (corner_inset, corner_y) = inset(corner);
+            assert_eq!(corner_y, wire::AlignY::Bottom);
+            assert!(
+                bar >= corner_inset + island,
+                "at {width} the bar at {bar} from the bottom runs into {corner}, \
+                 {island} tall at {corner_inset}"
+            );
+        }
+        assert!(
+            width - 2. * bar >= presentation::TOOL_BAR,
+            "at {width} the bar's inset {bar} leaves it less than its width"
+        );
+    }
+}
+
+/// The chip sits after the board's name, and a long name pushed it under the
+/// tool bar where nobody could read it. The menu is given the room left of the
+/// tool bar and no more, and in it the chip is the rigid one: the name gives
+/// way, cut to a line, and the ▾ after it stays.
+///
+/// The sizes mean what the host makes of them: `Fill` is the whole of the
+/// parent less what its rigid siblings keep, a one-line `Shrink` text keeps its
+/// width, and a button keeps whatever width it is given. So it is the box
+/// around the button that gives way, never the button.
+#[test]
+fn a_long_board_name_gives_way_to_the_save_chip_and_not_the_other_way() {
+    let mut view = view();
+    let title = "boards-views-accept-20260918t120040-c2-with-a-longer-tail-60";
+    assert_eq!(title.len(), 60);
+    view.confirmed = Some(Board::new(title.into(), "owner".into()).unwrap());
+    // The chip at its longest: a count of changes in two digits.
+    for i in 0..12 {
+        let _ = card(&mut view, &format!("c{i}"), i * 40);
+    }
+    assert!(view.status().contains("12 changes"), "{}", view.status());
+    let fill = Some(wire::Length::Fill);
+    let one_line = (Some(wire::Length::Shrink), Some(wire::Wrapping::None));
+    // The narrowest stage that still keeps the tool bar at the top, the stage
+    // the chip went missing on, and a wide one.
+    for width in [960., 1080., 1440.] {
+        view.on_size(width, 800.);
+        let tree = view.view();
+        let menu = node_at(&tree, "boards/menu").expect("the board menu is drawn");
+        let wire::Node::Container { max_width, .. } = menu else {
+            panic!("the board menu is an island: {menu:?}");
+        };
+        let tools_start = (width - presentation::TOOL_BAR) / 2.;
+        assert!(
+            max_width.is_some_and(
+                |room| presentation::ISLAND + room + presentation::ISLAND <= tools_start
+            ),
+            "at {width} the board menu may run to {max_width:?}, under the tool bar at \
+             {tools_start}"
+        );
+        let Some(wire::Node::Linear {
+            width: head,
+            children,
+            ..
+        }) = node_at(&tree, "boards/menu-head")
+        else {
+            panic!("the board menu has no head");
+        };
+        let [
+            wire::Node::Container {
+                key,
+                width: room,
+                content: switcher,
+                ..
+            },
+            wire::Node::Text {
+                content: chip,
+                width: chip_width,
+                options: chip_options,
+                ..
+            },
+        ] = children.as_slice()
+        else {
+            panic!("the head is the switcher's box, then the chip: {children:?}");
+        };
+        assert_eq!(key, "boards/switcher/room");
+        assert_eq!(
+            (*head, *room),
+            (fill, fill),
+            "the head spans the menu, and the switcher's box takes what the chip leaves"
+        );
+        assert_eq!(*chip, view.status());
+        assert_eq!(
+            (*chip_width, chip_options.wrapping),
+            one_line,
+            "the chip has to keep its own width whatever the name beside it needs"
+        );
+        let wire::Node::Button {
+            width: button,
+            content: wire::ButtonContent::Child(label),
+            ..
+        } = switcher.as_ref()
+        else {
+            panic!("the board's name is the button that opens the list: {switcher:?}");
+        };
+        let wire::Node::Linear {
+            width: label_width,
+            children,
+            ..
+        } = label.as_ref()
+        else {
+            panic!("the button holds the name and the ▾ side by side: {label:?}");
+        };
+        let [
+            wire::Node::Text {
+                content: name,
+                width: name_width,
+                options,
+                ..
+            },
+            wire::Node::Text {
+                content: caret,
+                width: caret_width,
+                options: caret_options,
+                ..
+            },
+        ] = children.as_slice()
+        else {
+            panic!("the button holds the name, then the ▾: {children:?}");
+        };
+        assert_eq!(
+            (*button, *label_width),
+            (fill, fill),
+            "the button is as wide as its box, and the name and ▾ as the button"
+        );
+        assert_eq!(
+            (name.as_str(), *name_width, options.wrapping),
+            (title, fill, Some(wire::Wrapping::None)),
+            "the name has to take only the room the ▾ leaves, on one line, and be cut there"
+        );
+        assert_eq!(
+            (caret.as_str(), (*caret_width, caret_options.wrapping)),
+            ("▾", one_line),
+            "the ▾ is a word of its own, not the tail an ellipsis cuts off the name"
+        );
+    }
 }
 /// The zoom readout is a fixed-width box, so what it has to hold is a fact
 /// about the zoom's own limits rather than about the labels that happened to be
@@ -5170,5 +6412,43 @@ fn the_chord_chains_out_of_a_sticky_and_out_of_nothing_else() {
         !view.chains_to_the_next_note("note"),
         "a refused finish still opened the next note, over the message saying \
          why this one could not be saved"
+    );
+}
+
+/// A board's title in the switcher is a one-line text that ends in an
+/// ellipsis, not a label the strip's button cannot shrink below.
+#[test]
+fn a_long_board_title_truncates_in_the_switcher() {
+    let mut view = view();
+    let long = "A board whose name is far longer than the switcher strip is wide";
+    view.catalog.insert("other".into(), long.into());
+    view.on_board_picker();
+    let tree = view.view();
+    let Some(wire::Node::Button { content, label, .. }) = node_at(&tree, "boards/open/other")
+    else {
+        panic!("the board is listed")
+    };
+    assert_eq!(label.as_deref(), Some(long));
+    let wire::ButtonContent::Child(child) = content else {
+        panic!("the title is a text in the button")
+    };
+    let wire::Node::Text { width, options, .. } = child.as_ref() else {
+        panic!("the title is a text in the button")
+    };
+    assert_eq!(*width, Some(wire::Length::Fill));
+    assert_eq!(options.wrapping, Some(wire::Wrapping::None));
+}
+/// The board menu floats as a card: its corners are the design's card radius.
+#[test]
+fn the_board_menu_wears_the_card_radius() {
+    let mut view = view();
+    view.menu = Some([40., 30.]);
+    let tree = view.view();
+    let Some(wire::Node::Float { radius, .. }) = node_at(&tree, "boards/menu-card") else {
+        panic!("the menu floats")
+    };
+    assert_eq!(
+        *radius,
+        Some([ducktape_view_guest::kit::radius::CARD as f32; 4])
     );
 }

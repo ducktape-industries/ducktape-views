@@ -6,10 +6,21 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use ducktape_view_guest::testing::{answer, has_text, item, press, submit, texts, type_into};
-use ducktape_view_guest::wire::{ButtonContent, Frame, Node, Request, Wrapping};
-use settings_view::host::{KeyAdd, Name, Session, Tab, TasteRow, Unlock};
-use settings_view::{boot_native, tick_native};
+use ducktape_view_guest::testing::{answer, find, has_text, item, press, submit, texts, type_into};
+use ducktape_view_guest::wire::{ButtonContent, Frame, Length, Node, Request, Wrapping};
+use settings_view::boot_native;
+use settings_view::host::{Endpoint, KeyAdd, Name, Session, Tab, TasteRow, Unlock};
+
+/// The view's own tick, refusing a frame assistive technology cannot read:
+/// every tree these tests render is checked.
+fn tick_native(events: Vec<ducktape_view_guest::wire::Event>) -> ducktape_view_guest::wire::Frame {
+    let frame = settings_view::tick_native(events);
+    frame
+        .root
+        .iter()
+        .for_each(ducktape_view_guest::testing::assert_accessible);
+    frame
+}
 
 const SEAT: &str = "8c4fa211";
 
@@ -31,6 +42,11 @@ fn facts() -> Session {
         account_exists: true,
         network_name: "testnet".into(),
         connected_rpc: "http://127.0.0.1:1".into(),
+        rpc_endpoint: "http://127.0.0.1:32989".into(),
+        rpc_endpoint_override: String::new(),
+        rpc_endpoint_refusal: String::new(),
+        rpc_endpoint_editable: None,
+        rpc_endpoint_editability_reason: String::new(),
         account_ceremony_phase: String::new(),
         account_ceremony_qr: String::new(),
         account_ceremony_detail: String::new(),
@@ -43,6 +59,7 @@ fn facts() -> Session {
         update_current: String::new(),
         update_previous: String::new(),
         update_staged_display: String::new(),
+        update_refused: String::new(),
         update_channel: "stable".into(),
         update_checked: String::new(),
         update_note: String::new(),
@@ -68,6 +85,9 @@ fn taste_row(tasting: bool, reason: &str) -> TasteRow {
 fn encoded(session: &Session) -> Vec<u8> {
     serde_json::to_vec(session).expect("session encodes")
 }
+
+/// The app's refusal of a URL that is not a node RPC URL, word for word.
+const ENDPOINT_REFUSAL: &str = "A node RPC URL is http:// or https:// followed by a host and an optional port, and nothing else.";
 
 fn kinds(requests: &[Request]) -> Vec<&str> {
     requests
@@ -255,6 +275,44 @@ fn a_connected_view_reads_its_own_standing_and_key_rows() {
             "missing {expected:?} in {:?}",
             texts(&frame)
         );
+    }
+}
+
+/// A throwaway seat with no account, connected to a node that is a
+/// validator: the validator standing is the NODE's, read off its key. Your
+/// identity says nothing about a standing this key does not hold, and the
+/// network pane's Node row carries the node's own (#40).
+#[test]
+fn a_seat_without_an_account_is_not_given_the_nodes_standing() {
+    let session = Session {
+        seat_key: "3d55b0f0".into(),
+        account_name: String::new(),
+        account_number: String::new(),
+        account_exists: false,
+        ..facts()
+    };
+    let (frame, _, _) = connected(&session, 0);
+    let frame = tick_native(press(&frame, "Account"));
+    assert!(
+        has_text(
+            &frame,
+            "Create an account below, or join your existing account from another device."
+        ),
+        "{:?}",
+        texts(&frame)
+    );
+    for claim in ["Standing", "Validator"] {
+        assert!(!has_text(&frame, claim), "{claim}: {:?}", texts(&frame));
+    }
+    let frame = tick_native(press(&frame, "Network"));
+    assert_eq!(badge(&frame, "settings/node-standing"), "Validator");
+}
+
+/// The words of the badge keyed `key`.
+fn badge(frame: &Frame, key: &str) -> String {
+    match find(frame, &format!("{key}/text")) {
+        Some(Node::Text { content, .. }) => content.clone(),
+        other => panic!("no badge {key}: {other:?}"),
     }
 }
 
@@ -575,9 +633,10 @@ fn raw_tokens_read_as_words_and_a_pending_read_says_so() {
     let props = request(&frame, "settings.props").id;
     // the session is in, the standing and key reads are still out
     let frame = tick_native(vec![item(props, &encoded(&session))]);
-    let frame = tick_native(press(&frame, "Account"));
-    assert!(has_text(&frame, "Reading…"), "{:?}", texts(&frame));
+    let frame = tick_native(press(&frame, "Network"));
+    assert_eq!(badge(&frame, "settings/node-standing"), "Reading…");
     assert!(!has_text(&frame, "validator"), "{:?}", texts(&frame));
+    let frame = tick_native(press(&frame, "Account"));
     assert!(
         has_text(&frame, "This code expires in 1:07"),
         "{:?}",
@@ -677,6 +736,8 @@ const MAY_WRAP: &[&str] = &[
     "settings/error-text",          // why the node could not be read
     "settings/network-name",        // the network's own name, as its heading
     "settings/network-rpc",         // the endpoint, beside its Copy button
+    "settings/node-rpc",            // the node RPC URL in use
+    "settings/node-rpc-refusal",    // the app's refusal of a URL, a sentence
     "settings/updates-unavailable", // there is no launcher, in a sentence
     "settings/update-note",         // what the last check found
     "settings/seat",                // the seated public key, 64 hex digits
@@ -735,8 +796,14 @@ fn every_row_cell_keeps_one_line() {
         account_ceremony_qr: "https://auth.example/c".into(),
         account_ceremony_detail: "Scan this with your phone.".into(),
         account_ceremony_left: "1:07".into(),
+        rpc_endpoint_refusal: ENDPOINT_REFUSAL.into(),
         tasting: vec![taste_row(true, "")],
         ..facts()
+    };
+    // a staged release its qualify refused
+    let refused = Session {
+        update_refused: "qualify_exit_3".into(),
+        ..rich.clone()
     };
     // no account yet, the seat locked, a proposed view this node refuses
     let enrol = Session {
@@ -748,7 +815,7 @@ fn every_row_cell_keeps_one_line() {
         ..facts()
     };
     let mut drawn = Vec::new();
-    for session in [facts(), rich, enrol] {
+    for session in [facts(), rich, refused, enrol] {
         drawn.extend(every_pane(connected(&session, 2).0));
     }
     // a session the view cannot read draws its error over the pane
@@ -791,19 +858,87 @@ fn every_row_cell_keeps_one_line() {
     );
 }
 
+/// A narrow pane holds every row: a setting row and each row of controls
+/// wrap (the words a portion, so a control drops under them only when it
+/// cannot sit beside them), and a one-line reading or a key's label takes
+/// its row's rest and truncates instead of running past the edge.
+#[test]
+fn a_narrow_pane_wraps_the_controls_and_truncates_long_readings() {
+    let long = Session {
+        account_name: "a name far longer than any settings pane is wide".into(),
+        update_state: "staged".into(),
+        update_staged_display: "2026.09.2+abc1234".into(),
+        update_previous: "9f8e7d6".into(),
+        ..facts()
+    };
+    let (frame, ..) = connected(&long, 2);
+    let panes = every_pane(frame);
+    let found = |key: &str| {
+        panes
+            .iter()
+            .find_map(|frame| find(frame, key).cloned())
+            .unwrap_or_else(|| panic!("no {key} on any pane"))
+    };
+    for key in [
+        "settings/theme",
+        "settings/node-rpc-edit",
+        "settings/rename-row",
+        "settings/node-rpc-controls",
+        "settings/rename-controls",
+        "settings/key-label-row",
+        "settings/update-actions",
+    ] {
+        let Node::Linear { wrap, .. } = found(key) else {
+            panic!("{key} is a row");
+        };
+        assert!(wrap.is_some(), "{key} wraps");
+    }
+    let Node::Linear { width, .. } = found("settings/theme/text") else {
+        panic!("a setting's words are a column");
+    };
+    assert_eq!(width, Some(Length::FillPortion(1)), "the words give way");
+    for key in [
+        "settings/account-name",
+        "settings/update-staged",
+        "settings/network-status",
+    ] {
+        let Node::Text { width, options, .. } = found(key) else {
+            panic!("{key} is text");
+        };
+        assert_eq!(
+            (width, options.wrapping),
+            (Some(Length::Fill), Some(Wrapping::None)),
+            "{key} truncates"
+        );
+    }
+}
+
+/// An account holds at least its first key, so an account with none read
+/// says the read is out — not "0 keys" over an empty list.
+#[test]
+fn an_account_whose_keys_are_not_read_says_so() {
+    let (frame, ..) = connected(&facts(), 0);
+    let frame = tick_native(press(&frame, "Account"));
+    assert!(has_text(&frame, "Reading keys…"), "{:?}", texts(&frame));
+    assert!(!has_text(
+        &frame,
+        "0 keys — each one signs for this account."
+    ));
+}
+
 // ---------- updates ----------
 
 /// Without a launcher the Updates group says so and offers no control;
 /// installed, its rows read the facts and each control leaves as its own
-/// intent: `Check now` while idle, `Restart to update` only while staged,
-/// `Roll back to <previous>` only while idle with a previous release.
+/// intent: `Check now` while idle or staged, `Restart to update` only while
+/// staged, `Roll back to <previous>` only while idle with a previous release.
 #[test]
 fn the_updates_group_reads_the_facts_and_each_control_is_one_intent() {
     let (frame, props, _) = connected(&facts(), 2);
     assert!(
         has_text(
             &frame,
-            "Updates unavailable: not installed through the launcher."
+            "Automatic updates are unavailable in this copy of Ducktape. Open the installed app to check for updates."
         ),
         "{:?}",
         texts(&frame)
@@ -849,8 +984,8 @@ fn the_updates_group_reads_the_facts_and_each_control_is_one_intent() {
     let frame = tick_native(vec![item(props, &encoded(&staged))]);
     assert!(has_text(&frame, "2026.09.2+abc1234"), "{:?}", texts(&frame));
     assert!(
-        button_disabled(&frame, "Check now"),
-        "staged: nothing to check for"
+        !button_disabled(&frame, "Check now"),
+        "staged: a newer release may still replace it"
     );
     let pressed = tick_native(press(&frame, "Restart to update"));
     assert_eq!(one_intent(&pressed).kind, "settings.update_restart");
@@ -872,6 +1007,316 @@ fn the_updates_group_reads_the_facts_and_each_control_is_one_intent() {
     let frame = tick_native(vec![item(props, &encoded(&busy))]);
     assert!(has_text(&frame, "Checking…"), "{:?}", texts(&frame));
     assert!(button_disabled(&frame, "Check now"));
+}
+
+/// A STAGED RELEASE ITS QUALIFY REFUSED reads as refused, as the app's
+/// console strip does: the reason token beside it, no restart into it, and
+/// a discard (the roll-back intent, which from `staged` discards). A ready
+/// release keeps its restart and offers the same discard beside it; idle
+/// keeps its roll-back and offers no discard.
+#[test]
+fn a_refused_staged_release_offers_a_discard_and_no_restart() {
+    let staged = Session {
+        update_state: "staged".into(),
+        update_current: "1a2b3c4".into(),
+        update_previous: "9f8e7d6".into(),
+        update_staged_display: "2026.09.2+abc1234".into(),
+        update_refused: "qualify_exit_3".into(),
+        ..facts()
+    };
+    let (frame, props, _) = connected(&staged, 2);
+    for expected in [
+        "Update cannot be installed",
+        "2026.09.2+abc1234",
+        "qualify_exit_3",
+        "Keep using your current version. Choose Check now to look for a newer update, or Discard to remove this download.",
+    ] {
+        assert!(
+            has_text(&frame, expected),
+            "missing {expected:?} in {:?}",
+            texts(&frame)
+        );
+    }
+    assert!(!has_text(&frame, "Ready to install"), "{:?}", texts(&frame));
+    assert!(
+        find(&frame, "settings/update-restart").is_none(),
+        "no restart into a refused release: {:?}",
+        texts(&frame)
+    );
+    assert!(!button_disabled(&frame, "Check now"));
+    let pressed = tick_native(press(&frame, "Discard 2026.09.2+abc1234"));
+    assert_eq!(one_intent(&pressed).kind, "settings.update_rollback");
+
+    let ready = Session {
+        update_refused: String::new(),
+        ..staged.clone()
+    };
+    let frame = tick_native(vec![item(props, &encoded(&ready))]);
+    assert!(has_text(&frame, "Ready to install"), "{:?}", texts(&frame));
+    assert!(!has_text(&frame, "qualify_exit_3"), "{:?}", texts(&frame));
+    assert!(!button_disabled(&frame, "Restart to update"));
+    assert!(!button_disabled(&frame, "Check now"));
+    assert!(!button_disabled(&frame, "Discard 2026.09.2+abc1234"));
+
+    let idle = Session {
+        update_state: "idle".into(),
+        ..ready
+    };
+    let frame = tick_native(vec![item(props, &encoded(&idle))]);
+    assert!(!button_disabled(&frame, "Roll back to 9f8e7d6"));
+    assert!(
+        find(&frame, "settings/update-discard").is_none(),
+        "nothing staged, nothing to discard: {:?}",
+        texts(&frame)
+    );
+}
+
+// ---------- node RPC URL ----------
+
+/// What the field with `key` reads now.
+fn field(frame: &Frame, key: &str) -> String {
+    let Some(Node::Input { value, .. }) = find(frame, key) else {
+        panic!("no field {key:?} in {:?}", texts(frame));
+    };
+    value.clone()
+}
+
+fn endpoint(intent: &Request) -> Endpoint {
+    assert_eq!(intent.kind, "settings.endpoint");
+    serde_json::from_slice(&intent.payload).expect("decodes")
+}
+
+/// The Network tab reads the node RPC URL in use, and Save sends the typed
+/// URL as it was typed. The app checks it; when it lands the stored URL is
+/// the one sent, and the field follows it.
+#[test]
+fn a_typed_node_rpc_url_leaves_as_the_endpoint_intent() {
+    let (frame, props, _) = connected(&facts(), 2);
+    let frame = tick_native(press(&frame, "Network"));
+    assert!(has_text(&frame, "Node RPC"), "{:?}", texts(&frame));
+    assert!(
+        has_text(&frame, "http://127.0.0.1:32989"),
+        "{:?}",
+        texts(&frame)
+    );
+    assert!(button_disabled(&frame, "Clear"), "nothing stored to clear");
+    assert!(button_disabled(&frame, "Save"), "nothing typed to save");
+
+    let frame = tick_native(type_into(
+        &frame,
+        "node RPC URL…",
+        "http://100.92.85.92:28990",
+    ));
+    let frame = tick_native(press(&frame, "Save"));
+    assert_eq!(
+        endpoint(one_intent(&frame)),
+        Endpoint {
+            url: "http://100.92.85.92:28990".into()
+        }
+    );
+
+    let stored = Session {
+        rpc_endpoint: "http://100.92.85.92:28990".into(),
+        rpc_endpoint_override: "http://100.92.85.92:28990".into(),
+        ..facts()
+    };
+    let frame = tick_native(vec![item(props, &encoded(&stored))]);
+    assert_eq!(
+        field(&frame, "settings/node-rpc-draft"),
+        "http://100.92.85.92:28990"
+    );
+    assert!(button_disabled(&frame, "Save"), "the stored URL is saved");
+    assert!(!button_disabled(&frame, "Clear"));
+}
+
+/// A REFUSED URL STAYS IN THE FIELD with the app's sentence under it: the
+/// stored URL did not move, so the draft that asked for it is not spent.
+#[test]
+fn a_refused_node_rpc_url_keeps_its_draft_under_the_refusal() {
+    let (frame, props, _) = connected(&facts(), 2);
+    let frame = tick_native(press(&frame, "Network"));
+    let frame = tick_native(type_into(&frame, "node RPC URL…", "ftp://node"));
+    let frame = tick_native(press(&frame, "Save"));
+    assert_eq!(endpoint(one_intent(&frame)).url, "ftp://node");
+
+    let refused = Session {
+        rpc_endpoint_refusal: ENDPOINT_REFUSAL.into(),
+        ..facts()
+    };
+    let frame = tick_native(vec![item(props, &encoded(&refused))]);
+    assert!(has_text(&frame, ENDPOINT_REFUSAL), "{:?}", texts(&frame));
+    assert_eq!(field(&frame, "settings/node-rpc-draft"), "ftp://node");
+    assert!(
+        !button_disabled(&frame, "Save"),
+        "the draft can be sent again"
+    );
+}
+
+#[test]
+fn node_rpc_endpoint_editability_keeps_legacy_and_true_and_removes_false_controls() {
+    let (frame, _, _) = connected(&facts(), 2);
+    let frame = tick_native(press(&frame, "Network"));
+    assert!(find(&frame, "settings/node-rpc-draft").is_some());
+    assert!(find(&frame, "settings/node-rpc-edit").is_some());
+
+    let enabled = Session {
+        rpc_endpoint_editable: Some(true),
+        ..facts()
+    };
+    let (frame, props, _) = connected(&enabled, 2);
+    let frame = tick_native(press(&frame, "Network"));
+    assert!(find(&frame, "settings/node-rpc-draft").is_some());
+    assert!(find(&frame, "settings/node-rpc-edit").is_some());
+
+    let reason = "This connection has no local workspace.";
+    let refused = Session {
+        rpc_endpoint_editable: Some(false),
+        rpc_endpoint_editability_reason: reason.into(),
+        rpc_endpoint_refusal: ENDPOINT_REFUSAL.into(),
+        ..facts()
+    };
+    let frame = tick_native(vec![item(props, &encoded(&refused))]);
+    assert!(
+        has_text(&frame, "http://127.0.0.1:32989"),
+        "{:?}",
+        texts(&frame)
+    );
+    assert!(has_text(&frame, reason), "{:?}", texts(&frame));
+    assert!(has_text(&frame, ENDPOINT_REFUSAL), "{:?}", texts(&frame));
+    for key in [
+        "settings/node-rpc-draft",
+        "settings/node-rpc-save",
+        "settings/node-rpc-clear",
+        "settings/node-rpc-edit",
+    ] {
+        assert!(find(&frame, key).is_none(), "{key}: {:?}", texts(&frame));
+    }
+    assert!(
+        !frame
+            .requests
+            .iter()
+            .any(|request| request.kind == "settings.endpoint")
+    );
+}
+
+#[test]
+fn node_rpc_actions_keep_network_selected_through_refusal_and_reconnect() {
+    let (frame, props, _) = connected(&facts(), 2);
+    let frame = tick_native(press(&frame, "Network"));
+    let assert_network_selected = |frame: &Frame| {
+        assert!(matches!(
+            find(frame, "settings/tab/network"),
+            Some(Node::Button {
+                checked: Some(true),
+                ..
+            })
+        ));
+        assert!(matches!(
+            find(frame, "settings/tab/general"),
+            Some(Node::Button {
+                checked: Some(false),
+                ..
+            })
+        ));
+    };
+    let frame = tick_native(type_into(&frame, "node RPC URL…", "ftp://node"));
+    let frame = tick_native(press(&frame, "Save"));
+    assert_eq!(endpoint(one_intent(&frame)).url, "ftp://node");
+
+    let refused = Session {
+        rpc_endpoint_refusal: ENDPOINT_REFUSAL.into(),
+        ..facts()
+    };
+    let frame = tick_native(vec![item(props, &encoded(&refused))]);
+    assert_network_selected(&frame);
+    assert_eq!(field(&frame, "settings/node-rpc-draft"), "ftp://node");
+    assert!(has_text(&frame, ENDPOINT_REFUSAL), "{:?}", texts(&frame));
+
+    let frame = tick_native(type_into(
+        &frame,
+        "node RPC URL…",
+        "http://100.92.85.92:28990",
+    ));
+    let frame = tick_native(press(&frame, "Save"));
+    assert_eq!(
+        endpoint(one_intent(&frame)).url,
+        "http://100.92.85.92:28990"
+    );
+    let saved = Session {
+        connected_rpc: "http://100.92.85.92:28990".into(),
+        rpc_endpoint: "http://100.92.85.92:28990".into(),
+        rpc_endpoint_override: "http://100.92.85.92:28990".into(),
+        ..facts()
+    };
+    let frame = tick_native(vec![item(props, &encoded(&saved))]);
+    assert_network_selected(&frame);
+    assert_eq!(
+        field(&frame, "settings/node-rpc-draft"),
+        "http://100.92.85.92:28990"
+    );
+}
+
+/// A stored URL seeds the field and can be cleared: Clear sends the empty
+/// URL, and once the app drops the stored one the field is empty too.
+#[test]
+fn a_stored_node_rpc_url_is_cleared_with_the_empty_url() {
+    let stored = Session {
+        rpc_endpoint: "http://100.92.85.92:28990".into(),
+        rpc_endpoint_override: "http://100.92.85.92:28990".into(),
+        ..facts()
+    };
+    let (frame, props, _) = connected(&stored, 2);
+    let frame = tick_native(press(&frame, "Network"));
+    assert_eq!(
+        field(&frame, "settings/node-rpc-draft"),
+        "http://100.92.85.92:28990"
+    );
+    assert!(
+        button_disabled(&frame, "Save"),
+        "the field is the stored URL"
+    );
+    let frame = tick_native(press(&frame, "Clear"));
+    assert_eq!(endpoint(one_intent(&frame)).url, "");
+
+    let frame = tick_native(vec![item(props, &encoded(&facts()))]);
+    assert_eq!(field(&frame, "settings/node-rpc-draft"), "");
+    assert!(button_disabled(&frame, "Clear"), "nothing stored to clear");
+}
+
+/// An app that sends none of the node RPC facts (nor `update_refused`)
+/// still has its session read: the row is there, with no URL to show.
+#[test]
+fn a_session_from_an_older_app_draws_no_node_rpc_url() {
+    let mut older = serde_json::to_value(facts()).expect("session encodes");
+    let older_fields = older.as_object_mut().expect("an object");
+    for newer in [
+        "rpc_endpoint",
+        "rpc_endpoint_override",
+        "rpc_endpoint_refusal",
+        "rpc_endpoint_editable",
+        "rpc_endpoint_editability_reason",
+        "update_refused",
+    ] {
+        assert!(older_fields.remove(newer).is_some(), "{newer} is sent");
+    }
+    let (_, props, _) = connected(&facts(), 2);
+    let frame = tick_native(vec![item(
+        props,
+        &serde_json::to_vec(&older).expect("encodes"),
+    )]);
+    let frame = tick_native(press(&frame, "Network"));
+    assert!(
+        find(&frame, "settings/error-text").is_none(),
+        "the older session reads: {:?}",
+        texts(&frame)
+    );
+    assert!(has_text(&frame, "Node RPC"), "{:?}", texts(&frame));
+    assert!(has_text(&frame, "—"), "{:?}", texts(&frame));
+    assert!(
+        !has_text(&frame, "http://127.0.0.1:32989"),
+        "{:?}",
+        texts(&frame)
+    );
 }
 
 #[test]
@@ -900,4 +1345,12 @@ fn the_appearance_choice_offers_system_and_checks_the_current_mode() {
             ("dark".to_owned(), Some(false)),
         ]
     );
+}
+
+/// `tick_native` asserts every frame it returns; this draws all four panes
+/// connected, the states that hold the view's controls.
+#[test]
+fn accessibility_every_settings_pane_names_its_controls() {
+    let (frame, _, _) = connected(&facts(), 2);
+    every_pane(frame);
 }

@@ -191,6 +191,8 @@ pub struct ChatView {
     pub(crate) member_key_draft: String,
     pub(crate) thread_edit_draft: String,
     pub(crate) host_error: String,
+    /// The last session item failed, so the note on screen is the session's.
+    pub(crate) session_failed: bool,
     pub(crate) sent: bool,
     pub(crate) dark: bool,
 }
@@ -416,6 +418,7 @@ impl ChatView {
             member_key_draft: "".to_owned(),
             thread_edit_draft: "".to_owned(),
             host_error: "".to_owned(),
+            session_failed: false,
             sent: false,
             dark: false,
         }
@@ -426,7 +429,7 @@ impl ChatView {
     pub(crate) const PREFERRED_WINDOW_SIZE: &'static str = "none";
     /// This state's layout, digested — `snapshot_schema` holds it here.
     pub(crate) const SNAPSHOT_SCHEMA: &'static str =
-        "c27364dd4ab41bc0aac3719c4ddc27d5fea5ef598d33d1a4a29b950245c43f58";
+        "a72de312cd2b8e3bf6a58fe2b2bef413109994463f41e62e2842160ac66b3b06";
     pub(crate) fn snapshot(&self) -> Result<Vec<u8>, String> {
         self.validate_snapshot()?;
         wire::Snapshot {
@@ -664,6 +667,24 @@ mod tests {
             },
         ));
         assert!(state.host_error.is_empty());
+    }
+
+    #[test]
+    fn a_session_that_reads_again_takes_back_only_its_own_note() {
+        let mut state = ChatView::state();
+        let session = |error: &str| {
+            Message::SessionArrived(Box::new(crate::host::SessionItem {
+                error: error.into(),
+                ..Default::default()
+            }))
+        };
+        let _ = state.update(session("bad props"));
+        assert!(state.host_error.contains("bad props"));
+        let _ = state.update(session(""));
+        assert!(state.host_error.is_empty());
+        state.host_error = "Couldn’t open this conversation: refused".into();
+        let _ = state.update(session(""));
+        assert_eq!(state.host_error, "Couldn’t open this conversation: refused");
     }
 
     #[test]
@@ -929,6 +950,8 @@ mod tests {
         state.connected = true;
         state.active_channel = "room".into();
         state.active_channel_name = "Room".into();
+        // a reader who holds an account: the writes below are hers to make
+        state.me = "acct:1".into();
         state.unread_boundary = 1;
         state.unread_marker_seq = 2;
         state.rooms = vec![crate::host::ChatSidebarRow {
@@ -1122,6 +1145,8 @@ mod tests {
         state.connected = true;
         state.active_channel = "room".into();
         state.selected_message_seq = 1;
+        // a reader who holds an account: the writes below are hers to make
+        state.me = "acct:1".into();
         state.message_action = MessageAction::Reactions;
         let mut tree = state.view();
         let mut grids = 0;
@@ -1171,6 +1196,219 @@ mod tests {
         assert_eq!(grids, 1);
     }
 
+    /// A long channel name pushed Huddle and Details out of the header, and
+    /// the thread's room line ran under its ✕. The sizes mean what the host
+    /// makes of them: a one-line `Shrink` text keeps its whole width, up to its
+    /// row's; a `Fill` row takes what its rigid siblings leave; a clipped box
+    /// sized to its content shrinks to what is left. So the title is the `Fill`
+    /// row, and the name is the clipped box in it.
+    #[test]
+    fn a_long_channel_name_gives_way_to_huddle_and_details() {
+        let name = "views-walk-20260918-a-very-long-channel-name-to-check-how-the-header-and-the-channel-list-truncate-it";
+        let mut state = ChatView::state();
+        state.connected = true;
+        state.active_channel = "room".into();
+        state.active_channel_name = name.into();
+        state.active_thread_seq = 1;
+        let mut tree = state.view();
+        let (mut header, mut thread_title) = (Vec::new(), Vec::new());
+        tree.for_each_mut(&mut |node| {
+            if let wire::Node::Linear { key, children, .. } = node {
+                match key.as_str() {
+                    "ChatView/chat/header" => header = children.clone(),
+                    "ChatView/chat/thread-pane/title-row" => thread_title = children.clone(),
+                    _ => {}
+                }
+            }
+        });
+        let gives_way = |node: &wire::Node, text: &str| match node {
+            wire::Node::Container {
+                width: Some(wire::Length::Shrink),
+                clip: true,
+                content,
+                ..
+            } => matches!(
+                content.as_ref(),
+                wire::Node::Text { content, width: None | Some(wire::Length::Shrink), options, .. }
+                    if content == text && options.wrapping == Some(wire::Wrapping::None)
+            ),
+            _ => false,
+        };
+        let keys: Vec<_> = header.iter().map(|node| node.key()).collect();
+        assert_eq!(
+            keys,
+            [
+                Some("ChatView/chat/room-title"),
+                Some("ChatView/chat/huddle"),
+                Some("ChatView/chat/details"),
+            ],
+            "the header is the title, then Huddle and Details: {header:?}"
+        );
+        let wire::Node::Linear {
+            width,
+            children: title,
+            ..
+        } = &header[0]
+        else {
+            panic!("the title is a row: {:?}", header[0]);
+        };
+        assert_eq!(*width, Some(wire::Length::Fill));
+        assert!(
+            title.iter().any(|node| gives_way(node, name)),
+            "the name is a clipped box that gives way: {title:?}"
+        );
+        assert!(
+            thread_title
+                .iter()
+                .any(|node| gives_way(node, &format!("#{name}"))),
+            "the thread's room line gives way to its ✕: {thread_title:?}"
+        );
+    }
+
+    /// A long channel or person name in the list pane pushed the marks and
+    /// the unread dot after it out of the row, where the row's button clipped
+    /// them away: the name is the clipped box that gives way, as the header's.
+    #[test]
+    fn a_long_name_in_the_list_pane_gives_way_to_its_unread_dot() {
+        let name = "a-very-long-channel-name-that-is-wider-than-any-list-pane-the-reader-can-drag";
+        let mut state = ChatView::state();
+        state.connected = true;
+        state.rooms = vec![crate::host::ChatSidebarRow {
+            channel: crate::host::ChatChannel {
+                id: "room".into(),
+                name: name.into(),
+                members_only: true,
+                ..Default::default()
+            },
+            unread: true,
+        }];
+        state.dm_rows = vec![crate::host::DmSidebarRow {
+            peer: crate::host::DmPeer {
+                key: "peer".into(),
+                name: name.into(),
+                ..Default::default()
+            },
+            unread: true,
+        }];
+        let mut tree = state.view();
+        let mut rows = Vec::new();
+        tree.for_each_mut(&mut |node| {
+            if let wire::Node::Linear { key, children, .. } = node
+                && key.ends_with("/row")
+                && (key.contains("/channel/room/") || key.contains("/dm/peer/"))
+            {
+                rows.push((key.clone(), children.clone()));
+            }
+        });
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        for (key, children) in rows {
+            assert!(
+                children.iter().any(|node| matches!(
+                    node,
+                    wire::Node::Container {
+                        width: Some(wire::Length::Shrink),
+                        clip: true,
+                        ..
+                    }
+                )),
+                "{key}: the name gives way: {children:?}"
+            );
+        }
+    }
+
+    /// A room still reading its messages draws the kit's loading state, a
+    /// titled block, not a lone caption.
+    #[test]
+    fn a_loading_room_draws_the_kits_loading_state() {
+        let mut state = ChatView::state();
+        state.connected = true;
+        state.active_channel = "room".into();
+        state.loading = true;
+        let mut tree = state.view();
+        let mut titled = false;
+        tree.for_each_mut(&mut |node| {
+            if let wire::Node::Text { key, content, .. } = node
+                && key.ends_with("/loading/title")
+            {
+                titled |= content == "Loading messages…";
+            }
+        });
+        assert!(titled);
+    }
+
+    /// With a thread open, Details drew a second side pane, and the two left
+    /// the conversation ~170 px at 1280 and nothing at 1000: each pane's width
+    /// is clamped as the only one beside the room. Details now stands in front
+    /// of the thread, and closing it brings the thread back.
+    #[test]
+    fn details_over_a_thread_stand_in_front_of_it_instead_of_beside_it() {
+        let mut state = ChatView::state();
+        state.connected = true;
+        state.active_channel = "room".into();
+        let panes = |state: &ChatView| {
+            let mut tree = state.view();
+            let mut panes = Vec::new();
+            tree.for_each_mut(&mut |node| {
+                if let Some(key @ ("ChatView/chat/details-pane" | "ChatView/chat/thread-pane")) =
+                    node.key()
+                {
+                    panes.push(key.to_owned());
+                }
+            });
+            panes
+        };
+        let _ = state.update(Message::OpenThreadFor(1));
+        assert_eq!(panes(&state), ["ChatView/chat/thread-pane"]);
+        let _ = state.update(Message::ToggleChannelSettings);
+        assert_eq!(
+            panes(&state),
+            ["ChatView/chat/details-pane"],
+            "one side pane beside the room"
+        );
+        let _ = state.update(Message::ToggleChannelSettings);
+        assert_eq!(panes(&state), ["ChatView/chat/thread-pane"]);
+    }
+
+    /// "Create a channel" was a bare column on the dimmed backdrop: no edge,
+    /// and its title and fields flush with its sides. It wears the card the
+    /// other views' dialogs do, padded, under a heading.
+    #[test]
+    fn the_create_a_channel_dialog_is_a_padded_card() {
+        let mut state = ChatView::state();
+        state.connected = true;
+        let _ = state.update(Message::ToggleChannelCreate);
+        let mut tree = state.view();
+        let mut card = None;
+        tree.for_each_mut(&mut |node| {
+            if let wire::Node::Container {
+                key,
+                padding,
+                border,
+                background,
+                content,
+                ..
+            } = node
+                && key == "ChatView/chat/create/card"
+            {
+                let title = match content.as_ref() {
+                    wire::Node::Linear { children, .. } => children.first().cloned(),
+                    _ => None,
+                };
+                card = Some((*padding, border.is_some(), background.is_some(), title));
+            }
+        });
+        let (padding, bordered, filled, title) = card.expect("the dialog is a card");
+        assert_eq!(padding, Some(wire::Edges::all(20.)));
+        assert!(bordered && filled, "the card has an edge on the backdrop");
+        assert_eq!(
+            title,
+            Some(native::heading(
+                "ChatView/chat/create/title",
+                "Create a channel"
+            ))
+        );
+    }
+
     #[test]
     fn every_thread_menu_mount_matches_its_focus_target() {
         let mut state = ChatView::state();
@@ -1207,7 +1445,7 @@ mod tests {
     }
 
     /// The "…" menu is a dropdown floated where the pointer pressed: one
-    /// item a row, full-width, no close row (the backdrop closes it), and
+    /// item a row, full-width, no close row (the modal closes it), and
     /// nothing of it in the stream's flow. The timeline's menu adds Reply;
     /// the thread's has no thread to open. One menu floats at a time.
     #[test]
@@ -1218,6 +1456,40 @@ mod tests {
         state.active_thread_seq = 1;
         state.press_x = 900.0;
         state.press_y = 300.0;
+        let assert_menu_modal = |state: &ChatView, open: bool, expected: (f32, f32)| {
+            let mut tree = state.view();
+            let mut overlays = 0;
+            let mut backdrops = 0;
+            tree.for_each_mut(&mut |node| match node {
+                wire::Node::Overlay {
+                    key,
+                    label,
+                    backdrop,
+                    on_dismiss,
+                    children,
+                    ..
+                } if key.ends_with("/menu-overlay") => {
+                    assert!(open, "a closed menu exposed its dialog");
+                    assert_eq!(label.as_deref(), Some("Message menu"));
+                    assert_eq!(*backdrop, wire::Rgba([0.; 4]));
+                    assert!(on_dismiss.is_some());
+                    assert_eq!(children.len(), 2);
+                    assert_eq!(children[0].key(), Some("ChatView/chat/press-area"));
+                    let wire::Node::Float { key, x, y, .. } = &children[1] else {
+                        panic!("the message menu dialog does not carry its Float")
+                    };
+                    assert_eq!(key, "ChatView/chat/floating-menu");
+                    assert_eq!((*x, *y), expected);
+                    overlays += 1;
+                }
+                wire::Node::MouseArea { key, .. } if key.ends_with("/menu-backdrop") => {
+                    backdrops += 1;
+                }
+                _ => {}
+            });
+            assert_eq!(backdrops, 0, "the old actionable backdrop remains");
+            assert_eq!(overlays, usize::from(open));
+        };
         let menu_of = |state: &ChatView, focus: &str| -> Vec<String> {
             let mut tree = state.view();
             let mut floats = 0;
@@ -1257,6 +1529,7 @@ mod tests {
             items
         };
         let _ = state.update(Message::OpenMessageActions(1, "body".into(), 0));
+        assert_menu_modal(&state, true, (900., 304.));
         assert_eq!(
             menu_of(&state, "message-action-focus"),
             [
@@ -1276,7 +1549,9 @@ mod tests {
             }
         });
         let _ = state.update(Message::ClearMessageSelection);
+        assert_menu_modal(&state, false, (0., 0.));
         let _ = state.update(Message::OpenThreadMessageActions(1, "body".into(), 0));
+        assert_menu_modal(&state, true, (10., 14.));
         assert_eq!(
             menu_of(&state, "thread-action-focus"),
             [
@@ -1300,8 +1575,8 @@ mod tests {
     /// and Files is a button inside it, never where the press lands.
     #[test]
     fn attachment_press_previews_in_place_and_files_is_one_press_away() {
-        let doc = "duck://files/shared/attachments/u1/notes.txt".to_owned();
-        let shot = "duck://files/shared/attachments/u1/shot.png".to_owned();
+        let doc = "duck://testnet-0a1b2c3d/files/shared/attachments/u1/notes.txt".to_owned();
+        let shot = "duck://testnet-0a1b2c3d/files/shared/attachments/u1/shot.png".to_owned();
         let mut state = ChatView::state();
         state.connected = true;
         state.active_channel = "room".into();
@@ -1404,7 +1679,7 @@ mod tests {
             ..Default::default()
         }));
         assert_eq!(surfaces(&state), vec![("code".to_owned(), false)]);
-        let readme = "duck://files/shared/attachments/u1/README.md".to_owned();
+        let readme = "duck://testnet-0a1b2c3d/files/shared/attachments/u1/README.md".to_owned();
         let _ = state.update(Message::OpenAttachment(readme));
         let _ = state.update(Message::PreviewArrived(crate::host::PreviewItem {
             path: "/shared/attachments/u1/README.md".into(),

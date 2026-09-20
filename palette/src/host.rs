@@ -10,8 +10,11 @@
 //! Nothing here links a module crate: every request and every reply is
 //! spelled as the JSON the module's wire already is.
 
+use duck_address::chat::MessageAddress;
+use duck_address::{Address, ChainId, Refused};
 use ducktape_view_guest::host;
 use futures::StreamExt;
+use pages_wire::PageAddress;
 use serde::{Deserialize, Serialize};
 
 /// The chord this palette answers to. One string, claimed at the kernel and
@@ -215,33 +218,39 @@ fn text(value: &serde_json::Value) -> String {
     value.as_str().unwrap_or_default().to_owned()
 }
 
-/// A message's address, for the chain this session is on. The `?net=` half
-/// is the chain id's digest — the whole id cannot ride a URI.
+/// A message's address, for the chain this session is on.
 pub fn chat_link(hit: &ChatHit, chain: &str) -> String {
-    format!(
-        "duck://channel/{}{}#{}",
-        hit.channel_id,
-        net_query(chain),
-        hit.seq
-    )
+    let seq = u64::try_from(hit.seq).ok();
+    minted(chain, |chain| {
+        MessageAddress {
+            channel: hit.channel_id.clone(),
+            seq,
+        }
+        .address(chain)
+    })
 }
 
 /// A page block's address, for the chain this session is on.
 pub fn page_link(hit: &PageHit, chain: &str) -> String {
-    let block = match hit.block_id.is_empty() {
-        true => String::new(),
-        false => format!("#{}", hit.block_id),
-    };
-    format!("duck://page/{}{}{}", hit.page_id, net_query(chain), block)
+    let block = (!hit.block_id.is_empty()).then(|| hit.block_id.clone());
+    minted(chain, |chain| {
+        PageAddress {
+            page: hit.page_id.clone(),
+            block,
+        }
+        .address(chain)
+    })
 }
 
-/// `?net=<digest>` for a chain id of the form `<name>#<digest>`, or nothing
-/// when this session is on no named chain.
-fn net_query(chain: &str) -> String {
-    match chain.rsplit_once('#') {
-        Some((_, digest)) if !digest.is_empty() => format!("?net={digest}"),
-        _ => String::new(),
-    }
+/// `address` on `chain` (`<label>#<salt>`) as a `duck://` link, or "" when
+/// there is none to give: no chain known, or a tail its module refuses.
+fn minted(chain: &str, address: impl FnOnce(ChainId) -> Result<Address, Refused>) -> String {
+    chain
+        .parse()
+        .ok()
+        .and_then(|chain| address(chain).ok())
+        .map(|address| address.to_string())
+        .unwrap_or_default()
 }
 
 /// The address of a hit, handed to the kernel's ONE open door, which routes

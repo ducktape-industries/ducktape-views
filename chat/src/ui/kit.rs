@@ -5,7 +5,7 @@ use ducktape_view_guest::slots;
 /// The avatar plate beside an author's first message, and the gap to the
 /// text. A continuation row keeps the same rail so bodies line up.
 pub(super) const AVATAR: f32 = 28.;
-pub(super) const RAIL_GAP: f32 = 10.;
+pub(super) const RAIL_GAP: f32 = native::spacing::MD as f32;
 /// Where a message's text starts, from the row's left edge.
 pub(super) const RAIL: f32 = 16. + AVATAR + RAIL_GAP;
 
@@ -28,7 +28,10 @@ fn reaction_pill(
     // an emoji glyph stands taller than its point size: the host's button
     // clips its content to the line box, so the line box says how tall
     let mut parts = vec![native::nowrap(native::text_options(
-        native::text_size(native::text(format!("{key}/emoji"), emoji), 13.),
+        native::text_size(
+            native::text(format!("{key}/emoji"), emoji),
+            native::type_scale::BODY as f32,
+        ),
         wire::TextOptions {
             line_height: Some(wire::LineHeight::Absolute(PILL_HEIGHT)),
             ..Default::default()
@@ -48,7 +51,10 @@ fn reaction_pill(
     }
     let mut button = native::button_child(
         key.clone(),
-        native::spaced(native::centered_row(format!("{key}/label"), parts), 4.),
+        native::spaced(
+            native::centered_row(format!("{key}/label"), parts),
+            native::spacing::XXS as f32,
+        ),
         on_press,
         wire::ButtonPreset::Subtle,
     );
@@ -67,9 +73,9 @@ fn reaction_pill(
         *height = Some(wire::Length::Fixed(PILL_HEIGHT));
         *padding = Some(wire::Edges {
             top: 0.,
-            right: 8.,
+            right: native::spacing::SM as f32,
             bottom: 0.,
-            left: 6.,
+            left: native::spacing::XS as f32,
         });
     }
     let mut pill = native::container(format!("{key}/pill"), button);
@@ -116,7 +122,7 @@ fn reply_link(key: String, replies: i64, open: Message) -> wire::Node {
                 native::nowrap(native::caption(format!("{key}/hint"), "View thread ›")),
             ],
         ),
-        8.,
+        native::spacing::SM as f32,
     );
     let mut button = native::button_child(
         key.clone(),
@@ -132,12 +138,12 @@ fn reply_link(key: String, replies: i64, open: Message) -> wire::Node {
     } = &mut button
     {
         *label = Some("Open thread".into());
-        *height = Some(wire::Length::Fixed(26.));
+        *height = Some(wire::Length::Fixed(native::height::ROW as f32));
         *padding = Some(wire::Edges {
             top: 0.,
-            right: 10.,
+            right: native::spacing::MD as f32,
             bottom: 0.,
-            left: 10.,
+            left: native::spacing::MD as f32,
         });
     }
     // A row hugs the chip; a column would stretch it across the message.
@@ -180,7 +186,7 @@ impl ChatView {
                 Some(wire::Length::Fixed(4.)),
             )
         };
-        let contents = self.message_contents(format!("{key}/contents"), message, surface);
+        let contents = self.message_contents(format!("{key}/contents"), message, surface, plate);
         let mut row = native::row(format!("{key}/row"), [rail, contents]);
         if let wire::Node::Linear {
             spacing,
@@ -192,7 +198,11 @@ impl ChatView {
             *spacing = Some(RAIL_GAP);
             // a new author opens with air above; a continuation sits close
             *padding = Some(wire::Edges {
-                top: if message.show_author { 10. } else { 3. },
+                top: if message.show_author {
+                    native::spacing::MD as f32
+                } else {
+                    3.
+                },
                 right: 16.,
                 bottom: 3.,
                 left: 16.,
@@ -218,6 +228,7 @@ impl ChatView {
         key: String,
         message: &crate::host::ChatMessage,
         surface: CopySurface,
+        plate: RowPlate,
     ) -> wire::Node {
         use ducktape_view_guest::slots;
         let mut children = Vec::new();
@@ -244,11 +255,21 @@ impl ChatView {
             }
             children.push(native::spaced(
                 native::centered_row(format!("{key}/header"), header),
-                6.,
+                native::spacing::XS as f32,
             ));
         }
+        // Shift-pressing the body grows the copy range: the message is a
+        // row, selected while the range holds it.
         children.push(wire::Node::MouseArea {
             key: format!("{key}/select"),
+            role: Some(wire::Role::Row),
+            label: Some(format!(
+                "Select message, shows its actions: {}: {}",
+                message.author, message.body
+            )),
+            expanded: None,
+            selected: Some(plate != RowPlate::Plain),
+            checked: None,
             on_press: Some(slots::message(Message::PressMessage(message.seq, surface))),
             on_release: None,
             on_double_click: None,
@@ -299,7 +320,7 @@ impl ChatView {
                 Some(reaction.count),
                 label,
                 reaction.reacted_by_me,
-                (!self.active_channel_archived).then(|| slots::message(event)),
+                (!self.active_channel_archived && self.may_write()).then(|| slots::message(event)),
             ));
         }
         // a row of reactions ends with the way to add one more
@@ -320,11 +341,11 @@ impl ChatView {
                 None,
                 "Add reaction",
                 false,
-                (!self.active_channel_archived).then(|| slots::message(open)),
+                (!self.active_channel_archived && self.may_write()).then(|| slots::message(open)),
             ));
             children.push(native::spaced(
                 native::wrapped_row(format!("{key}/reactions"), reactions),
-                4.,
+                native::spacing::XXS as f32,
             ));
         }
         // in the timeline the count is the way into the thread; in the
@@ -351,7 +372,7 @@ impl ChatView {
                         ),
                     ],
                 ),
-                8.,
+                native::spacing::SM as f32,
             )),
         }
         if message.pending {
@@ -385,7 +406,10 @@ impl ChatView {
                     children.push(Self::plain_line(format!("{scope}/code"), &block.text, true));
                     let mut code = native::container(
                         scope.clone(),
-                        native::spaced(native::column(format!("{scope}/code-lines"), children), 4.),
+                        native::spaced(
+                            native::column(format!("{scope}/code-lines"), children),
+                            native::spacing::XXS as f32,
+                        ),
                     );
                     if let wire::Node::Container {
                         background,
@@ -400,7 +424,7 @@ impl ChatView {
                             width: Some(1.),
                             radius: Some([native::radius::CONTROL as f32; 4]),
                         });
-                        *padding = Some(wire::Edges::all(10.));
+                        *padding = Some(wire::Edges::all(native::spacing::MD as f32));
                     }
                     code
                 }
@@ -419,7 +443,7 @@ impl ChatView {
                             ],
                         );
                         if let wire::Node::Linear { spacing, .. } = &mut quote {
-                            *spacing = Some(10.);
+                            *spacing = Some(native::spacing::MD as f32);
                         }
                         quote
                     } else {
@@ -430,7 +454,7 @@ impl ChatView {
             };
             children.push(content);
         }
-        native::spaced(native::column(key, children), 6.)
+        native::spaced(native::column(key, children), native::spacing::XS as f32)
     }
     /// A file that came with the message: its name over what it is, in a
     /// bordered plate that opens it in Files. Slack's file card, one line.
@@ -514,7 +538,7 @@ impl ChatView {
                     ),
                 ],
             ),
-            10.,
+            native::spacing::MD as f32,
         );
         let action = Some(slots::message(Message::OpenAttachment(block.link.clone())));
         let mut card = native::button_child(
@@ -533,10 +557,10 @@ impl ChatView {
         {
             *label = Some(format!("Open {}", block.text));
             *padding = Some(wire::Edges {
-                top: 8.,
+                top: native::spacing::SM as f32,
                 right: 14.,
-                bottom: 8.,
-                left: 12.,
+                bottom: native::spacing::SM as f32,
+                left: native::spacing::LG as f32,
             });
             *width = Some(wire::Length::Shrink);
             style.active.background = Some(native::rgba(p.surface));
@@ -591,7 +615,7 @@ impl ChatView {
             for (content, link, weight, italic) in [
                 (
                     &part.mention,
-                    Some(&part.mention_link),
+                    Some(&part.mention_account),
                     wire::Weight::Medium,
                     false,
                 ),
@@ -731,7 +755,10 @@ impl ChatView {
         }
         children.extend([show, leave]);
         native::sized(
-            native::spaced(native::centered_row(&key, children), 6.),
+            native::spaced(
+                native::centered_row(&key, children),
+                native::spacing::XS as f32,
+            ),
             Some(wire::Length::Shrink),
             None,
         )
@@ -743,14 +770,23 @@ impl ChatView {
         join: impl Fn() -> Message + Clone + 'static,
     ) -> wire::Node {
         // one word in the header; the full name is what a reader hears
+        let allowed = self.may_write();
         let mut button = native::button(
             key,
             "Huddle",
-            Some(slots::message(join())),
+            allowed.then(|| slots::message(join())),
             wire::ButtonPreset::Subtle,
         );
-        if let wire::Node::Button { label, .. } = &mut button {
+        if let wire::Node::Button {
+            label, description, ..
+        } = &mut button
+        {
             *label = Some("Start a huddle".into());
+            if !allowed {
+                // pressing it only ever met the host's refusal; the step out
+                // of that is what the button says instead
+                *description = Some("Create an account to start a huddle".into());
+            }
         }
         button
     }
@@ -792,9 +828,22 @@ impl ChatView {
                         reopen,
                     ],
                 ),
-                12.,
+                native::spacing::LG as f32,
             ),
             Tone::Neutral,
+        )
+    }
+
+    /// What stands where the composer would for a key that holds no account:
+    /// the reason the host would give, before a press has to go and fetch it.
+    pub(super) fn account_notice(&self, key: String) -> wire::Node {
+        native::notice(
+            key.clone(),
+            native::wrapping(native::text(
+                format!("{key}/text"),
+                "To send messages, create or join an account in Settings → Account. You can read this channel without an account.",
+            )),
+            Tone::Warning,
         )
     }
 

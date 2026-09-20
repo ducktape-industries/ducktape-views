@@ -10,8 +10,8 @@ const PAGE_FOLD_SLOT: f32 = PAGE_TREE_STEP;
 /// The title's trailing pad: room for "…" and "+" to appear over it.
 const PAGE_ROW_ACTIONS_WIDTH: f32 = 52.;
 const PAGE_MENU_WIDTH: f64 = 200.;
-const PAGE_MENU_INSET: f32 = 6.;
-const PAGE_MENU_ITEM_HEIGHT: f32 = 28.;
+const PAGE_MENU_INSET: f32 = kit::spacing::XS as f32;
+const PAGE_MENU_ITEM_HEIGHT: f32 = kit::height::CONTROL as f32;
 /// The tallest a row menu grows before its list scrolls inside it.
 const PAGE_MENU_MAX_ROWS: usize = 12;
 /// A reply sits one avatar in from its opener.
@@ -88,7 +88,7 @@ impl PagesView {
                     };
                     *label = Some(format!("{verb} {title}"));
                 }
-                toggle
+                disclosure(toggle, !folded)
             }
             false => kit::space(Some(Length::Fixed(PAGE_FOLD_SLOT)), None),
         };
@@ -151,7 +151,7 @@ impl PagesView {
             background: None,
             border: None,
             tint: Some(wash),
-            radius: 4.,
+            radius: kit::radius::CONTROL as f32,
             open: menu_open,
             children: vec![
                 line,
@@ -160,6 +160,11 @@ impl PagesView {
         };
         let area = Node::MouseArea {
             key: format!("{key}/area"),
+            role: Some(wire::Role::Row),
+            label: Some(title.to_owned()),
+            expanded: (page.child_count > 0).then(|| !self.page_folded(page)),
+            selected: Some(selected),
+            checked: None,
             on_press: None,
             on_release: None,
             on_double_click: None,
@@ -245,6 +250,7 @@ impl PagesView {
             .find(|page| page.id == self.page_menu_page)?;
         let key = format!("{PAGE_KEY}/page/{}/menu", page.id);
         let available = !self.unavailable();
+        let link = crate::host::page_address(&page.id, &self.chain);
         let items = match self.page_menu_moving {
             true => self.page_move_items(page, &key, available),
             false => vec![
@@ -266,11 +272,8 @@ impl PagesView {
                     format!("{key}/link"),
                     "🔗",
                     "Copy link",
-                    Message::CopyToClipboard(
-                        crate::host::page_address(&page.id, &self.chain),
-                        "Page link".into(),
-                    ),
-                    false,
+                    Message::CopyToClipboard(link.clone(), "Page link".into()),
+                    link.is_empty(),
                 ),
                 menu_item(
                     format!("{key}/delete"),
@@ -308,8 +311,11 @@ impl PagesView {
             *max_height = Some(size.1 as f32);
         }
         let shade = if kit::is_dark() { 0.5 } else { 0.16 };
-        Some(Node::Float {
-            key,
+        // The box around the float, not the card inside it: the host lays a
+        // float out in the box it is handed and paints its surface across
+        // that box, so the modal hands it the card's own size.
+        let float = Node::Float {
+            key: key.clone(),
             x: x as f32,
             y: y as f32,
             scale: 1.,
@@ -319,9 +325,14 @@ impl PagesView {
                 y: Some(4.),
                 blur: Some(16.),
             },
-            radius: Some([8.; 4]),
+            radius: Some([kit::radius::CARD as f32; 4]),
             content: Box::new(card),
-        })
+        };
+        Some(kit::sized(
+            kit::container(format!("{key}/box"), float),
+            Some(Length::Fixed(size.0 as f32)),
+            Some(Length::Fixed(size.1 as f32)),
+        ))
     }
 
     fn search_result(&self, hit: &crate::host::PageSearchHit) -> Node {
@@ -345,7 +356,7 @@ impl PagesView {
                                 kit::badge(format!("{key}/kind"), &hit.kind, Tone::Neutral),
                             ],
                         ),
-                        6.,
+                        kit::spacing::XS as f32,
                     ),
                     kit::wrapping(kit::colored(
                         kit::text_size(
@@ -356,22 +367,23 @@ impl PagesView {
                     )),
                 ],
             ),
-            4.,
+            kit::spacing::XXS as f32,
         );
-        kit::padded(
-            kit::list_row(
-                key,
-                content,
-                false,
-                (!self.unavailable()).then(|| {
-                    slots::message(Message::OpenPageSearchHit(
-                        hit.page_id.clone(),
-                        hit.block_id.clone(),
-                    ))
-                }),
-            ),
-            wire::Edges::all(8.),
-        )
+        let mut row = kit::list_row(
+            key,
+            content,
+            false,
+            (!self.unavailable()).then(|| {
+                slots::message(Message::OpenPageSearchHit(
+                    hit.page_id.clone(),
+                    hit.block_id.clone(),
+                ))
+            }),
+        );
+        if let Node::Button { label, .. } = &mut row {
+            *label = Some(format!("{}: {}", hit.page_title, hit.text));
+        }
+        kit::padded(row, wire::Edges::all(kit::spacing::SM as f32))
     }
 
     /// One thread, Notion's card: the opener's line (avatar, name, the
@@ -427,19 +439,22 @@ impl PagesView {
         let toggle = crate::host::reply_toggle_label(thread, expanded);
         if !toggle.is_empty() {
             rows.push(kit::padded(
-                named(
-                    action(
-                        format!("{key}/replies"),
-                        toggle,
-                        Message::ToggleThreadReplies(thread.id.clone()),
-                        !disabled,
-                        ButtonPreset::Text,
+                disclosure(
+                    named(
+                        action(
+                            format!("{key}/replies"),
+                            toggle,
+                            Message::ToggleThreadReplies(thread.id.clone()),
+                            !disabled,
+                            ButtonPreset::Text,
+                        ),
+                        if expanded {
+                            "Fewer replies"
+                        } else {
+                            "Show every reply"
+                        },
                     ),
-                    if expanded {
-                        "Fewer replies"
-                    } else {
-                        "Show every reply"
-                    },
+                    expanded,
                 ),
                 wire::Edges {
                     top: 0.,
@@ -457,7 +472,7 @@ impl PagesView {
         }
         kit::card(
             key.clone(),
-            kit::spaced(kit::column(format!("{key}/body"), rows), 6.),
+            kit::spaced(kit::column(format!("{key}/body"), rows), kit::spacing::XS as f32),
         )
     }
 
@@ -493,7 +508,7 @@ impl PagesView {
                 ButtonPreset::Primary,
             ));
         }
-        kit::spaced(kit::centered_row(format!("{key}/compose"), row), 6.)
+        kit::spaced(kit::centered_row(format!("{key}/compose"), row), kit::spacing::XS as f32)
     }
 
     /// One comment: who, then the words — or, while it is the one being
@@ -532,7 +547,7 @@ impl PagesView {
         if let Some(trailing) = trailing {
             who.push(trailing);
         }
-        let head = kit::spaced(kit::centered_row(format!("{key}/head"), who), 8.);
+        let head = kit::spaced(kit::centered_row(format!("{key}/head"), who), kit::spacing::SM as f32);
         let editing = !id.is_empty() && self.comment_edit_id == id;
         let words = if editing {
             kit::spaced(
@@ -563,12 +578,12 @@ impl PagesView {
                         ),
                     ],
                 ),
-                6.,
+                kit::spacing::XS as f32,
             )
         } else {
             kit::wrapping(kit::text(format!("{key}/text"), text))
         };
-        let entry = kit::spaced(kit::column(format!("{key}/entry"), [head, words]), 4.);
+        let entry = kit::spaced(kit::column(format!("{key}/entry"), [head, words]), kit::spacing::XXS as f32);
         let deleted_or_editing = id.is_empty() || editing;
         if deleted_or_editing {
             return entry;
@@ -608,7 +623,7 @@ impl PagesView {
             *border = Some(wire::Border {
                 color: Some(kit::rgba(kit::palette().border)),
                 width: Some(1.),
-                radius: Some([6.; 4]),
+                radius: Some([kit::radius::CARD as f32; 4]),
             });
             *padding = Some(wire::Edges::all(2.));
         }
@@ -676,7 +691,7 @@ fn page_row_actions(key: String, actions: Node) -> Node {
         *height = Some(Length::Fill);
         *padding = Some(wire::Edges {
             top: HOVER_FLOAT_LIFT,
-            right: 4.,
+            right: kit::spacing::XXS as f32,
             bottom: 0.,
             left: 0.,
         });

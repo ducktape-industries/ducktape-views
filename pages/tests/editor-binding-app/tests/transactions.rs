@@ -22,6 +22,7 @@ impl Guest {
     fn boot() -> Self {
         boot_native();
         let root = tick_native(vec![]).root.expect("first tree");
+        assert_eq!(wire::accessibility_faults(&root), Vec::new());
         Self {
             root,
             text: "- 한글".into(),
@@ -36,6 +37,7 @@ impl Guest {
         } else if !frame.unchanged {
             wire::apply(&mut self.root, frame.patches.clone()).expect("valid tree patch");
         }
+        assert_eq!(wire::accessibility_faults(&self.root), Vec::new());
         frame
     }
     fn editor(

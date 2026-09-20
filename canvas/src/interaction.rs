@@ -489,10 +489,10 @@ impl BoardsView {
         Task::batch([save, action])
     }
     fn select_press(&mut self, point: [f32; 2]) -> Task<Message> {
+        self.forget_what_the_board_no_longer_has();
         let Some(board) = self.visible() else {
             return Task::none();
         };
-        self.selected.retain(|id| board.shapes.contains_key(id));
         // Handles sit outside a card: hit them before ordinary card selection.
         if let Some(id) = self.only_selected().cloned() {
             let shape = &board.shapes[&id].shape;
@@ -1425,7 +1425,7 @@ impl BoardsView {
                 return self.finish_text();
             }
             let inline = self.inline.take().expect("the editor is open");
-            self.error.clear();
+            self.say_nothing();
             // Words are the whole of a text shape, and these are not being
             // kept, so one that had none before goes back to not existing.
             let never_written =
@@ -1541,6 +1541,7 @@ impl BoardsView {
         if self.inline.is_some() {
             return Task::none();
         }
+        self.closed_inline = None;
         let text = record.shape.text.clone();
         self.gesture = Gesture::Idle;
         let mut document = Editor::new(text.clone());
@@ -1561,6 +1562,7 @@ impl BoardsView {
         self.inline = Some(Inline {
             id: id.clone(),
             original: text,
+            revision: record.revision,
             document,
             grown: None,
             wide: None,
@@ -1630,18 +1632,46 @@ impl BoardsView {
         &mut self,
         transaction: ducktape_view_guest::EditorTransaction<Message>,
     ) -> Task<Message> {
-        let Some(inline) = &mut self.inline else {
-            return Task::none();
-        };
-        transaction
-            .apply(&mut inline.document)
-            .map_or_else(Task::none, Task::done)
+        if let Some(inline) = &mut self.inline {
+            return transaction
+                .apply(&mut inline.document)
+                .map_or_else(Task::none, Task::done);
+        }
+        if let Some(inline) = &mut self.closed_inline {
+            let _ = transaction.apply(&mut inline.document);
+            let text = inline.document.text();
+            if self.lost.is_none()
+                && self.current.is_empty()
+                && !self.error.is_empty()
+                && !text.trim().is_empty()
+            {
+                let middle = self.world([self.viewport[0] / 2., self.viewport[1] / 2.]);
+                self.lost = Some(Shape {
+                    text: text.clone(),
+                    ..self.creation_shape(Kind::Note, middle, middle)
+                });
+            }
+            if let Some(lost) = &mut self.lost {
+                lost.text = text;
+                self.error = match quoted(&lost.text) {
+                    Some(words) => format!(
+                        "Somebody else removed this board, so what you wrote was not saved — {words}."
+                    ),
+                    None => {
+                        "Somebody else removed this board, so that change was not saved.".into()
+                    }
+                };
+            }
+        }
+        Task::none()
     }
     pub(super) fn on_text_document(
         &mut self,
         document: ducktape_view_guest::EditorDocumentUpdate,
     ) -> Task<Message> {
         if let Some(inline) = &mut self.inline {
+            document.apply(&mut inline.document);
+        } else if let Some(inline) = &mut self.closed_inline {
             document.apply(&mut inline.document);
         }
         Task::none()
@@ -1681,14 +1711,21 @@ impl BoardsView {
             self.inline = Some(inline);
             return Task::none();
         }
-        // What the card says on the board NOW, which need not be what this
-        // editor opened on: anybody else can have finished their own sitting in
-        // it while ours stood open, and a card gone from under us is nobody's
-        // words to keep.
-        let standing = board
+        // The card on the board NOW, which need not be what this editor opened
+        // on: anybody else can have finished their own sitting in it while ours
+        // stood open, and a card gone from under us is nobody's words to keep.
+        let record = board
             .as_ref()
-            .and_then(|board| board.shapes.get(&inline.id))
-            .map_or_else(|| inline.original.clone(), |r| r.shape.text.clone());
+            .and_then(|board| board.shapes.get(&inline.id));
+        let standing = record.map_or_else(|| inline.original.clone(), |r| r.shape.text.clone());
+        // The revision those standing words are at, which is the one this save
+        // writes over. Read here and not carried from the opening, because a
+        // card can take a revision without taking a word — somebody recolouring
+        // it does that — and the baseline is about the WORDS. With the card off
+        // the board there is nothing to read it from, so the revision this
+        // writer did open on stands: the module answers `TARGET_GONE` to
+        // that, which is the honest answer and not a revision we invented.
+        let revision = record.map_or(inline.revision, |r| r.revision);
         // Saving writes the card's WHOLE text, so those words go with no trace
         // and no undo of ours standing behind them — they are not ours to undo.
         // Refuse the first close and quote what is there. Taking it as the new
@@ -1697,13 +1734,9 @@ impl BoardsView {
         // from being shut inside a card that answers nothing.
         let erases_their_words = changed && standing != inline.original && standing != text;
         if erases_their_words {
-            self.error = format!(
-                "Somebody else changed this card while you had it open — {}. Close it again to \
-                 replace their words with yours.",
-                now_reading(&standing)
-            );
             inline.original = standing;
-            self.inline = Some(inline);
+            inline.revision = revision;
+            self.read_this_first(inline);
             return Task::none();
         }
         // Words are the whole of a text shape. One left with none is an empty
@@ -1724,10 +1757,30 @@ impl BoardsView {
             changes.push(Change::Text {
                 id: inline.id,
                 text,
+                base_revision: revision,
             });
         }
         changes.extend(grow);
         Task::batch([self.edit_many(changes), self.hand_back_focus()])
+    }
+    /// The card put back in front of the writer with their draft still in it,
+    /// and the words they were about to replace quoted beside it.
+    ///
+    /// Taking `theirs` as the new baseline — the words AND the revision they
+    /// are at — is what makes the next close the writer saying they have read
+    /// them and mean to replace them anyway, and is also what keeps them from
+    /// being shut inside a card that answers nothing.
+    ///
+    /// Two clashes end here: one this view could already see when the editor
+    /// closed, and one only the module could see, a round trip later. They are
+    /// the same clash and the writer is owed the same answer to both.
+    pub(super) fn read_this_first(&mut self, inline: Inline) {
+        self.error = format!(
+            "Somebody else changed this card while you had it open — {}. Close it again to \
+             replace their words with yours.",
+            now_reading(&inline.original)
+        );
+        self.inline = Some(inline);
     }
     /// ⌘Enter out of a sticky: finish it and open the next one.
     ///
@@ -2024,7 +2077,7 @@ impl BoardsView {
             return Task::none();
         };
         let before = self.pending.len();
-        let task = self.enqueue_many(history.undo.clone());
+        let task = self.enqueue_many(self.replayed(&history.undo));
         if self.pending.len() > before {
             self.undo.pop();
             self.redo.push(history);
@@ -2039,7 +2092,7 @@ impl BoardsView {
             return Task::none();
         };
         let before = self.pending.len();
-        let task = self.enqueue_many(history.redo.clone());
+        let task = self.enqueue_many(self.replayed(&history.redo));
         if self.pending.len() > before {
             self.redo.pop();
             self.undo.push(history);
@@ -2629,21 +2682,25 @@ pub(super) fn plate(run: &[[f32; 2]]) -> [f32; 4] {
         middle[1] + reach[1],
     ]
 }
-/// What a card says now, short enough to read in a banner. The card itself is
-/// behind the editor and cannot be read around it, so the banner is the only
-/// place the writer can see the words they are about to replace.
-fn now_reading(text: &str) -> String {
+/// A card's words, short enough to read in a banner, or nothing when it has
+/// none. The card is behind the editor, or off the board altogether, so the
+/// banner is the only place its words can be seen.
+pub(super) fn quoted(text: &str) -> Option<String> {
     // Long enough for a sticky's first line, short enough not to bury the
     // sentence that says what to do about it.
     const ROOM: usize = 80;
     if text.trim().is_empty() {
-        return "it is empty now".to_owned();
+        return None;
     }
-    let mut shown: String = text.chars().take(ROOM).collect();
-    if text.chars().nth(ROOM).is_some() {
-        shown.push('…');
+    let shown = ducktape_view_guest::kit::ellipsize(text, ROOM);
+    Some(format!("“{shown}”"))
+}
+/// What a card says now, for the writer about to replace it.
+fn now_reading(text: &str) -> String {
+    match quoted(text) {
+        Some(words) => format!("it now reads {words}"),
+        None => "it is empty now".to_owned(),
     }
-    format!("it now reads “{shown}”")
 }
 /// Which end of the stack a single step travels towards.
 #[derive(Clone, Copy, PartialEq, Eq)]

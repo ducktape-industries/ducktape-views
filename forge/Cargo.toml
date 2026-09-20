@@ -18,6 +18,7 @@ serde_json.workspace = true
 ducktape-view-guest.workspace = true
 ducktape-view-composer.workspace = true
 base64.workspace = true
+duck-address = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "duck-address" }
 
 [dev-dependencies]
 # the snapshot tag is a digest of this view's own state layout; the tracer

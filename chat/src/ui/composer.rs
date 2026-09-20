@@ -25,7 +25,7 @@ impl ChatView {
     pub(crate) fn composer_drops(&self) -> ducktape_view_guest::Subscription<Message> {
         use futures::StreamExt;
         let accepts_files =
-            self.connected && !self.active_channel.is_empty() && self.post_refusal.is_empty();
+            self.connected && !self.active_channel.is_empty() && self.write_refusal().is_empty();
         if !accepts_files {
             return ducktape_view_guest::Subscription::none();
         }
@@ -65,18 +65,31 @@ impl ChatView {
     ) -> wire::Node {
         let draft = self.composers.get(&scope).cloned().unwrap_or_default();
         let choices = crate::host::composer_choices(&self.channel_members);
+        // The scope is the draft's identity — one per room, per thread, per
+        // message being edited — so it is also the editor document's. The node
+        // key is the place on screen, and that place shows a different draft
+        // every time the reader moves.
+        let document = scope.clone();
         let route = Route {
             scope,
             key: key.clone(),
             target,
             connection: self.connection_serial,
         };
-        composer::view(&draft, &key, hint, editable, &choices, move |event| {
-            Message::Composer(Box::new(ComposerMessage::Editor(
-                route.clone(),
-                Box::new(event),
-            )))
-        })
+        composer::view(
+            &draft,
+            &key,
+            &document,
+            hint,
+            editable,
+            &choices,
+            move |event| {
+                Message::Composer(Box::new(ComposerMessage::Editor(
+                    route.clone(),
+                    Box::new(event),
+                )))
+            },
+        )
     }
     pub(crate) fn on_composer(&mut self, message: ComposerMessage) -> Task<Message> {
         match message {
@@ -275,9 +288,10 @@ impl ChatView {
             });
             let route = route.clone();
             let upload_token = file.token.clone();
+            let chain = self.network_chain_id.clone();
             let (task, handle) = Task::future(async move {
                 let token = file.token.clone();
-                let result = host::upload(file).await.map_err(host::said);
+                let result = host::upload(file, chain).await.map_err(host::said);
                 Message::Composer(Box::new(ComposerMessage::Uploaded(route, token, result)))
             })
             .abortable();

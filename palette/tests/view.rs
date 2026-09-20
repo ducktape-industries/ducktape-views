@@ -6,8 +6,17 @@
 
 use ducktape_view_guest::testing::{answer, has_text, item, press, texts, type_into};
 use ducktape_view_guest::wire::{Frame, Request};
+use palette_view::boot_native;
 use palette_view::host::{CHORD, Session};
-use palette_view::{boot_native, tick_native};
+
+/// Every frame a test renders is one assistive technology can name.
+fn tick_native(events: Vec<ducktape_view_guest::wire::Event>) -> ducktape_view_guest::wire::Frame {
+    let frame = palette_view::tick_native(events);
+    if let Some(root) = &frame.root {
+        assert_eq!(ducktape_view_guest::wire::accessibility_faults(root), []);
+    }
+    frame
+}
 
 fn request<'a>(frame: &'a Frame, kind: &str) -> &'a Request {
     frame
@@ -115,7 +124,10 @@ fn the_chord_opens_it_a_query_finds_and_a_hit_leaves_as_one_open_link() {
         "ship"
     );
     let frame = tick_native(vec![
-        answer(view_asking(&frame, "chat", "search").id, CHAT_HITS.as_bytes()),
+        answer(
+            view_asking(&frame, "chat", "search").id,
+            CHAT_HITS.as_bytes(),
+        ),
         answer(
             view_asking(&frame, "pages", "search").id,
             PAGE_HITS.as_bytes(),
@@ -137,7 +149,7 @@ fn the_chord_opens_it_a_query_finds_and_a_hit_leaves_as_one_open_link() {
     let frame = tick_native(press(&frame, "palette/chat/general/42/press"));
     assert_eq!(
         payload(request(&frame, "host.open_link"))["link"],
-        "duck://channel/general?net=a1b2c3d4#42"
+        "duck://dev-a1b2c3d4/chat/general/42"
     );
     // What it was opened to find has been found: the palette gets out of the
     // way, and an empty tree is what tells the app there is no overlay.
@@ -151,7 +163,10 @@ fn a_page_hit_leaves_at_its_block() {
     let frame = tick_native(type_into(&frame, "palette/input", "ship"));
     let frame = tick_native(vec![item(request(&frame, "clock.ticks").id, b"")]);
     let frame = tick_native(vec![
-        answer(view_asking(&frame, "chat", "search").id, CHAT_HITS.as_bytes()),
+        answer(
+            view_asking(&frame, "chat", "search").id,
+            CHAT_HITS.as_bytes(),
+        ),
         answer(
             view_asking(&frame, "pages", "search").id,
             PAGE_HITS.as_bytes(),
@@ -164,7 +179,7 @@ fn a_page_hit_leaves_at_its_block() {
     let frame = tick_native(press(&frame, "palette/page/p-1/b-9/press"));
     assert_eq!(
         payload(request(&frame, "host.open_link"))["link"],
-        "duck://page/p-1?net=a1b2c3d4#b-9"
+        "duck://dev-a1b2c3d4/pages/p-1/block/b-9"
     );
 }
 
@@ -244,7 +259,10 @@ fn one_lane_refusing_still_answers_and_both_refusing_says_so() {
     let frame = tick_native(type_into(&frame, "palette/input", "ship"));
     let frame = tick_native(vec![item(request(&frame, "clock.ticks").id, b"")]);
     let frame = tick_native(vec![
-        answer(view_asking(&frame, "chat", "search").id, CHAT_HITS.as_bytes()),
+        answer(
+            view_asking(&frame, "chat", "search").id,
+            CHAT_HITS.as_bytes(),
+        ),
         ducktape_view_guest::wire::Event::Response {
             id: view_asking(&frame, "pages", "search").id,
             result: Err(ducktape_view_guest::wire::Refusal::new(
@@ -259,4 +277,93 @@ fn one_lane_refusing_still_answers_and_both_refusing_says_so() {
         !has_text(&frame, "Search did not reach the node. Retry in a moment."),
         "one lane refusing was reported as a dead search"
     );
+}
+
+/// The card fills a window narrower than it and stops at its width in a
+/// wider one; a search that failed is a danger notice, and one that found
+/// nothing is the kit's empty state — never a bare line.
+#[test]
+fn the_card_gives_way_to_a_narrow_window_and_its_states_are_the_kits() {
+    use ducktape_view_guest::testing::find;
+    use ducktape_view_guest::wire::{Length, Node};
+
+    let Seat { chord, .. } = seated();
+    let frame = tick_native(vec![item(chord, b"")]);
+    let Some(Node::Container {
+        width, max_width, ..
+    }) = find(&frame, "palette/card")
+    else {
+        panic!("no card");
+    };
+    assert_eq!((*width, *max_width), (Some(Length::Fill), Some(560.)));
+
+    let frame = tick_native(type_into(&frame, "palette/input", "ship"));
+    let frame = tick_native(vec![item(request(&frame, "clock.ticks").id, b"")]);
+    let refused = |id| ducktape_view_guest::wire::Event::Response {
+        id,
+        result: Err(ducktape_view_guest::wire::Refusal::new("module", "down")),
+        done: true,
+    };
+    let failed = tick_native(vec![
+        refused(view_asking(&frame, "chat", "search").id),
+        refused(view_asking(&frame, "pages", "search").id),
+    ]);
+    assert!(
+        matches!(find(&failed, "palette/error"), Some(Node::Container { .. })),
+        "{:?}",
+        texts(&failed)
+    );
+
+    let frame = tick_native(type_into(&failed, "palette/input", "nothing"));
+    let frame = tick_native(vec![item(request(&frame, "clock.ticks").id, b"")]);
+    let empty = tick_native(vec![
+        answer(view_asking(&frame, "chat", "search").id, br#"{"hits":[]}"#),
+        answer(view_asking(&frame, "pages", "search").id, br#"{"hits":[]}"#),
+    ]);
+    assert!(has_text(&empty, "Nothing matched"), "{:?}", texts(&empty));
+}
+
+#[test]
+fn the_open_palette_is_one_named_dialog_with_a_named_way_out() {
+    use ducktape_view_guest::wire::Node;
+
+    /// Every `Overlay` in the tree, however deep.
+    fn overlays<'a>(node: &'a Node, found: &mut Vec<&'a Node>) {
+        if matches!(node, Node::Overlay { .. }) {
+            found.push(node);
+        }
+        for child in node.children() {
+            overlays(child, found);
+        }
+    }
+
+    fn named(node: &Node, name: &str) -> bool {
+        matches!(node, Node::Button { label: Some(label), .. } if label == name)
+            || node.children().iter().any(|child| named(child, name))
+    }
+
+    let Seat { chord, .. } = seated();
+    let frame = tick_native(vec![item(chord, b"")]);
+    let root = frame.root.as_ref().expect("an open palette draws");
+
+    // ONE DIALOG, NAMED, WITH A DOOR. The host closes overlays on Escape
+    // through `on_dismiss`; a stack of a scrim and a card had neither the
+    // role nor the door, so the chord was the only way back out.
+    let mut found = Vec::new();
+    overlays(root, &mut found);
+    assert_eq!(found.len(), 1, "{found:?}");
+    let Node::Overlay {
+        label, on_dismiss, ..
+    } = found[0]
+    else {
+        unreachable!("overlay")
+    };
+    assert_eq!(label.as_deref(), Some("Command palette"));
+    assert!(on_dismiss.is_some(), "no way out on Escape");
+
+    // and the same door a pointer can find: pressing it shuts the palette
+    // back down to the empty tree a closed one costs.
+    assert!(named(root, "Close"), "{:?}", texts(&frame));
+    let shut = tick_native(press(&frame, "palette/close"));
+    assert!(texts(&shut).is_empty(), "{:?}", texts(&shut));
 }

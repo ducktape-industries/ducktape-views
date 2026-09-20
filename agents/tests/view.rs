@@ -4,13 +4,22 @@
 //! `rpc.live` hit, and a pause or a save leaves as `op.submit`. Only the
 //! navigation intents still leave as notifications.
 
+use agents_view::boot_native;
 use agents_view::host::Session;
-use agents_view::{boot_native, tick_native};
 use ducktape_view_guest::testing::{
     answer, has_text, item, pick, press, refuse, texts, toggle, type_into,
 };
 use ducktape_view_guest::wire::{Event, Frame, Node, Request};
 use serde_json::{Value, json};
+
+/// Every frame a test renders is one assistive technology can name.
+fn tick_native(events: Vec<ducktape_view_guest::wire::Event>) -> ducktape_view_guest::wire::Frame {
+    let frame = agents_view::tick_native(events);
+    if let Some(root) = &frame.root {
+        assert_eq!(ducktape_view_guest::wire::accessibility_faults(root), []);
+    }
+    frame
+}
 
 /// Inputs are found by placeholder and pick lists by key.
 const AGENT_ID_HINT: &str = "a-dns-label, e.g. chiefduck";
@@ -393,6 +402,26 @@ fn a_reader_who_is_not_the_controller_gets_the_record_read_only() {
     assert!(frame.requests.is_empty(), "{:?}", frame.requests);
 }
 
+/// A reader cannot save the record, so nothing on it takes typing: the
+/// display name is text, not a field, and the title is the STORED name. A
+/// title that followed a draft nobody can save named an agent that does not
+/// exist, while the list and the notice still said the stored one.
+#[test]
+fn a_read_only_record_takes_no_typing_and_keeps_its_stored_title() {
+    let (frame, _) = registered("9");
+    let frame = tick_native(press(&frame, "Reviewer Bot"));
+    let find = ducktape_view_guest::testing::find;
+    assert!(
+        !matches!(find(&frame, "agents/name"), Some(Node::Input { .. })),
+        "a record the reader may only read offers its name for typing"
+    );
+    assert!(matches!(
+        find(&frame, "agents/editor-title"),
+        Some(Node::Text { content, .. }) if content == "Reviewer Bot"
+    ));
+    assert!(has_text(&frame, "Reviewer Bot"));
+}
+
 #[test]
 fn the_controller_pauses_a_record_with_a_signed_op() {
     let (frame, _) = registered("7");
@@ -445,7 +474,8 @@ fn a_new_agent_registers_from_the_form_once_its_id_is_a_label() {
     );
     let frame = tick_native(vec![answer(
         program.id,
-        &serde_json::to_vec(&json!({"model_program":runs_wire::model_program("chiefduck")})).unwrap(),
+        &serde_json::to_vec(&json!({"model_program":runs_wire::model_program("chiefduck")}))
+            .unwrap(),
     )]);
     let provision = request(&frame, "op.submit");
     let payload: Value = serde_json::from_slice(&provision.payload).unwrap();
@@ -655,7 +685,7 @@ fn the_open_run_draws_its_places_as_chips() {
     let opened = tick_native(press(&frame, "Open in chat"));
     assert_eq!(
         opened_link(&opened),
-        "duck://channel/general?net=a1b2c3d4#9"
+        "duck://duck-1-a1b2c3d4/chat/general/9"
     );
     let frame = tick_native(press(&opened, "Hide message"));
     assert!(
@@ -676,7 +706,7 @@ fn the_open_run_draws_its_places_as_chips() {
     // the chain's digest, never its whole id
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&intent.payload).expect("decodes")["link"],
-        "duck://page/p-9?net=a1b2c3d4"
+        "duck://duck-1-a1b2c3d4/pages/p-9"
     );
 }
 
@@ -782,6 +812,64 @@ fn the_agent_editor_width_is_the_readers_and_its_edge_has_a_resize_cursor() {
         dy: 0.0,
     }]);
     assert_eq!(width(&frame), 470.0);
+}
+
+/// In a narrow pane a list and its rail cannot sit side by side (the editor
+/// keeps 320, the run list 200): the rail stacks under the list with no
+/// width to drag, and the toolbar's summary takes the bar's rest and
+/// truncates instead of pushing New agent off it. A wide pane keeps the
+/// split.
+#[test]
+fn a_narrow_pane_stacks_each_rail_under_its_list() {
+    use ducktape_view_guest::testing::{find, measure};
+    use ducktape_view_guest::wire::{Axis, Length};
+
+    let axis = |frame: &Frame, key: &str| match find(frame, key) {
+        Some(Node::Linear { axis, .. }) => *axis,
+        other => panic!("{key}: {other:?}"),
+    };
+    let (frame, _) = registered("7");
+    let frame = tick_native(press(&frame, "Reviewer Bot"));
+    let narrow = tick_native(measure(&frame, "agents/viewport", 360., 700.));
+    assert_eq!(axis(&narrow, "agents/registry-panes"), Axis::Column);
+    assert!(find(&narrow, "agents/editor-resize").is_none());
+    let Some(Node::Container { width, .. }) = find(&narrow, "agents/editor") else {
+        panic!("no editor");
+    };
+    assert_eq!(*width, Some(Length::Fill));
+    let Some(Node::Text { width, .. }) = find(&narrow, "agents/summary") else {
+        panic!("no summary: {:?}", texts(&narrow));
+    };
+    assert_eq!(*width, Some(Length::Fill), "the summary truncates");
+    let wide = tick_native(measure(&narrow, "agents/viewport", 1280., 700.));
+    assert_eq!(axis(&wide, "agents/registry-panes"), Axis::Row);
+    assert!(find(&wide, "agents/editor-resize").is_some());
+
+    let (runs, _) = connect(booted(), "7", "dispatch-gone", 1);
+    let narrow = tick_native(measure(&runs, "agents/viewport", 360., 700.));
+    assert_eq!(axis(&narrow, "agents/run-panes"), Axis::Column);
+    assert!(find(&narrow, "agents/run-list-resize").is_none());
+    let wide = tick_native(measure(&narrow, "agents/viewport", 1280., 700.));
+    assert_eq!(axis(&wide, "agents/run-panes"), Axis::Row);
+}
+
+/// A Fill space in a wrapping row takes a line of its own: the open run's
+/// standing row carries none, so it adds no blank line.
+#[test]
+fn the_run_standing_row_carries_no_filler_line() {
+    use ducktape_view_guest::testing::find;
+
+    let (frame, _) = connect(booted(), "7", "dispatch-gone", 1);
+    let Some(Node::Linear { children, wrap, .. }) = find(&frame, "agents/journal-standing") else {
+        panic!("no standing row: {:?}", texts(&frame));
+    };
+    assert!(wrap.is_some());
+    assert!(
+        !children
+            .iter()
+            .any(|child| matches!(child, Node::Space { .. })),
+        "{children:?}"
+    );
 }
 
 /// THE RUN AS IT RUNS. The open run's progress is the node's own output
@@ -1122,12 +1210,15 @@ fn stream_errors_show_outside_the_disclosure_and_reconnect_the_same_run() {
     let frame = tick_native(vec![Event::Response {
         id: stream.id,
         result: Err(ducktape_view_guest::wire::Refusal::new(
-            "unauthorized",
-            "HTTP error: 403 Forbidden",
+            "stream_open_failed",
+            "could not open the node stream: connection reset",
         )),
         done: true,
     }]);
-    assert!(has_text(&frame, "HTTP error: 403 Forbidden"));
+    assert!(has_text(
+        &frame,
+        "could not open the node stream: connection reset"
+    ));
     assert!(!has_text(
         &frame,
         "No process details are available from this node. Older output may have expired."
@@ -1150,12 +1241,69 @@ fn stream_errors_show_outside_the_disclosure_and_reconnect_the_same_run() {
         .to_string()
         .as_bytes(),
     )]);
-    assert!(!has_text(&frame, "HTTP error: 403 Forbidden"));
+    assert!(!has_text(
+        &frame,
+        "could not open the node stream: connection reset"
+    ));
     let frame = tick_native(press(&frame, "Trace"));
     assert!(has_text(
         &frame,
         "Connected to the session. Waiting for its first process details…"
     ));
+}
+
+/// A run this key may not watch is a state of the reader, not a broken
+/// connection: no Reconnect changes who is asking. Both ways the node says so
+/// arrive here — a topic refused in band with the stream's `forbidden` code,
+/// then the close; or the upgrade itself refused, which the kernel classes
+/// `unauthorized`. The panel says the output is not this reader's, gives the
+/// node's own sentence for who may watch, offers no Reconnect, and the
+/// conversation does not claim there is no reply: it is in that output.
+#[test]
+fn a_run_this_key_may_not_watch_reads_as_a_state_and_offers_no_reconnect() {
+    let sentence = "run output requires the workspace token, the requester, or its program \
+                    controller — open `/v1/ws?run=<dispatch>` signed by an authorized key";
+    let in_band = |id: u64| {
+        vec![
+            item(
+                id,
+                json!({"type":"error","topic":"run-output:dispatch-foreign",
+                       "code":"forbidden","detail":sentence})
+                .to_string()
+                .as_bytes(),
+            ),
+            Event::Response {
+                id,
+                result: Ok(Vec::new()),
+                done: true,
+            },
+        ]
+    };
+    let at_upgrade = |id: u64| {
+        vec![Event::Response {
+            id,
+            result: Err(ducktape_view_guest::wire::Refusal::new(
+                "unauthorized",
+                sentence,
+            )),
+            done: true,
+        }]
+    };
+    for refusal in [&in_band as &dyn Fn(u64) -> Vec<Event>, &at_upgrade] {
+        let (_, left) = connect(booted(), "7", "dispatch-foreign", 1);
+        let stream = left
+            .iter()
+            .find(|request| request.kind == "rpc.stream")
+            .unwrap();
+        let frame = tick_native(refusal(stream.id));
+        assert!(has_text(&frame, "You cannot watch this run's output"));
+        assert!(has_text(&frame, sentence), "{:?}", texts(&frame));
+        assert!(
+            ducktape_view_guest::testing::find(&frame, "agents/output-retry").is_none(),
+            "a Reconnect here can only draw the same refusal"
+        );
+        assert!(!has_text(&frame, "No reply is available for this run."));
+    }
 }
 
 fn begin_registration() -> (Frame, u64) {
@@ -1170,7 +1318,8 @@ fn begin_registration() -> (Frame, u64) {
     let program = request(&frame, "rpc.query").id;
     let frame = tick_native(vec![answer(
         program,
-        &serde_json::to_vec(&json!({"model_program":runs_wire::model_program("new-agent")})).unwrap(),
+        &serde_json::to_vec(&json!({"model_program":runs_wire::model_program("new-agent")}))
+            .unwrap(),
     )]);
     (frame, props)
 }

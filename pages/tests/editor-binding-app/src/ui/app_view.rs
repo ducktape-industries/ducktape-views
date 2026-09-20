@@ -16,6 +16,7 @@ impl PagesEditorFixture {
         let mut children = vec![wire::Node::Editor {
             key: "PagesEditorFixture/document".into(),
             placeholder: String::new(),
+            label: Some("Document".into()),
             document,
             on_document,
             editable: true,

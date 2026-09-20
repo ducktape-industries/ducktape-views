@@ -3,7 +3,7 @@
 //! wasm component the desktop app loads from a file.
 //!
 //! The kernel pushes session facts only (`node.props`: connected, dark, the
-//! app's connection reading, the daemon's workspace directory and the wall
+//! app's connection reading, the local app data directory and the wall
 //! clock). This node's STANDING is not among them — the view folds it off
 //! `rpc.status` and the valset, so the badge and the gate that reads it
 //! move together. The node's own facts,
@@ -68,7 +68,7 @@ pub enum Message {
 impl NodeView {
     /// This state's layout, digested — `snapshot_schema` holds it here.
     const SNAPSHOT_SCHEMA: &'static str =
-        "a3c71212f7dd37b4968727ff2aa8999979360e8d6a5c0ee634db40e8823988eb";
+        "dce4ba365c9422236d46621a8e925a331c4d530be55d2a3fb1c34f6ede1d1afd";
     fn state() -> Self {
         Self {
             node_data_dir: "".to_owned(),
@@ -257,7 +257,7 @@ impl NodeView {
     }
     fn on_logs_arrived(&mut self, item: crate::host::LogItem) -> Task<Message> {
         self.host_error = item.error;
-        self.log_lines = host::push_logs(&self.log_lines, &item.lines);
+        host::push_logs(&mut self.log_lines, item.lines);
         Task::none()
     }
     /// The node's answer to a retune lands beside the control that asked,

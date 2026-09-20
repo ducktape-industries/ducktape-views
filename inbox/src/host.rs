@@ -23,8 +23,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
+use duck_address::chat::MessageAddress;
+use duck_address::forge::{ForgeLocator, ForgeRepoAddress, ForgeTarget};
+use duck_address::runs::RunAddress;
+use duck_address::{Address, ChainId, Refused};
 use ducktape_view_guest::host;
 use futures::{Stream, StreamExt, stream};
+use pages_wire::PageAddress;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
@@ -172,16 +177,18 @@ fn live(plane: &'static [u8]) -> impl Stream<Item = host::Answer> {
 }
 
 /// One reading of the queue, then again on every hit of its plane.
-pub fn inbox(connection: i64, account: String, chain: String) -> ducktape_view_guest::Subscription<InboxItem> {
+pub fn inbox(
+    connection: i64,
+    account: String,
+    chain: String,
+) -> ducktape_view_guest::Subscription<InboxItem> {
     ducktape_view_guest::Subscription::run_with((connection, account, chain), |key| {
         let (_, account, chain) = key.clone();
         let again = (account.clone(), chain.clone());
-        stream::once(read(account, chain)).chain(
-            live(INBOX_PLANE).then(move |_| {
-                let (account, chain) = again.clone();
-                read(account, chain)
-            }),
-        )
+        stream::once(read(account, chain)).chain(live(INBOX_PLANE).then(move |_| {
+            let (account, chain) = again.clone();
+            read(account, chain)
+        }))
     })
 }
 
@@ -439,7 +446,7 @@ impl Directory {
                 .get(key)
                 .filter(|name| !name.is_empty())
                 .cloned()
-                .unwrap_or_else(|| short_label(key)),
+                .unwrap_or_else(|| ducktape_view_guest::kit::short_id(key, 8)),
             Some(("module", module)) => capitalized(module),
             _ => "System".to_owned(),
         }
@@ -586,9 +593,7 @@ async fn chat_message(object: &str, row: &mut Row, chain: &str) -> Result<(), St
     if row.detail.is_empty() {
         row.detail = "Message attachment".into();
     }
-    let seq = message["seq"]
-        .as_i64()
-        .ok_or("message sequence overflow")?;
+    let seq = message["seq"].as_i64().ok_or("message sequence overflow")?;
     row.link = channel_message_link(&text_at(message, "channel_id"), seq, chain);
     Ok(())
 }
@@ -625,7 +630,11 @@ async fn page_block(block_id: &str, row: &mut Row, chain: &str) -> Result<(), St
 
 /// One block off pages' view lane; `None` for an id the index does not hold.
 async fn page_block_row(block_id: &str) -> Result<Option<serde_json::Value>, String> {
-    let reply = view("pages", serde_json::json!({"get_block":{"block_id":block_id}})).await?;
+    let reply = view(
+        "pages",
+        serde_json::json!({"get_block":{"block_id":block_id}}),
+    )
+    .await?;
     let block = reply.get("block").ok_or("wrong page block reply")?;
     Ok(match block.is_null() {
         true => None,
@@ -721,7 +730,11 @@ async fn forge_repo(kind: &str, object: &str, row: &mut Row, chain: &str) -> Res
 }
 
 async fn task(object: &str, row: &mut Row) -> Result<(), String> {
-    let reply = query("tasks", serde_json::json!({"task":{"get":{"task_id":object}}})).await?;
+    let reply = query(
+        "tasks",
+        serde_json::json!({"task":{"get":{"task_id":object}}}),
+    )
+    .await?;
     let task = reply["task"].get("task").ok_or("wrong task reply")?;
     if task.is_null() {
         row.detail = "Task not found".into();
@@ -744,7 +757,11 @@ async fn task(object: &str, row: &mut Row) -> Result<(), String> {
 }
 
 async fn job(job_id: &str, row: &mut Row) -> Result<(), String> {
-    let reply = query("tasks", serde_json::json!({"job":{"get":{"job_id":job_id}}})).await?;
+    let reply = query(
+        "tasks",
+        serde_json::json!({"job":{"get":{"job_id":job_id}}}),
+    )
+    .await?;
     let job = reply["job"].get("job").ok_or("wrong job reply")?;
     if job.is_null() {
         row.detail = "Job not found".into();
@@ -786,7 +803,8 @@ async fn job_event(item: &Item, object: &str, row: &mut Row) -> Result<(), Strin
     let matches_source = source["module"].as_str() == Some("tasks")
         && source["kind"].as_str() == Some("job_event")
         && source["object"].as_str() == Some(object);
-    let matches_sequence = record["at"].as_u64() == Some(seq) && change["seq"].as_u64() == Some(seq);
+    let matches_sequence =
+        record["at"].as_u64() == Some(seq) && change["seq"].as_u64() == Some(seq);
     if !matches_source || !matches_sequence {
         return Err("wrong change".into());
     }
@@ -840,47 +858,78 @@ pub async fn mark_read(account: String, up_to_seq: i64) -> Result<(), String> {
         "target": "inbox",
         "payload": {"mark_read": {"account": number, "up_to_seq": up_to_seq}},
     });
-    host::request("op.submit", &serde_json::to_vec(&op).expect("the op encodes"))
-        .await
-        .map(|_reply| ())
-        .map_err(host::said)
+    host::request(
+        "op.submit",
+        &serde_json::to_vec(&op).expect("the op encodes"),
+    )
+    .await
+    .map(|_reply| ())
+    .map_err(host::said)
 }
 
 // ---------- the addresses a row opens ----------
 
-/// `duck://channel/<id>?net=…#<seq>` — one message. The query precedes the
-/// fragment, as in every other URI.
 fn channel_message_link(channel: &str, seq: i64, chain: &str) -> String {
-    format!("duck://channel/{channel}{}#{seq}", net_query(chain))
+    let seq = u64::try_from(seq).ok();
+    minted(chain, |chain| {
+        MessageAddress {
+            channel: channel.to_owned(),
+            seq,
+        }
+        .address(chain)
+    })
 }
 
 fn page_link(page: &str, chain: &str) -> String {
-    format!("duck://page/{page}{}", net_query(chain))
+    minted(chain, |chain| {
+        PageAddress {
+            page: page.to_owned(),
+            block: None,
+        }
+        .address(chain)
+    })
 }
 
 fn forge_item_link(repo: &str, number: u64, chain: &str) -> String {
-    format!("duck://forge/{repo}/{number}{}", net_query(chain))
+    forge_link(repo, Some(number), chain)
 }
 
 fn forge_repo_link(repo: &str, chain: &str) -> String {
-    format!("duck://forge/{repo}{}", net_query(chain))
+    forge_link(repo, None, chain)
 }
 
-/// `duck://run/<dispatch_id>?net=…`. A run is addressed by its DISPATCH id
-/// everywhere outside the runs module: the run id's hex sha256.
+/// A forge repo, or an item in it. The forge's namespace is flat today: a
+/// name that carries no `<owner>/` has no address.
+fn forge_link(repo: &str, number: Option<u64>, chain: &str) -> String {
+    let Ok(repo) = ForgeRepoAddress::from_name(repo) else {
+        return String::new();
+    };
+    minted(chain, |chain| match number {
+        Some(number) => ForgeLocator {
+            repo,
+            target: ForgeTarget::Item { number },
+        }
+        .address(chain),
+        None => repo.address(chain),
+    })
+}
+
+/// A run is addressed by its DISPATCH id everywhere outside the runs
+/// module: the run id's hex sha256.
 fn run_link(run_id: &str, chain: &str) -> String {
-    let dispatch_id = hex_encode(&Sha256::digest(run_id.as_bytes()));
-    format!("duck://run/{dispatch_id}{}", net_query(chain))
+    let digest = hex_encode(&Sha256::digest(run_id.as_bytes()));
+    minted(chain, |chain| RunAddress { digest }.address(chain))
 }
 
-/// The `?net=` a produced `duck://` link carries: the chain id's hash half
-/// (the part after its `#`), or nothing when the chain is unknown.
-fn net_query(chain: &str) -> String {
-    let digest = chain.rsplit_once('#').map_or("", |(_, hex)| hex);
-    match digest.is_empty() {
-        true => String::new(),
-        false => format!("?net={digest}"),
-    }
+/// `address` on `chain` (`<label>#<salt>`) as a `duck://` link, or "" when
+/// there is none to give: no chain known, or a tail its module refuses.
+fn minted(chain: &str, address: impl FnOnce(ChainId) -> Result<Address, Refused>) -> String {
+    chain
+        .parse()
+        .ok()
+        .and_then(|chain| address(chain).ok())
+        .map(|address| address.to_string())
+        .unwrap_or_default()
 }
 
 /// A row's address, handed to the kernel's ONE open door, which routes a
@@ -910,14 +959,6 @@ fn preview(text: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
-}
-
-fn short_label(id: &str) -> String {
-    let mut label: String = id.chars().take(8).collect();
-    if id.chars().count() > 8 {
-        label.push('…');
-    }
-    label
 }
 
 fn hex_encode(bytes: &[u8]) -> String {

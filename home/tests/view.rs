@@ -4,9 +4,18 @@
 //! as `host.open_link` carrying a `duck://` address.
 
 use ducktape_view_guest::testing::{answer, find, has_text, item, measure, press, refuse, texts};
-use ducktape_view_guest::wire::{Frame, Node, Request};
+use ducktape_view_guest::wire::{Frame, Length, Node, Request};
+use home_view::boot_native;
 use home_view::host::Session;
-use home_view::{boot_native, tick_native};
+
+/// Every frame a test renders is one assistive technology can name.
+fn tick_native(events: Vec<ducktape_view_guest::wire::Event>) -> ducktape_view_guest::wire::Frame {
+    let frame = home_view::tick_native(events);
+    if let Some(root) = &frame.root {
+        assert_eq!(ducktape_view_guest::wire::accessibility_faults(root), []);
+    }
+    frame
+}
 
 fn boot() -> Frame {
     boot_native();
@@ -168,7 +177,7 @@ fn connected_dashboard() -> (Frame, Vec<(String, u64)>) {
             "files" => {
                 let history: serde_json::Value = serde_json::from_slice(&history()).unwrap();
                 serde_json::to_vec(&serde_json::json!({"history":history["snapshots"]})).unwrap()
-            },
+            }
             other => panic!("unexpected query target {other}"),
         };
         events.push(answer(id, &reply));
@@ -265,7 +274,8 @@ fn a_connected_view_reads_every_card_through_the_kernel() {
         "Resident",
         "Online",
         "0badf00d",
-        "Offline",
+        // a peer this node has no link to, in Members' words (#9)
+        "Not linked",
         // the blocks card: the op-carrying block alone
         "abababab",
         "3 ops",
@@ -289,7 +299,7 @@ fn a_connected_view_reads_every_card_through_the_kernel() {
     }
     // a DM room, an archived room, a settled proposal and an op-less block
     // are not on the dashboard
-    for absent in ["#two", "#old", "Signal", "0 ops"] {
+    for absent in ["#two", "#old", "Signal", "0 ops", "Offline"] {
         assert!(
             !has_text(&frame, absent),
             "{absent} drawn: {:?}",
@@ -337,6 +347,29 @@ fn the_columns_follow_the_measured_pane() {
     assert!(frame.requests.is_empty(), "a measurement reads nothing");
 }
 
+/// Every rail is exactly its share of the pane, whatever its cards hold.
+/// The host draws `FillPortion` as a flex item no narrower than its widest
+/// one-line row, so one long room name or file message ran its rail past
+/// the pane's edge and cut the other rail (#35); `Fill` is 100% and gives
+/// way, so equal `Fill` rails split the row evenly and a long row's own
+/// `Fill` text is what gets cut.
+#[test]
+fn every_rail_gives_way_to_the_pane() {
+    let (frame, _) = connected_dashboard();
+    for width in [600., 900., 1400.] {
+        let frame = tick_native(measure(&frame, "home/viewport", width, 800.));
+        let Some(Node::Linear { children, .. }) = find(&frame, "home/columns") else {
+            panic!("no columns row at {width}");
+        };
+        for rail in children {
+            let Node::Linear { key, width: w, .. } = rail else {
+                panic!("a rail is a column: {rail:?}");
+            };
+            assert_eq!(*w, Some(Length::Fill), "{key} at {width}");
+        }
+    }
+}
+
 /// Every text in a card row keeps ONE line: the rows are built at a fixed
 /// height and a card in a three-column pane is narrow, so a height, a
 /// count or a digest allowed to wrap lands under the next row. The one
@@ -377,6 +410,34 @@ fn every_row_cell_keeps_one_line() {
     assert!(wrapping.is_empty(), "cells that may wrap: {wrapping:?}");
 }
 
+/// A reading's text takes what its row leaves and truncates there: a
+/// label's own width never shrinks, so a long sync line — or, in a pane
+/// 320 px wide, a digest beside its Copy — ran over the card's edge.
+#[test]
+fn a_reading_truncates_to_what_its_row_leaves() {
+    let (frame, _) = connected_dashboard();
+    let frame = tick_native(measure(&frame, "home/viewport", 320., 800.));
+    for key in [
+        "home/node/sync/value",
+        "home/node/chain/value",
+        "home/node/root/value",
+        "home/node/key/value",
+        "home/members/account/value",
+    ] {
+        let Some(Node::Text { width, options, .. }) = find(&frame, key) else {
+            panic!("no {key}");
+        };
+        assert_eq!(
+            (*width, options.wrapping),
+            (
+                Some(Length::Fill),
+                Some(ducktape_view_guest::wire::Wrapping::None)
+            ),
+            "{key}"
+        );
+    }
+}
+
 /// A pressed room leaves as `host.open_link` with the room's `duck://`
 /// address on this chain; so does a run.
 #[test]
@@ -389,7 +450,7 @@ fn a_room_and_a_run_open_through_the_link_plane() {
     assert_eq!(intent.kind, "host.open_link");
     assert_eq!(
         payload(intent),
-        serde_json::json!({ "link": "duck://channel/general?net=a1b2c3d4" })
+        serde_json::json!({ "link": "duck://dev-a1b2c3d4/chat/general" })
     );
 
     let frame = tick_native(press(&frame, "Open run abababab"));
@@ -399,7 +460,7 @@ fn a_room_and_a_run_open_through_the_link_plane() {
     assert_eq!(intent.kind, "host.open_link");
     assert_eq!(
         payload(intent),
-        serde_json::json!({ "link": format!("duck://run/{}?net=a1b2c3d4", "ab".repeat(32)) })
+        serde_json::json!({ "link": format!("duck://dev-a1b2c3d4/runs/{}", "ab".repeat(32)) })
     );
 }
 

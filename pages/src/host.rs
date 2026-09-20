@@ -636,11 +636,11 @@ impl Names {
     /// `module:{id}`, `system`) as a person's name.
     fn display(&self, handle: &str) -> String {
         match handle.split_once(':') {
-            Some(("user", key)) => self
-                .by_key
-                .get(key)
-                .cloned()
-                .unwrap_or_else(|| format!("user {}", short_label(key))),
+            Some(("user", key)) => {
+                self.by_key.get(key).cloned().unwrap_or_else(|| {
+                    format!("user {}", ducktape_view_guest::kit::short_id(key, 8))
+                })
+            }
             Some(("acct", number)) => number
                 .parse()
                 .ok()
@@ -720,14 +720,6 @@ fn hex_encode(bytes: &[u8]) -> String {
         let _ = write!(output, "{byte:02x}");
     }
     output
-}
-
-fn short_label(id: &str) -> String {
-    let mut label: String = id.chars().take(8).collect();
-    if id.chars().count() > 8 {
-        label.push('…');
-    }
-    label
 }
 
 fn page_comment(ordinal: usize, comment: &Value, names: &Names) -> PageComment {
@@ -1589,8 +1581,8 @@ async fn insert_block(
         .as_ref()
         .and_then(|block| block.parent.clone())
         .unwrap_or_else(|| page_id.to_owned());
-    // A page block IS the page: its own id is what every `duck://page/…`
-    // address names, so it is minted from the page space like the sidebar's.
+    // A page block IS the page: its own id is what every
+    // `duck://<chain>/pages/<page>` address names, so it is minted from the page space like the sidebar's.
     let id = mint(match kind {
         "Page" => "page",
         _ => "block",
@@ -1737,10 +1729,10 @@ pub struct PictureItem {
 
 /// Choose a picture on this device and put it ON THE NETWORK: the bytes are
 /// this machine's alone, so a path would name nothing to anybody else. The
-/// answer is the `duck://files/…` address every member can fetch, under the
-/// page that names it.
-pub async fn pick_picture(page_id: String) -> PictureItem {
-    match picked_picture(page_id).await {
+/// answer is the `duck://<chain>/files/…` address every member can fetch,
+/// under the page that names it.
+pub async fn pick_picture(page_id: String, chain: String) -> PictureItem {
+    match picked_picture(page_id, chain).await {
         Ok(item) => item,
         Err(error) => PictureItem {
             error,
@@ -1749,7 +1741,7 @@ pub async fn pick_picture(page_id: String) -> PictureItem {
     }
 }
 
-async fn picked_picture(page_id: String) -> Result<PictureItem, String> {
+async fn picked_picture(page_id: String, chain: String) -> Result<PictureItem, String> {
     if page_id.is_empty() {
         return Err("open a page before adding a picture".into());
     }
@@ -1765,7 +1757,15 @@ async fn picked_picture(page_id: String) -> Result<PictureItem, String> {
     // one page or in two, are two files.
     let id = mint("picture").await?;
     let path = format!("/shared/pages/{page_id}/{id}/{}", file_name(&file.name));
-    let uri = ducktape_view_files::upload(file, path)
+    // A picture no address can name is refused before its bytes leave.
+    let uri = match ducktape_view_files::file_address(&chain, &path) {
+        Ok(uri) => uri,
+        Err(refused) => {
+            ducktape_view_files::release(&file.token).await;
+            return Err(refused.sentence);
+        }
+    };
+    ducktape_view_files::upload(file, path)
         .await
         .map_err(host::said)?;
     Ok(PictureItem {
@@ -1779,10 +1779,12 @@ async fn picked_picture(page_id: String) -> Result<PictureItem, String> {
 /// away, mirroring the composer's own safe name.
 fn file_name(name: &str) -> String {
     name.chars()
-        .map(|c| match c.is_whitespace() || matches!(c, '(' | ')' | '[' | ']' | '/') {
-            true => '_',
-            false => c,
-        })
+        .map(
+            |c| match c.is_whitespace() || matches!(c, '(' | ')' | '[' | ']' | '/') {
+                true => '_',
+                false => c,
+            },
+        )
         .collect()
 }
 
@@ -1835,7 +1837,7 @@ pub fn picture_caret(text: &str, uri: &str) -> ducktape_view_guest::wire::Editor
 }
 
 /// Every picture the document names, once each, in reading order: the duckfs
-/// path behind each `![alt](duck://files/…)` line.
+/// path behind each `![alt](duck://<chain>/files/…)` line.
 pub fn document_pictures(text: &str) -> Vec<String> {
     let mut paths = Vec::new();
     for line in text.lines() {
@@ -1852,9 +1854,7 @@ pub fn document_pictures(text: &str) -> Vec<String> {
 /// The duckfs path of a line that is one picture and nothing else.
 fn picture_line_path(line: &str) -> Option<String> {
     let (_alt, src) = crate::rich_document::picture_line(line)?;
-    let path = src.strip_prefix("duck://files")?;
-    let plain = !path.is_empty() && !path.contains(['?', '#']);
-    plain.then(|| path.to_owned())
+    ducktape_view_files::address_path(src).ok()
 }
 
 /// Ask the host to page in one duckfs picture and decode it into this view's
@@ -1867,24 +1867,21 @@ pub async fn load_picture(path: String) -> String {
     }
 }
 
-/// `duck://page/<id>?net=<digest>` — the handle that brings a reader back to
-/// this page, from another page, another view, or outside the app.
-///
-/// Only the chain id's HASH HALF rides a URI, and it splits from the right:
-/// `node init --name` validates nothing, so a network named `my#net` mints
-/// the chain id `my#net#a1b2c3d4` and only the last `#` is the separator.
-/// Mirror of `chat::client::duck_net_query`, a crate a view cannot reach —
-/// spell the query any other way and the app reads the whole chain id as the
-/// digest and refuses its own link as a foreign network's.
+/// `duck://<chain>/pages/<id>` — the handle that brings a reader back to
+/// this page, from another page, another view, or outside the app. `chain`
+/// is the view's `<label>#<salt>`; without one, or without a page, there is
+/// no link to give: a link that names no network opens nowhere.
 pub fn page_address(page_id: &str, chain: &str) -> String {
-    if page_id.is_empty() {
+    let Ok(chain) = chain.parse::<duck_address::ChainId>() else {
         return String::new();
-    }
-    let digest = chain.rsplit_once('#').map_or("", |(_, hex)| hex);
-    match digest.is_empty() {
-        true => format!("duck://page/{page_id}"),
-        false => format!("duck://page/{page_id}?net={digest}"),
-    }
+    };
+    let page = pages_wire::PageAddress {
+        page: page_id.to_owned(),
+        block: None,
+    };
+    page.address(chain)
+        .map(|address| address.to_string())
+        .unwrap_or_default()
 }
 
 /// The title the sidebar shows for a page, or the one already on screen when
@@ -2469,19 +2466,21 @@ mod tests {
     fn a_document_names_each_of_its_pictures_once() {
         const DOCUMENT: &str = "# Handbook\n\
             Everything a new member needs.\n\
-            ![duck](duck://files/shared/pages/p1/a/duck.png)\n\
-            ![again](duck://files/shared/pages/p1/a/duck.png)\n\
-            ![goose](duck://files/shared/pages/p1/b/goose.gif)\n\
+            ![duck](duck://testnet-0a1b2c3d/files/shared/pages/p1/a/duck.png)\n\
+            ![again](duck://testnet-0a1b2c3d/files/shared/pages/p1/a/duck.png)\n\
+            ![goose](duck://testnet-0a1b2c3d/files/shared/pages/p1/b/goose.gif)\n\
             ![web](https://example.test/off.png)\n\
-            A line with ![one](duck://files/shared/pages/p1/c/inline.png) inside it.";
+            ![old](duck://files/shared/pages/p1/d/old.png)\n\
+            A line with ![one](duck://testnet-0a1b2c3d/files/shared/pages/p1/c/inline.png) inside it.";
         assert_eq!(
             document_pictures(DOCUMENT),
             [
                 "/shared/pages/p1/a/duck.png",
                 "/shared/pages/p1/b/goose.gif"
             ],
-            "a picture off the web is the loader's, and one inside a sentence \
-             is prose — neither is a line this view pages in"
+            "a picture off the web is the loader's, one inside a sentence is \
+             prose, and an old `duck://files/…` form names no chain — none is \
+             a line this view pages in"
         );
     }
 
@@ -2491,7 +2490,7 @@ mod tests {
     #[test]
     fn a_picture_lands_on_its_own_line() {
         const DOCUMENT: &str = "# Handbook\nWritten already\n\nUnder it";
-        let uri = "duck://files/shared/pages/p1/a/duck.png";
+        let uri = "duck://testnet-0a1b2c3d/files/shared/pages/p1/a/duck.png";
         let placed = format!("# Handbook\nWritten already\n![duck.png]({uri})\n\nUnder it");
         assert_eq!(picture_placed(DOCUMENT, 2, uri, "duck.png"), placed);
         assert_eq!(
@@ -2521,25 +2520,19 @@ mod tests {
         );
     }
 
-    /// A page link carries the chain id's hash half and nothing else — the
-    /// app reads `?net=` as that digest, so the name in front of it would be
-    /// read as a different network's and the link refused.
+    /// A page link names the page on the view's own chain: `<label>#<salt>`
+    /// is the authority `<label>-<salt>`. A view that knows no chain, or one
+    /// the grammar refuses, gives no link rather than one that opens nowhere.
     #[test]
-    fn a_page_link_carries_only_the_chain_digest() {
+    fn a_page_link_names_the_page_on_its_chain() {
         assert_eq!(
-            page_address("pg-notes", "pages#b71c73d1"),
-            "duck://page/pg-notes?net=b71c73d1"
+            page_address("pg-notes", "testnet#0a1b2c3d"),
+            "duck://testnet-0a1b2c3d/pages/pg-notes"
         );
-        // `node init --name` validates nothing: only the last `#` is minted.
-        assert_eq!(
-            page_address("pg-notes", "my#net#a1b2c3d4"),
-            "duck://page/pg-notes?net=a1b2c3d4"
-        );
-        // No chain yet, or an unnamed one: a link without the query still
-        // names the page for the network the reader already stands on.
-        assert_eq!(page_address("pg-notes", ""), "duck://page/pg-notes");
-        assert_eq!(page_address("pg-notes", "pages"), "duck://page/pg-notes");
-        assert_eq!(page_address("", "pages#b71c73d1"), "");
+        for chain in ["", "pages", "my#net#a1b2c3d4"] {
+            assert_eq!(page_address("pg-notes", chain), "", "{chain}");
+        }
+        assert_eq!(page_address("", "testnet#0a1b2c3d"), "");
     }
 
     /// The crumb walks the parents by title, root first; a parent the index

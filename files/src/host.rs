@@ -75,8 +75,8 @@ pub struct FsDiffEntry {
 /// The session facts the kernel pushes, one item per change. `chain` is the
 /// network an unsaved draft belongs to: a draft parks when it moves.
 /// `account` is the reader's account number, which names her home under
-/// `/home`. `route` is where a `duck://files/...` link sent the reader — the
-/// shell resolves the address and moves the tab, so the path arrives here
+/// `/home`. `route` is the `duck://<chain>/files/<path…>` address a link sent
+/// the reader to — the shell moves the tab, so the address arrives here
 /// rather than being navigated to — and `route_serial` counts those pushes,
 /// because the same path twice has to land twice and the path alone would not
 /// have changed.
@@ -101,7 +101,7 @@ pub struct SessionItem {
 pub fn session() -> ducktape_view_guest::Subscription<SessionItem> {
     ducktape_view_guest::Subscription::run(|| {
         host::subscribe("files.props", &[]).map(|answer| {
-            let read = answer.map_err(host::said).and_then(|bytes| {
+            let read = answer.map_err(refusal_line).and_then(|bytes| {
                 serde_json::from_slice(&bytes).map_err(|error| error.to_string())
             });
             match read {
@@ -275,7 +275,7 @@ pub fn fold_history(reply: &serde_json::Value) -> Vec<FsSnapshot> {
         .map(|snapshot| {
             let id = snapshot["id"].as_str().unwrap_or_default().to_string();
             FsSnapshot {
-                short_id: short_digest(&id),
+                short_id: ducktape_view_guest::kit::short_id(&id, 12),
                 parent: snapshot["parent"].as_str().unwrap_or_default().to_string(),
                 author: fold_author(&snapshot["author"]),
                 height: snapshot["height"].as_i64().unwrap_or(0),
@@ -306,7 +306,7 @@ pub fn fold_author(author: &serde_json::Value) -> String {
             .filter_map(serde_json::Value::as_u64)
             .map(|byte| format!("{byte:02x}"))
             .collect();
-        return format!("ext:{}", short_digest(&hex));
+        return format!("ext:{}", ducktape_view_guest::kit::short_id(&hex, 12));
     }
     String::new()
 }
@@ -315,11 +315,14 @@ pub fn fold_author(author: &serde_json::Value) -> String {
 
 /// One item of the provenance subscription: the newest snapshot within
 /// [`PROVENANCE_DEPTH`] that touched the path, or "" when none of them did.
+/// `rooted` says there is no earlier change to name: the walk reached the
+/// FIRST snapshot, or the newest snapshot does not hold the path at all.
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq)]
 pub struct ProvenanceItem {
     pub path: String,
     pub snapshot: FsSnapshot,
     pub searched: i64,
+    pub rooted: bool,
     pub error: String,
 }
 
@@ -339,41 +342,45 @@ pub fn provenance(
 }
 
 async fn load_provenance(path: String, history: Vec<FsSnapshot>) -> ProvenanceItem {
-    let mut searched = 0;
-    for snapshot in history.iter().take(PROVENANCE_DEPTH) {
-        searched += 1;
-        let touched = match snapshot_touches(snapshot, &path).await {
-            Ok(touched) => touched,
-            Err(error) => {
-                return ProvenanceItem {
-                    path,
-                    searched,
-                    error: format!("Could not read the file's history: {error}"),
-                    ..ProvenanceItem::default()
-                };
-            }
-        };
-        if touched {
-            return ProvenanceItem {
-                path,
-                snapshot: snapshot.clone(),
-                searched,
-                error: String::new(),
-            };
-        }
-    }
-    ProvenanceItem {
+    let mut item = ProvenanceItem {
         path,
-        searched,
         ..ProvenanceItem::default()
+    };
+    if let Err(error) = walk_provenance(&mut item, &history).await {
+        item.error = format!("Could not read the file's history: {error}");
     }
+    item
 }
 
-/// Did this snapshot change anything under `path`? The first snapshot has
-/// no parent and touched everything it holds.
+async fn walk_provenance(item: &mut ProvenanceItem, history: &[FsSnapshot]) -> Result<(), String> {
+    let window = &history[..history.len().min(PROVENANCE_DEPTH)];
+    for snapshot in window {
+        item.searched += 1;
+        if snapshot_touches(snapshot, &item.path).await? {
+            item.snapshot = snapshot.clone();
+            return Ok(());
+        }
+    }
+    // Nothing in the window touched the path. Where the walk stopped says
+    // whether anything earlier could have: at the first snapshot, nothing
+    // can. Short of it, "earlier than the window" is only true of a path that
+    // is there, so ONE stat at the newest snapshot — the head the listing was
+    // read at — says whether it is.
+    item.rooted = match (window.first(), window.last()) {
+        (_, Some(oldest)) if oldest.parent.is_empty() => true,
+        (Some(newest), _) => !holds(newest, &item.path).await?,
+        _ => false,
+    };
+    Ok(())
+}
+
+/// Did this snapshot change anything under `path`? Every snapshot but the
+/// first is read as the diff against its parent; the first has no parent to
+/// diff against, so it touched the path only if it HOLDS it — a snapshot
+/// holding nothing of the path changed nothing about it.
 async fn snapshot_touches(snapshot: &FsSnapshot, path: &str) -> Result<bool, String> {
     if snapshot.parent.is_empty() {
-        return Ok(true);
+        return holds(snapshot, path).await;
     }
     let reply = files_get(
         "diff",
@@ -382,6 +389,16 @@ async fn snapshot_touches(snapshot: &FsSnapshot, path: &str) -> Result<bool, Str
     .await?;
     let entries = reply["entries"].as_array().cloned().unwrap_or_default();
     Ok(!entries.is_empty())
+}
+
+/// Does this snapshot hold `path`? Asked of the module as a stat at it.
+async fn holds(snapshot: &FsSnapshot, path: &str) -> Result<bool, String> {
+    let reply = files_get(
+        "stat",
+        serde_json::json!({ "path": path, "snapshot": snapshot.id }),
+    )
+    .await?;
+    Ok(!reply.is_null())
 }
 
 // ---------- the preview ----------
@@ -741,7 +758,7 @@ async fn submit_commit(
     });
     host::request("op.submit", &serde_json::to_vec(&op).expect("encodes"))
         .await
-        .map_err(host::said)?;
+        .map_err(refusal_line)?;
     Ok(())
 }
 
@@ -788,10 +805,25 @@ pub fn open_link(url: &str) -> bool {
 
 // ---------- the kernel calls ----------
 
+/// A refusal as this view draws it: the refusing module's sentence, then its
+/// token in brackets — `path not found: /x [files_query]`. It is the line
+/// duckfs's own `refusal_line` prints for the CLI and every rejection's
+/// `Display`, so the reader sees one shape of refusal wherever it surfaces;
+/// `host::said` would drop the token on the way in, and with it who refused.
+///
+/// Every refusal the view draws is written here and nowhere else. A reply
+/// this seam could not DECODE is its own words, not a refusal, and stays a
+/// plain sentence with no token nobody sent. Nothing branches on the token: the
+/// files module answers every query under the one `files_query` class, so it
+/// names the refusal and does not yet sort it.
+fn refusal_line(refused: host::Refusal) -> String {
+    format!("{} [{}]", refused.sentence, refused.reason)
+}
+
 async fn request(kind: &str, ask: &serde_json::Value) -> Result<serde_json::Value, String> {
     let bytes = host::request(kind, &serde_json::to_vec(ask).expect("encodes"))
         .await
-        .map_err(host::said)?;
+        .map_err(refusal_line)?;
     serde_json::from_slice(&bytes).map_err(|error| error.to_string())
 }
 
@@ -950,14 +982,6 @@ fn head_within(text: &str, limit: usize) -> (String, bool) {
     (text[..text.floor_char_boundary(limit)].to_owned(), true)
 }
 
-pub fn short_digest(digest: &str) -> String {
-    let mut short: String = digest.chars().take(12).collect();
-    if digest.chars().count() > 12 {
-        short.push('…');
-    }
-    short
-}
-
 /// The files read lane's wire: standard alphabet, padded — the same engine
 /// duckfs-core encodes with, so both ends share one reading of a byte.
 fn base64_encode(bytes: &[u8]) -> String {
@@ -978,7 +1002,7 @@ pub fn drops()
     ducktape_view_guest::Subscription::run(|| {
         host::subscribe("fs.drops", b"{}").map(|reply| {
             reply
-                .map_err(host::said)
+                .map_err(refusal_line)
                 .and_then(|bytes| serde_json::from_slice(&bytes).map_err(|error| error.to_string()))
         })
     })
@@ -1011,7 +1035,7 @@ pub async fn upload_files(
             for pending in files {
                 ducktape_view_files::release(&pending.token).await;
             }
-            return Err(host::said(error));
+            return Err(refusal_line(error));
         }
     }
     Ok(())

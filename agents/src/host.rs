@@ -21,8 +21,13 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 
+use duck_address::chat::MessageAddress;
+use duck_address::forge::{ForgeLocator, ForgeRepoAddress, ForgeTarget};
+use duck_address::runs::RunAddress;
+use duck_address::{Address, ChainId, Refused};
 use ducktape_view_guest::host;
 use futures::{Stream, StreamExt, stream};
+use pages_wire::PageAddress;
 use serde::{Deserialize, Serialize};
 
 /// The planes the register follows: `runs` carries every model record and
@@ -246,21 +251,15 @@ async fn view(target: &str, ask_for: serde_json::Value) -> Result<serde_json::Va
     .await
 }
 
-/// The `?net=` digest every duck:// chip is spelled with, so a chip opened
-/// later on another network refuses instead of resolving its ids against
-/// the wrong store: the chain id's hash half, the part after its `#`. A
-/// status that cannot be read spells no network, which is what an address
-/// with no `net` means.
-async fn chain_digest() -> String {
+/// The chain every duck:// chip is minted on, `<label>#<salt>` as the node
+/// reports it, so a chip opened later on another network refuses instead of
+/// resolving its ids against the wrong store. A status that cannot be read
+/// names no chain, and a chip on no chain has no address.
+async fn chain_id() -> String {
     let Ok(status) = ask("rpc.status", &serde_json::json!({})).await else {
         return String::new();
     };
-    let chain_id = status["chain_id"].as_str().unwrap_or_default();
-    chain_id
-        .rsplit_once('#')
-        .map(|(_, digest)| digest)
-        .unwrap_or_default()
-        .to_owned()
+    status["chain_id"].as_str().unwrap_or_default().to_owned()
 }
 
 // ---------- the name directory ----------
@@ -697,7 +696,7 @@ async fn read_journal(dispatch_id: &str) -> Result<RunJournal, String> {
     let kept: Vec<serde_json::Value> = rows.into_iter().skip(omitted).collect();
     let linked_prs: Vec<serde_json::Value> = kept.iter().filter_map(pr_of_row).collect();
     let mut chips = Chips {
-        chain: chain_digest().await,
+        chain: chain_id().await,
         names: read_accounts().await.unwrap_or_default(),
         resolved: Vec::new(),
     };
@@ -783,7 +782,7 @@ impl Chips {
                 preview: None,
                 kind: "forge".into(),
                 label: format!("Repository {repo}"),
-                url: duck_link(&format!("forge/{repo}"), &self.chain),
+                url: forge_link(&repo, None, &self.chain),
             },
             Target::ForgeProposal {
                 repo,
@@ -847,7 +846,7 @@ impl Chips {
             "page" => link(
                 "page",
                 chip_label(&text("title")),
-                duck_link(&format!("page/{}", text("page_id")), &self.chain),
+                page_link(&text("page_id"), None, &self.chain),
             ),
             "job" => link("job", "Job discussion".into(), String::new()),
             "task" => link(
@@ -865,14 +864,14 @@ impl Chips {
             "run" => link(
                 "run",
                 "Delegated run".into(),
-                duck_link(&format!("run/{}", text("dispatch_id")), &self.chain),
+                run_link(&text("dispatch_id"), &self.chain),
             ),
             "forge_item" => {
                 let number = place["number"].as_i64().unwrap_or(0);
                 link(
                     "forge",
                     format!("{}#{number}", text("repo")),
-                    duck_link(&format!("forge/{}/{number}", text("repo")), &self.chain),
+                    forge_link(&text("repo"), u64::try_from(number).ok(), &self.chain),
                 )
             }
             "output" => link("output", "Run output".into(), String::new()),
@@ -898,10 +897,7 @@ impl Chips {
                 None => chip_label(&text),
             },
         };
-        let url = format!(
-            "{}#{block_id}",
-            duck_link(&format!("page/{page_id}"), &self.chain)
-        );
+        let url = page_link(&page_id, Some(block_id), &self.chain);
         Some((label, url))
     }
 
@@ -962,13 +958,7 @@ impl Chips {
             None => room,
         };
         let preview = seq.map(|_| self.message_preview(message.as_ref()));
-        let url = match seq {
-            Some(seq) => format!(
-                "{}#{seq}",
-                duck_link(&format!("channel/{channel}"), &self.chain)
-            ),
-            None => duck_link(&format!("channel/{channel}"), &self.chain),
-        };
+        let url = message_link(&channel, seq, &self.chain);
         RunLink {
             relation: "target".into(),
             preview,
@@ -1073,14 +1063,14 @@ impl Chips {
                 preview: None,
                 kind: "forge".into(),
                 label: format!("{repo}#{number} · {title}"),
-                url: duck_link(&format!("forge/{repo}/{number}"), &self.chain),
+                url: forge_link(&repo, Some(*number), &self.chain),
             },
             _ => RunLink {
                 relation: "target".into(),
                 preview: None,
                 kind: "forge".into(),
                 label: format!("{repo}: {source} into {target}"),
-                url: duck_link(&format!("forge/{repo}"), &self.chain),
+                url: forge_link(&repo, None, &self.chain),
             },
         }
     }
@@ -1535,6 +1525,10 @@ pub enum OutputConnection {
     #[default]
     Connecting,
     Connected,
+    /// The node will not let this key watch the run. A state of the reader,
+    /// not of the connection, so nothing retries it; the node's sentence
+    /// names who may watch.
+    Refused(String),
     Failed(String),
 }
 
@@ -1563,6 +1557,7 @@ impl LiveRun {
             OutputConnection::Failed(_) => {
                 "Run output could not be connected. See the error above."
             }
+            OutputConnection::Refused(_) => "This run's output is not yours to watch.",
             OutputConnection::Connected if !self.trace.is_empty() => {
                 "This output contains no thinking or tool steps. Raw events are available in the Raw tab."
             }
@@ -1967,14 +1962,22 @@ fn fold_output(run: &mut LiveRun, topic: &str, frame: host::Answer) {
     let bytes = match frame {
         Ok(bytes) => bytes,
         Err(refusal) => {
-            run.connection =
-                OutputConnection::Failed(clip(&refusal.sentence, MAX_TRACE_EVENT_BYTES));
+            let sentence = clip(&refusal.sentence, MAX_TRACE_EVENT_BYTES);
+            // `unauthorized`: the kernel's class for an upgrade the node
+            // refused with 401 or 403 — this key may not hear the run
+            run.connection = match refusal.reason.as_str() {
+                refusal_class::UNAUTHORIZED => OutputConnection::Refused(sentence),
+                _ => OutputConnection::Failed(sentence),
+            };
             run.control = None;
             return;
         }
     };
     if bytes.is_empty() {
-        if !matches!(run.connection, OutputConnection::Failed(_)) {
+        if !matches!(
+            run.connection,
+            OutputConnection::Failed(_) | OutputConnection::Refused(_)
+        ) {
             run.connection = OutputConnection::Failed(
                 "The run output connection closed. Reconnect to continue receiving updates.".into(),
             );
@@ -1992,7 +1995,12 @@ fn fold_output(run: &mut LiveRun, topic: &str, frame: host::Answer) {
         let detail = value["detail"]
             .as_str()
             .unwrap_or("The node refused this run output subscription.");
-        run.connection = OutputConnection::Failed(clip(detail, MAX_TRACE_EVENT_BYTES));
+        let detail = clip(detail, MAX_TRACE_EVENT_BYTES);
+        // `forbidden`: the topic exists and this caller may not hold it
+        run.connection = match value["code"] == "forbidden" {
+            true => OutputConnection::Refused(detail),
+            false => OutputConnection::Failed(detail),
+        };
         run.control = None;
         return;
     }
@@ -2742,19 +2750,11 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 fn short_label(id: &str) -> String {
-    let mut label: String = id.chars().take(8).collect();
-    if id.chars().count() > 8 {
-        label.push('…');
-    }
-    label
+    ducktape_view_guest::kit::ellipsize(id, 9)
 }
 
 fn short_pubkey(pubkey: &str) -> String {
-    let head: String = pubkey.chars().take(16).collect();
-    match head.len() < pubkey.len() {
-        true => format!("{head}…"),
-        false => head,
-    }
+    ducktape_view_guest::kit::ellipsize(pubkey, 17)
 }
 
 /// A chip's label is one line: the text's words, single-spaced. How much of
@@ -2780,13 +2780,63 @@ fn height_label_short(height: i64) -> String {
     format!("block {grouped}")
 }
 
-/// `duck://<path>?net=<chain>` — an address spelled for the chain it was
-/// resolved on; a read with no chain spells no `net`.
-fn duck_link(path: &str, chain: &str) -> String {
-    if chain.is_empty() {
-        return format!("duck://{path}");
-    }
-    format!("duck://{path}?net={chain}")
+/// `address` on `chain` (`<label>#<salt>`) as a `duck://` link, or "" when
+/// there is none to give: no chain known, or a tail its module refuses.
+fn minted(chain: &str, address: impl FnOnce(ChainId) -> Result<Address, Refused>) -> String {
+    chain
+        .parse()
+        .ok()
+        .and_then(|chain| address(chain).ok())
+        .map(|address| address.to_string())
+        .unwrap_or_default()
+}
+
+/// A forge repo, or an item in it. The forge's namespace is flat today: a
+/// name that carries no `<owner>/` has no address.
+fn forge_link(repo: &str, number: Option<u64>, chain: &str) -> String {
+    let Ok(repo) = ForgeRepoAddress::from_name(repo) else {
+        return String::new();
+    };
+    minted(chain, |chain| match number {
+        Some(number) => ForgeLocator {
+            repo,
+            target: ForgeTarget::Item { number },
+        }
+        .address(chain),
+        None => repo.address(chain),
+    })
+}
+
+/// A page, or one block in it.
+fn page_link(page: &str, block: Option<&str>, chain: &str) -> String {
+    minted(chain, |chain| {
+        PageAddress {
+            page: page.to_owned(),
+            block: block.map(str::to_owned),
+        }
+        .address(chain)
+    })
+}
+
+/// A run by its dispatch id.
+fn run_link(dispatch_id: &str, chain: &str) -> String {
+    minted(chain, |chain| {
+        RunAddress {
+            digest: dispatch_id.to_owned(),
+        }
+        .address(chain)
+    })
+}
+
+/// A room, or one message in it.
+fn message_link(channel: &str, seq: Option<u64>, chain: &str) -> String {
+    minted(chain, |chain| {
+        MessageAddress {
+            channel: channel.to_owned(),
+            seq,
+        }
+        .address(chain)
+    })
 }
 
 #[cfg(test)]
@@ -2814,19 +2864,15 @@ mod process_tests {
             &mut run,
             topic,
             Err(host::Refusal::new(
-                "unauthorized",
-                "HTTP error: 403 Forbidden",
+                "stream_open_failed",
+                "could not open the node stream: connection reset",
             )),
         );
-        assert_eq!(
-            run.connection,
-            OutputConnection::Failed("HTTP error: 403 Forbidden".into())
-        );
+        let failed =
+            OutputConnection::Failed("could not open the node stream: connection reset".into());
+        assert_eq!(run.connection, failed);
         fold_output(&mut run, topic, Ok(Vec::new()));
-        assert_eq!(
-            run.connection,
-            OutputConnection::Failed("HTTP error: 403 Forbidden".into())
-        );
+        assert_eq!(run.connection, failed);
         let snapshot = json!({"type":"run_control_snapshot","topic":topic,"control":{"turn":"a","steers":true}});
         fold_output(&mut run, topic, Ok(serde_json::to_vec(&snapshot).unwrap()));
         assert_eq!(run.connection, OutputConnection::Connected);
@@ -2838,6 +2884,41 @@ mod process_tests {
             OutputConnection::Failed("not_this_runs_reader".into())
         );
         assert!(run.control.is_none());
+    }
+
+    /// Who may watch is decided by the node, on stable tokens only: the
+    /// stream's `forbidden` code in band, the kernel's `unauthorized` class
+    /// at the upgrade. Either is the reader's state and the close after it
+    /// does not turn it back into a broken connection.
+    #[test]
+    fn a_reader_the_node_refuses_is_refused_not_failed() {
+        let topic = "run-output:test";
+        let mut run = LiveRun::default();
+        let forbidden =
+            json!({"type":"error","topic":topic,"code":"forbidden","detail":"only the requester"});
+        fold_output(&mut run, topic, Ok(serde_json::to_vec(&forbidden).unwrap()));
+        assert_eq!(
+            run.connection,
+            OutputConnection::Refused("only the requester".into())
+        );
+        fold_output(&mut run, topic, Ok(Vec::new()));
+        assert_eq!(
+            run.connection,
+            OutputConnection::Refused("only the requester".into())
+        );
+        let mut run = LiveRun::default();
+        fold_output(
+            &mut run,
+            topic,
+            Err(host::Refusal::new("unauthorized", "only the requester")),
+        );
+        assert_eq!(
+            run.connection,
+            OutputConnection::Refused("only the requester".into())
+        );
+        let other = json!({"type":"error","topic":topic,"code":"unavailable","detail":"try later"});
+        fold_output(&mut run, topic, Ok(serde_json::to_vec(&other).unwrap()));
+        assert_eq!(run.connection, OutputConnection::Failed("try later".into()));
     }
 
     #[test]

@@ -98,12 +98,19 @@ pub async fn submit(id: String, send: &Send, target: &Target) -> Result<(), host
     .map(|_| ())
 }
 
-pub async fn upload(file: SelectedFile) -> Result<String, host::Refusal> {
+/// Uploads `file` and answers the address every member opens it by, on
+/// `chain` (the view's `<label>#<salt>`). The address is built FIRST: a name
+/// or a chain that has no address is refused before a byte is stored, so a
+/// refusal never leaves an attachment nobody can link to.
+pub async fn upload(file: SelectedFile, chain: String) -> Result<String, host::Refusal> {
     let attachment_id = String::from_utf8(host::request("host.id", b"attachment").await?)
         .map_err(|error| host::malformed(error.to_string()))?;
     let path = format!(
         "/shared/attachments/{attachment_id}/{}",
         safe_name(&file.name)
     );
-    ducktape_view_files::upload(file, path).await
+    let address = ducktape_view_files::file_address(&chain, &path)
+        .map_err(|refused| host::Refusal::new(refused.reason, refused.sentence))?;
+    ducktape_view_files::upload(file, path).await?;
+    Ok(address)
 }

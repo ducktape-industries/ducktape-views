@@ -7,7 +7,7 @@
 //! kernel's doors — `rpc.status`, `rpc.peers`, `rpc.blocks`, `rpc.query`,
 //! `rpc.view`, `files.get` — and re-read on every `rpc.live` hit for the
 //! plane that owns it. Every card is a summary and a door: a room or a run
-//! opens its own tab through `home.open_link` carrying a `duck://` address
+//! opens its own tab through `host.open_link` carrying a `duck://` address
 //! the shell's link plane routes. No op is ever addressed to this view and
 //! it submits nothing.
 //!

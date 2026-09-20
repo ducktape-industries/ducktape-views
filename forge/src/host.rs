@@ -22,6 +22,9 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 
+use duck_address::forge::{ForgeLocator, ForgeRepoAddress, ForgeTarget};
+use duck_address::identity::AccountAddress;
+use duck_address::{Address, ChainId};
 use ducktape_view_guest::host;
 use futures::{Stream, StreamExt, stream};
 use serde::{Deserialize, Serialize};
@@ -167,8 +170,12 @@ pub struct Session {
     /// this account's bio, as the empty state introduces the network
     pub about: String,
     pub network_chain_id: String,
+    /// this view's own network, `<label>#<salt>`, what its links carry
+    #[serde(default)]
+    pub chain: String,
     pub connected_rpc: String,
-    /// the `duck://forge/...` address the app's open plane last routed here
+    /// the `duck://<chain>/forge/...` address the app's open plane last
+    /// routed here
     pub link: String,
     /// moves once per routed link, so the same address twice still lands
     pub link_tick: i64,
@@ -309,7 +316,9 @@ async fn load_seat() -> SeatItem {
 }
 
 async fn read_seat() -> Result<String, String> {
-    let status = host::request("rpc.status", b"{}").await.map_err(host::said)?;
+    let status = host::request("rpc.status", b"{}")
+        .await
+        .map_err(host::said)?;
     let status: serde_json::Value =
         serde_json::from_slice(&status).map_err(|error| error.to_string())?;
     let node_key = status["public_key"].as_str().unwrap_or_default().to_owned();
@@ -1013,11 +1022,15 @@ async fn read_text(repo: &str, rev: &str, path: &str, net: &str) -> Result<BlobI
 /// the addresses are `duck://` refs, repo-relative paths and web URLs, and
 /// only the app's one open plane knows how to fetch each kind.
 async fn park_inline_pictures(item: &BlobItem, repo: &str, rev: &str, net: &str) {
-    let base = format!(
-        "duck://forge/{repo}/blob/{}@{rev}{}",
-        item.path,
-        net_query(net)
-    );
+    let base = forge_address(
+        net,
+        repo,
+        ForgeTarget::Blob {
+            rev: rev.to_owned(),
+            path: item.path.split('/').map(str::to_owned).collect(),
+        },
+    )
+    .unwrap_or_default();
     let ask = serde_json::json!({
         "doc": &item.path,
         "source": &item.text,
@@ -1122,14 +1135,39 @@ fn base64_len(b64: &str) -> u64 {
     (b64.len() as u64 / 4) * 3 - padding
 }
 
-/// The `?net=` a produced `duck://` link carries — the minted digest after
-/// the chain id's last `#` — or "" when the producer has no chain id.
-fn net_query(chain_id: &str) -> String {
-    let digest = chain_id.rsplit_once('#').map(|(_, hex)| hex).unwrap_or("");
-    match digest.is_empty() {
-        true => String::new(),
-        false => format!("?net={digest}"),
+/// This view's own network: the `chain` prop, else the `network_chain_id`
+/// an app that predates it pushes.
+pub fn own_chain(session: &Session) -> String {
+    match session.chain.is_empty() {
+        true => session.network_chain_id.clone(),
+        false => session.chain.clone(),
     }
+}
+
+/// `target` inside the repository `repo` names, as a `duck://` address on
+/// `chain` — or None when there is no address to give: the view knows no
+/// chain, the name carries no `<owner>/` (the forge's namespace is flat
+/// today and forge-wire maps nothing silently), or the target does not
+/// validate (a blob's rev is a 40-hex commit id, never a branch name).
+/// `duck://<chain>/identity/<account>` for a pressed mention; any other link
+/// is already an address and passes through. Nothing without a chain.
+pub fn pressed_link(link: String, chain: &str) -> String {
+    let Ok(account) = link.parse::<u64>() else {
+        return link;
+    };
+    chain
+        .parse::<ChainId>()
+        .ok()
+        .and_then(|chain| AccountAddress { account }.address(chain).ok())
+        .map(|address| address.to_string())
+        .unwrap_or_default()
+}
+
+fn forge_address(chain: &str, repo: &str, target: ForgeTarget) -> Option<String> {
+    let chain = chain.parse::<ChainId>().ok()?;
+    let repo = ForgeRepoAddress::from_name(repo).ok()?;
+    let address = ForgeLocator { repo, target }.address(chain).ok()?;
+    Some(address.to_string())
 }
 
 // ---------- the writes ----------
@@ -1441,7 +1479,10 @@ pub struct Copy {
 /// A link a body or the reader's document carried, handed to the kernel's
 /// ONE open door.
 pub fn open_link(url: &str) -> bool {
-    ducktape_view_guest::host::open_link(url);
+    // a mention pressed with no chain has no address to open
+    if !url.is_empty() {
+        ducktape_view_guest::host::open_link(url);
+    }
     true
 }
 
@@ -1463,8 +1504,9 @@ fn notify<T: Serialize>(operation: &str, payload: &T) -> bool {
 
 // ---------- the deep link ----------
 
-/// What a `duck://forge/…` address the app routed here names: a repo, an
-/// item (with the discussion note its `#seq` lands on), or a file.
+/// What a `duck://<chain>/forge/…` address the app routed here names: a
+/// repo, an item (with the discussion note its comment seq lands on), or a
+/// file at a commit.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ForgeLink {
     pub repo: String,
@@ -1474,44 +1516,44 @@ pub struct ForgeLink {
     pub rev: String,
 }
 
-/// `duck://forge/<repo>[/<number>[#<seq>]]` and
-/// `duck://forge/<repo>/blob/<path>[@<rev>]`, as the app's open plane
-/// spells them. Anything else names no repo and opens nothing.
+/// forge-wire's two typed addresses read the link: `<owner>/<repo>` names
+/// the repo as the namespace lists it, and a locator adds the item, the
+/// comment on it, or the file at a commit. Anything else names no repo and
+/// opens nothing.
 pub fn forge_link(url: &str) -> ForgeLink {
-    let Some(rest) = url.strip_prefix("duck://forge/") else {
+    let Ok(address) = Address::parse(url) else {
         return ForgeLink::default();
     };
-    let rest = rest.split('?').next().unwrap_or_default();
-    let (repo, rest) = match rest.split_once('/') {
-        Some((repo, rest)) => (repo, rest),
-        None => (rest, ""),
+    let named = ForgeRepoAddress::name;
+    if let Ok(repo) = ForgeRepoAddress::try_from(&address) {
+        return ForgeLink {
+            repo: named(&repo),
+            ..ForgeLink::default()
+        };
+    }
+    let Ok(locator) = ForgeLocator::try_from(&address) else {
+        return ForgeLink::default();
     };
     let link = ForgeLink {
-        repo: repo.to_owned(),
+        repo: named(&locator.repo),
         ..ForgeLink::default()
     };
-    if rest.is_empty() {
-        return link;
-    }
-    if let Some(blob) = rest.strip_prefix("blob/") {
-        let (path, rev) = match blob.rsplit_once('@') {
-            Some((path, rev)) => (path, rev),
-            None => (blob, ""),
-        };
-        return ForgeLink {
-            path: path.to_owned(),
-            rev: rev.to_owned(),
+    let counted = |number: u64| i64::try_from(number).unwrap_or(0);
+    match locator.target {
+        ForgeTarget::Item { number } => ForgeLink {
+            number: counted(number),
             ..link
-        };
-    }
-    let (number, seq) = match rest.split_once('#') {
-        Some((number, seq)) => (number, seq.parse::<i64>().unwrap_or(0)),
-        None => (rest, 0),
-    };
-    ForgeLink {
-        number: number.parse::<i64>().unwrap_or(0),
-        seq,
-        ..link
+        },
+        ForgeTarget::Comment { number, seq } => ForgeLink {
+            number: counted(number),
+            seq: counted(seq),
+            ..link
+        },
+        ForgeTarget::Blob { rev, path } => ForgeLink {
+            path: path.join("/"),
+            rev,
+            ..link
+        },
     }
 }
 
@@ -1523,7 +1565,12 @@ pub fn plural(count: i64, one: &str, many: &str) -> String {
 }
 
 /// The tracker's Pull requests / Issues split; the Code seat lists nothing.
-pub fn filter_forge_items(items: &[ForgeItem], tab: &str, side: &str, query: &str) -> Vec<ForgeItem> {
+pub fn filter_forge_items(
+    items: &[ForgeItem],
+    tab: &str,
+    side: &str,
+    query: &str,
+) -> Vec<ForgeItem> {
     let kind = match tab {
         "pulls" => "pr",
         "issues" => "issue",
@@ -1659,9 +1706,11 @@ pub fn binary_note(text: &str) -> String {
     }
 }
 
-/// `duck://forge/<repo>/<number>?net=…` — one issue or PR.
-pub fn duck_forge_item_link(repo: &str, number: i64, chain_id: &str) -> String {
-    format!("duck://forge/{repo}/{number}{}", net_query(chain_id))
+/// `duck://<chain>/forge/<owner>/<repo>/<number>` — one issue or PR — or
+/// None when the item has no address to give (see `forge_address`).
+pub fn duck_forge_item_link(repo: &str, number: i64, chain_id: &str) -> Option<String> {
+    let number = u64::try_from(number).ok()?;
+    forge_address(chain_id, repo, ForgeTarget::Item { number })
 }
 
 /// The installed service supplies the authenticated Git endpoint.
