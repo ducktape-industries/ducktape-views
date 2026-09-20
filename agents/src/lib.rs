@@ -261,7 +261,8 @@ const RUN_TABLE_WIDTH: f32 = TREE_KIND_WIDTH
     + STARTED_WIDTH
     + ACTIVITY_WIDTH
     + OWNER_WIDTH
-    + 5. * 8.;
+    + 5. * kit::spacing::SM as f32
+    + 2. * kit::spacing::MD as f32;
 
 fn tree_kind_cell(key: &str, leading: Node, kind: Node) -> Node {
     let mut row = kit::row(key, [leading, kind]);
