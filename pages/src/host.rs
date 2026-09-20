@@ -21,7 +21,11 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 
-use duck_address::pages::PageAddress;
+#[path = "address.rs"]
+mod address;
+
+use self::address::PageAddress;
+use duck_address::ChainId;
 use ducktape_view_guest::host;
 use futures::{Stream, StreamExt, stream};
 use serde::{Deserialize, Serialize};
@@ -2139,7 +2143,7 @@ pub async fn load_picture(path: String) -> String {
 /// is the view's `<label>#<salt>`; without one, or without a page, there is
 /// no link to give: a link that names no network opens nowhere.
 pub fn page_address(page_id: &str, chain: &str) -> String {
-    let Ok(chain) = chain.parse::<duck_address::ChainId>() else {
+    let Ok(chain) = chain.parse::<ChainId>() else {
         return String::new();
     };
     PageAddress {
