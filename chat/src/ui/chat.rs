@@ -548,7 +548,7 @@ impl ChatView {
                 self.composer(
                     format!("{key}/composer"),
                     crate::host::composer_scope(&self.endpoint, &self.active_channel),
-                    ducktape_view_composer::host::Target::Post {
+                    crate::composer::host::Target::Post {
                         channel: self.active_channel.clone(),
                         thread: None,
                     },
@@ -1171,7 +1171,7 @@ impl ChatView {
                         &self.active_channel,
                         self.active_thread_seq,
                     ),
-                    ducktape_view_composer::host::Target::Post {
+                    crate::composer::host::Target::Post {
                         channel: self.active_channel.clone(),
                         thread: Some(self.active_thread_seq as u64),
                     },
@@ -1545,7 +1545,7 @@ impl ChatView {
                 children.push(self.composer(
                     format!("{key}/{prefix}edit-composer"),
                     crate::host::edit_scope(&self.endpoint, &self.active_channel, seq),
-                    ducktape_view_composer::host::Target::Edit {
+                    crate::composer::host::Target::Edit {
                         channel: self.active_channel.clone(),
                         seq: seq as u64,
                         base_rev: if thread {
