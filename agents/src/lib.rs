@@ -11,6 +11,7 @@
 //! endpoint, the key and the password never cross: a guest that sees no key
 //! cannot leak one.
 pub mod host;
+pub mod session_records;
 use ducktape_view_guest::{
     kit::{self, Tone},
     slots,
