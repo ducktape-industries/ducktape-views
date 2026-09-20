@@ -3,7 +3,7 @@
 //! wasm component the desktop app loads from a file.
 //!
 //! The kernel pushes session facts only (`node.props`: connected, dark, the
-//! app's connection reading, the daemon's workspace directory and the wall
+//! app's connection reading, the local app data directory and the wall
 //! clock). This node's STANDING is not among them — the view folds it off
 //! `rpc.status` and the valset, so the badge and the gate that reads it
 //! move together. The node's own facts,

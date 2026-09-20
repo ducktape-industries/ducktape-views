@@ -2,8 +2,8 @@
 //! the node itself.
 //!
 //! The kernel pushes SESSION FACTS ONLY (`node.props`: connected, dark,
-//! the app's connection reading, the workspace directory the daemon runs
-//! out of, and the wall clock — the four things no `/v1` route publishes).
+//! the app's connection reading, the local app data directory, and the wall
+//! clock — the facts no `/v1` route publishes).
 //! Everything the node itself knows is read HERE: `rpc.status` for the
 //! consensus and sync facts, `rpc.status` + the valset for THIS NODE'S OWN
 //! STANDING, `rpc.peers` for the mesh sample, `rpc.status` + a `modules`
@@ -70,8 +70,8 @@ pub struct HostError {
 // ---------- the session ----------
 
 /// What the kernel knows and this view cannot: whether there is a node,
-/// the colour mode, the app's own connection reading, the directory the
-/// daemon runs out of, and the clock. NOT this node's standing — the view
+/// the colour mode, the app's own connection reading, the local app data
+/// directory, and the clock. NOT this node's standing — the view
 /// folds that off the valset itself ([`standing`]).
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Session {
@@ -79,8 +79,8 @@ pub struct Session {
     pub dark: bool,
     /// the app's connection reading — `Live`, `Offline`, `Sync delayed`
     pub status: String,
-    /// the workspace directory this daemon runs out of; no `/v1` route
-    /// publishes it
+    /// the local app data directory supplied by the session host; no `/v1`
+    /// route publishes a remote node's data directory
     pub data_dir: String,
     pub wall_now: i64,
 }
@@ -775,7 +775,7 @@ pub fn visible_log(lines: &[LogRow], filter: &str, level: &str) -> Vec<LogRow> {
 pub fn log_note(held: i64, shown: i64) -> String {
     match (shown > 0, held > 0) {
         (true, _) => String::new(),
-        (false, false) => "Waiting for the node's log ring…".into(),
+        (false, false) => "Waiting for log messages from the node…".into(),
         (false, true) => "No lines match this filter.".into(),
     }
 }

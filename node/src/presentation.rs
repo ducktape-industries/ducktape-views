@@ -202,7 +202,11 @@ impl NodeView {
         let identity_rows = [
             Self::copyable("node/key", "Node key", &facts.node_key),
             Self::copyable("node/root", "Root hash", &facts.node_root_hash),
-            Self::copyable("node/directory", "Data directory", &self.node_data_dir),
+            Self::copyable(
+                "node/directory",
+                "Local app data directory",
+                &self.node_data_dir,
+            ),
             Self::reading(
                 "node/version",
                 "Version",

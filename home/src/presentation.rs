@@ -449,8 +449,8 @@ impl HomeView {
         if rows.is_empty() {
             rows.push(kit::empty_state(
                 "home/peers/empty",
-                "No peers",
-                "This node has not met another node yet.",
+                "No peers to show",
+                "No peer details are available.",
             ));
         }
         self.card(

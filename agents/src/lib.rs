@@ -637,7 +637,7 @@ impl AgentsView {
             let content = (self.open_row.state == "running").then(|| {
                 kit::wrapping(kit::secondary(
                     "agents/control-unavailable",
-                    "This session is not connected for run control.",
+                    "Run controls are unavailable in this session.",
                 ))
             });
             return kit::column("agents/no-controls", content);

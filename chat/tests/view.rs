@@ -1940,7 +1940,7 @@ fn labelled<'a>(frame: &'a Frame, label: &str) -> &'a Node {
 #[test]
 fn a_key_with_no_account_reads_the_room_and_every_write_says_what_to_do() {
     on_a_deep_stack(|| {
-        let notice = "Your signing key holds no account on this network, and every message here is posted by one. Create an account to write; until then the room is yours to read.";
+        let notice = "To send messages, create or join an account in Settings → Account. You can read this channel without an account.";
         let mut keyed = session(true);
         keyed.me = "user:cc".into();
         keyed.me_key = "cc".into();

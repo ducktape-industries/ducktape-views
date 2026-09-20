@@ -433,7 +433,7 @@ impl Panel {
             true => kit::empty_state(
                 "huddle/roster-empty",
                 "Nobody here yet",
-                "Who is in the huddle appears as the room is read.",
+                "Waiting for the huddle's participant list.",
             ),
             false => kit::column("huddle/roster", rows),
         };

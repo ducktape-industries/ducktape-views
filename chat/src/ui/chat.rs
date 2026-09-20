@@ -344,7 +344,7 @@ impl ChatView {
             native::empty_state(
                 &key,
                 "Loading channels…",
-                "This network's rooms arrive with the next block.",
+                "Waiting for this network's channel list.",
             )
         } else if !self.rooms.is_empty() {
             native::empty_state(
