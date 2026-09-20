@@ -855,20 +855,50 @@ impl BoardsView {
             let text = inline.document.text();
             (text != inline.original).then(|| (inline.id.clone(), text))
         });
+        // A closed editor may already have queued its text behind the refused
+        // Create. `settled` contains every optimistic close, so keep the last
+        // text target and recover its final words before clearing the queue.
+        let queued_writing = self
+            .pending
+            .iter()
+            .skip(1)
+            .flat_map(|operation| shape_changes(operation).iter())
+            .filter_map(|change| match change {
+                Change::Text { id, .. } => Some(id),
+                _ => None,
+            })
+            .next_back()
+            .and_then(|id| {
+                before
+                    .as_ref()
+                    .and_then(|board| board.shapes.get(id))
+                    .map(|record| (id.clone(), record.shape.text.clone()))
+            });
         let refused = self.pending.pop_front();
         self.pending.clear();
         self.delivery = Delivery::Idle;
         self.on_read(epoch, id, reading);
-        let kept = match refused.as_ref().and_then(written) {
-            Some((card, draft)) => self.what_did_not_land(before.as_ref(), card, Some(draft)),
-            // An edit carrying no words of its own, with an editor open when
-            // the board went: `on_read` has already left that draft here, by
-            // the same rule and in the same place — and where it could not,
-            // the draft read before the queue went is what is left of it.
-            None => self.lost.take().or_else(|| {
-                let (card, draft) = writing?;
-                self.what_did_not_land(before.as_ref(), &card, Some(&draft))
-            }),
+        let kept = if let Some((card, draft)) = writing.as_ref() {
+            self.what_did_not_land(before.as_ref(), card, Some(draft))
+        } else {
+            match refused.as_ref().and_then(written) {
+                Some((card, draft)) => {
+                    let draft = queued_writing
+                        .as_ref()
+                        .filter(|(queued_card, _)| queued_card.as_str() == card)
+                        .map(|(_, draft)| draft.as_str())
+                        .unwrap_or(draft);
+                    self.what_did_not_land(before.as_ref(), card, Some(draft))
+                }
+                // An edit carrying no words of its own, with an editor open when
+                // the board went: `on_read` has already left that draft here, by
+                // the same rule and in the same place — and where it could not,
+                // the draft read before the queue went is what is left of it.
+                None => self.lost.take().or_else(|| {
+                    let (card, draft) = queued_writing.as_ref()?;
+                    self.what_did_not_land(before.as_ref(), card, Some(draft))
+                }),
+            }
         };
         self.error = match kept
             .as_ref()

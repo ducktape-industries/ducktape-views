@@ -2602,6 +2602,207 @@ fn a_board_removed_under_a_new_note_keeps_the_words_typed_into_it() {
     assert_eq!(view.status(), "Not saved");
 }
 
+/// A note can close and queue its text before the note's Create is answered.
+/// If that Create learns the board is gone, the final queued words still need
+/// the same recovery action as words left in the editor.
+#[test]
+fn a_closed_note_draft_behind_create_refusal_keeps_its_latest_words() {
+    let mut view = view();
+    view.catalog = [
+        ("room".to_owned(), "Planning".to_owned()),
+        ("other".to_owned(), "Elsewhere".to_owned()),
+    ]
+    .into();
+    view.on_quick_note();
+    view.on_minted(
+        0,
+        "room".into(),
+        Shape {
+            kind: Kind::Note,
+            width: 220,
+            height: 180,
+            ..Default::default()
+        },
+        Ok("b".into()),
+    );
+    view.inline
+        .as_mut()
+        .expect("the note opened no editor")
+        .document = Editor::new("FIRST FRAGMENT");
+    view.finish_text();
+    view.begin_text();
+    view.inline
+        .as_mut()
+        .expect("the saved note could not be reopened")
+        .document = Editor::new("LATEST COMPLETE WORDS");
+    view.finish_text();
+    assert_eq!(
+        view.pending.len(),
+        3,
+        "the Create and both closes were not queued"
+    );
+
+    view.on_delivered(
+        0,
+        "room".into(),
+        Err(refusal(NOT_FOUND, "That board is no longer here.")),
+        Ok(host::Reading {
+            catalog: [("other".to_owned(), "Elsewhere".to_owned())].into(),
+            board: None,
+        }),
+    );
+
+    assert!(view.pending.is_empty());
+    assert_eq!(view.status(), "Not saved");
+    let kept = view.lost.clone().expect("the closed draft was dropped");
+    assert_eq!(kept.text, "LATEST COMPLETE WORDS");
+    assert!(view.error.contains("LATEST COMPLETE WORDS"));
+
+    view.on_open("other".into());
+    view.on_read(
+        0,
+        "other".into(),
+        read(Board::new("Elsewhere".into(), "owner".into()).unwrap()),
+    );
+    view.on_keep_lost_words();
+    view.on_minted(0, "other".into(), kept, Ok("recovered".into()));
+    assert_eq!(
+        view.visible().unwrap().shapes["recovered"].shape.text,
+        "LATEST COMPLETE WORDS"
+    );
+}
+
+#[test]
+fn an_open_note_draft_behind_create_refusal_keeps_its_latest_words() {
+    let mut view = view();
+    view.catalog = [
+        ("room".to_owned(), "Planning".to_owned()),
+        ("other".to_owned(), "Elsewhere".to_owned()),
+    ]
+    .into();
+    view.on_quick_note();
+    view.on_minted(
+        0,
+        "room".into(),
+        Shape {
+            kind: Kind::Note,
+            width: 220,
+            height: 180,
+            ..Default::default()
+        },
+        Ok("b".into()),
+    );
+    view.inline
+        .as_mut()
+        .expect("the note opened no editor")
+        .document = Editor::new("FIRST FRAGMENT");
+    view.finish_text();
+    view.begin_text();
+    view.inline
+        .as_mut()
+        .expect("the saved note could not be reopened")
+        .document = Editor::new("LATEST COMPLETE WORDS");
+    assert_eq!(
+        view.pending.len(),
+        2,
+        "the Create and both closes were not queued"
+    );
+
+    view.on_delivered(
+        0,
+        "room".into(),
+        Err(refusal(NOT_FOUND, "That board is no longer here.")),
+        Ok(host::Reading {
+            catalog: [("other".to_owned(), "Elsewhere".to_owned())].into(),
+            board: None,
+        }),
+    );
+
+    assert!(view.pending.is_empty());
+    assert_eq!(view.status(), "Not saved");
+    let kept = view.lost.clone().expect("the closed draft was dropped");
+    assert_eq!(kept.text, "LATEST COMPLETE WORDS");
+    assert!(view.error.contains("LATEST COMPLETE WORDS"));
+
+    view.on_open("other".into());
+    view.on_read(
+        0,
+        "other".into(),
+        read(Board::new("Elsewhere".into(), "owner".into()).unwrap()),
+    );
+    view.on_keep_lost_words();
+    view.on_minted(0, "other".into(), kept, Ok("recovered".into()));
+    assert_eq!(
+        view.visible().unwrap().shapes["recovered"].shape.text,
+        "LATEST COMPLETE WORDS"
+    );
+}
+
+#[test]
+fn a_refused_text_draft_yields_to_a_later_queued_text_for_the_same_card() {
+    let board = one_card_saying("ORIGINAL");
+    let mut view = writing_in(&board);
+    view.inline
+        .as_mut()
+        .expect("the card did not open")
+        .document = Editor::new("FIRST FRAGMENT");
+    view.finish_text();
+    view.begin_text();
+    view.inline
+        .as_mut()
+        .expect("the card could not be reopened")
+        .document = Editor::new("LATEST COMPLETE WORDS");
+    view.finish_text();
+    assert_eq!(view.pending.len(), 2, "both text closes were not queued");
+
+    view.on_delivered(
+        0,
+        "room".into(),
+        Err(refusal(NOT_FOUND, "That board is no longer here.")),
+        Ok(host::Reading {
+            catalog: BTreeMap::new(),
+            board: None,
+        }),
+    );
+
+    let kept = view.lost.clone().expect("the latest draft was dropped");
+    assert_eq!(kept.text, "LATEST COMPLETE WORDS");
+    assert!(view.error.contains("LATEST COMPLETE WORDS"));
+    assert_eq!(view.status(), "Not saved");
+}
+
+#[test]
+fn a_refused_text_draft_yields_to_the_open_editor_for_the_same_card() {
+    let board = one_card_saying("ORIGINAL");
+    let mut view = writing_in(&board);
+    view.inline
+        .as_mut()
+        .expect("the card did not open")
+        .document = Editor::new("FIRST FRAGMENT");
+    view.finish_text();
+    view.begin_text();
+    view.inline
+        .as_mut()
+        .expect("the card could not be reopened")
+        .document = Editor::new("LATEST COMPLETE WORDS");
+    assert_eq!(view.pending.len(), 1, "both text closes were not queued");
+
+    view.on_delivered(
+        0,
+        "room".into(),
+        Err(refusal(NOT_FOUND, "That board is no longer here.")),
+        Ok(host::Reading {
+            catalog: BTreeMap::new(),
+            board: None,
+        }),
+    );
+
+    let kept = view.lost.clone().expect("the latest draft was dropped");
+    assert_eq!(kept.text, "LATEST COMPLETE WORDS");
+    assert!(view.error.contains("LATEST COMPLETE WORDS"));
+    assert_eq!(view.status(), "Not saved");
+}
+
 #[test]
 fn a_saved_editor_does_not_turn_a_later_move_into_a_lost_draft() {
     let board = one_card_saying("BEFORE");
