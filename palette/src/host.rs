@@ -11,10 +11,10 @@
 //! spelled as the JSON the module's wire already is.
 
 use duck_address::chat::MessageAddress;
+use duck_address::pages::PageAddress;
 use duck_address::{Address, ChainId, Refused};
 use ducktape_view_guest::host;
 use futures::StreamExt;
-use pages_wire::PageAddress;
 use serde::{Deserialize, Serialize};
 
 /// The chord this palette answers to. One string, claimed at the kernel and
@@ -232,11 +232,10 @@ pub fn chat_link(hit: &ChatHit, chain: &str) -> String {
 
 /// A page block's address, for the chain this session is on.
 pub fn page_link(hit: &PageHit, chain: &str) -> String {
-    let block = (!hit.block_id.is_empty()).then(|| hit.block_id.clone());
     minted(chain, |chain| {
         PageAddress {
             page: hit.page_id.clone(),
-            block,
+            block: (!hit.block_id.is_empty()).then(|| hit.block_id.clone()),
         }
         .address(chain)
     })
@@ -257,4 +256,25 @@ fn minted(chain: &str, address: impl FnOnce(ChainId) -> Result<Address, Refused>
 /// a `duck://` link to whatever owns it.
 pub fn open_link(link: &str) {
     ducktape_view_guest::host::open_link(link);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn page_block_fixture_matches_the_platform_address() {
+        let expected: serde_json::Value =
+            serde_json::from_str(include_str!("../../pages/tests/fixtures/page-address.json"))
+                .unwrap();
+        let hit = PageHit {
+            page_id: expected["page"].as_str().unwrap().to_owned(),
+            block_id: expected["block"].as_str().unwrap().to_owned(),
+            ..PageHit::default()
+        };
+        assert_eq!(
+            page_link(&hit, "testnet#0a1b2c3d"),
+            expected["block_uri"].as_str().unwrap()
+        );
+    }
 }

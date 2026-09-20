@@ -13,4 +13,3 @@ duckfs-core = { git = "https://github.com/ducktape-industries/ducktape-sdk", bra
 # a file's `duck://<chain>/files/<path…>` address: files' typed tail over the
 # one shared grammar, never a string built here
 duck-address = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "duck-address" }
-files-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "files-wire" }

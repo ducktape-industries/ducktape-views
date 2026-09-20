@@ -6,12 +6,8 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 [dependencies]
-# the board FORMAT, not the module that runs one
-boards-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "boards-wire" }
-# the refusal classes by constant, zero-dep: boards-wire already links it, and
-# a wasm view does not link sdk for three words
-refusal-class = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "refusal-class" }
 ducktape-view-guest.workspace = true
+refusal-class = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "refusal-class" }
 serde.workspace = true
 serde_json.workspace = true
 futures.workspace = true

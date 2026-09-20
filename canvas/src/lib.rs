@@ -1,10 +1,11 @@
 //! Optimistic native canvas. The guest owns editing; gpui-kit owns rendering,
 //! input and IME; the host signs field operations for consensus ordering.
+pub mod boards;
 mod host;
 mod interaction;
 mod markdown;
 mod presentation;
-use boards_wire::{
+use crate::boards::{
     Align, Board, Change, Dash, Fill, Heads, Kind, Operation, Shape, TARGET_GONE, TextSize, Weight,
 };
 use ducktape_view_guest::{Editor, wire};
@@ -1012,7 +1013,7 @@ impl BoardsView {
         // at all rather than fitted as far as the floor.
         let needed = grown.ceil().clamp(
             presentation::MIN_CARD[1] as f32,
-            boards_wire::MAX_SIZE as f32,
+            crate::boards::MAX_SIZE as f32,
         ) as i32;
         let hugging = shape.kind == Kind::Text;
         let height = match hugging {
@@ -1288,7 +1289,7 @@ impl BoardsView {
         let wanted = self.rename.trim();
         self.session.connected
             && self.pending.is_empty()
-            && boards_wire::valid_title(&self.rename).is_ok()
+            && crate::boards::valid_title(&self.rename).is_ok()
             && wanted != board.title
     }
     fn on_rename_board(&mut self) -> Task<Message> {
@@ -1394,8 +1395,8 @@ impl BoardsView {
 
 fn coordinate(value: f32) -> i32 {
     value.round().clamp(
-        -(boards_wire::MAX_COORD as f32),
-        boards_wire::MAX_COORD as f32,
+        -(crate::boards::MAX_COORD as f32),
+        crate::boards::MAX_COORD as f32,
     ) as i32
 }
 /// The shape a change edits in place — nothing for one that makes a shape, one
@@ -1615,7 +1616,7 @@ fn inverse(board: &Board, change: &Change) -> Vec<Change> {
                     .shapes
                     .iter()
                     .filter(|(_, r)| {
-                        let holds = |end| boards_wire::held(end) == Some(id.as_str());
+                        let holds = |end| crate::boards::held(end) == Some(id.as_str());
                         holds(&r.shape.from) || holds(&r.shape.to)
                     })
                     .map(|(id, r)| Change::Create {
@@ -1636,7 +1637,7 @@ ducktape_view_guest::export_app!(
 #[cfg(test)]
 mod tests;
 
-fn apply_operation(board: &Board, operation: &Operation) -> Result<Board, boards_wire::Refused> {
+fn apply_operation(board: &Board, operation: &Operation) -> Result<Board, crate::boards::Refused> {
     match operation {
         Operation::Edit { change, .. } => board.changed(change),
         Operation::Batch { changes, .. } => board.changed_many(changes),

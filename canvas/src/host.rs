@@ -1,4 +1,4 @@
-use boards_wire::{Board, Operation, Query, Reply};
+use crate::boards::{Board, Operation, Query, Reply};
 use ducktape_view_guest::{Subscription, host, host::Refusal};
 use futures::{StreamExt, stream};
 use serde::{Deserialize, Serialize};

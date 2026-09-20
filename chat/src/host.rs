@@ -22,7 +22,6 @@ use duck_address::identity::AccountAddress;
 use duck_address::runs::RunAddress;
 use duck_address::{Address, ChainId, Refused};
 use ducktape_view_guest::host;
-use files_wire::FileAddress;
 use futures::{FutureExt, Stream, StreamExt, stream};
 use serde::{Deserialize, Serialize};
 
@@ -153,10 +152,7 @@ pub fn is_picture(name: &str) -> bool {
 /// The absolute duckfs path a `duck://<chain>/files/…` link names, or ""
 /// when the link names no file.
 pub fn attachment_file_path(link: &str) -> String {
-    Address::parse(link)
-        .and_then(|address| FileAddress::try_from(&address))
-        .map(|file| format!("/{}", file.path.join("/")))
-        .unwrap_or_default()
+    ducktape_view_files::address_path(link).unwrap_or_default()
 }
 
 /// Every picture attachment across the timeline and the thread, once each,
@@ -3319,7 +3315,7 @@ async fn background_search(
     let mut hits = fold_hits(&reply, &names);
     for hit in &mut hits {
         hit.meta = format!("{} · #{}", hit.channel_id, hit.seq);
-        hit.text = chat_message::draft_mentions(&hit.text, |party| {
+        hit.text = ducktape_view_composer::message::draft_mentions(&hit.text, |party| {
             mention_label(&serde_json::to_value(party).expect("party encodes"), &names)
         })
         .0;

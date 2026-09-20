@@ -1,5 +1,5 @@
 //! The deployable view must fit the desktop's memory and per-frame fuel limits.
-use boards::{Board, Change, Reply, Shape};
+use canvas_view::boards::{self, Board, Change, Reply, Shape};
 use ducktape_view_guest::{testing, wire};
 use wasmtime::{
     Engine, Store,
