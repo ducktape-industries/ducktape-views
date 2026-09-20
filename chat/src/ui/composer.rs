@@ -1,7 +1,7 @@
 //! Draft and upload decisions belong to the conversation guest.
 use super::{ChatView, Message, MessageAction};
-use ducktape_view_composer::host::{self, SelectedFile, Target};
-use ducktape_view_composer::{self as composer, Attachment, AttachmentState, Event, Outcome, Send};
+use crate::composer::host::{self, SelectedFile, Target};
+use crate::composer::{self, Attachment, AttachmentState, Event, Outcome, Send};
 use ducktape_view_guest::{Task, widget, wire};
 
 #[derive(Clone, Hash)]
