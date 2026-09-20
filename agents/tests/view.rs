@@ -1154,6 +1154,16 @@ fn process_disclosure_renders_markdown_coalesces_steps_and_keeps_the_answer_visi
         )
     };
     let frame = tick_native(vec![
+        item(
+            stream.id,
+            json!({
+                "type":"run_control_snapshot",
+                "topic":"run-output:dispatch-live",
+                "control":null
+            })
+            .to_string()
+            .as_bytes(),
+        ),
         line(
             json!({"method":"item/started","params":{"item":{"id":"think","type":"reasoning","summary":[]}}}),
         ),
@@ -1232,6 +1242,16 @@ fn claude_thinking_tools_and_steering_share_the_process_without_ending_on_interr
         )
     };
     let frame = tick_native(vec![
+        item(
+            stream.id,
+            json!({
+                "type":"run_control_snapshot",
+                "topic":"run-output:dispatch-live",
+                "control":null
+            })
+            .to_string()
+            .as_bytes(),
+        ),
         line(
             json!({"type":"assistant","message":{"id":"message","content":[{"type":"thinking","thinking":"Inspect **wrapping** first."},{"type":"tool_use","id":"tool-1","name":"Read","input":{"file_path":"app.rs"}}]}}),
         ),

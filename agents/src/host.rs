@@ -1519,6 +1519,14 @@ pub struct LiveRun {
     /// after the UI selects another run, so consumers fence late items with
     /// this identity before replacing their current reading.
     pub dispatch_id: String,
+    /// A selection-generation fence in addition to `dispatch_id`: A→B→A can
+    /// leave an old A item queued after the old subscription was cancelled.
+    #[serde(skip)]
+    pub subscription_generation: u64,
+    /// Run-control snapshots are authoritative. This is transient so a
+    /// restored view cannot treat replayed control lines as fresh.
+    #[serde(skip)]
+    pub control_snapshot_received: bool,
     pub connection: OutputConnection,
     pub present: bool,
     pub status: String,
@@ -1742,6 +1750,13 @@ fn fold_process(run: &mut LiveRun, event: &serde_json::Value) {
         _ => {}
     }
     match event["type"].as_str() {
+        Some("message_start") if event["message"]["role"] == "assistant" => {
+            // Anthropic's streamed contract opens a new assistant message for
+            // each response around tools; a delta tail belongs to that message
+            // only, never to the preceding assistant response.
+            run.answer.clear();
+            run.answer_preview.clear();
+        }
         Some("content_block_delta")
             if event["delta"]["type"] == "text_delta" && event["delta"]["text"].is_string() =>
         {
@@ -1955,33 +1970,41 @@ pub fn empty_live() -> LiveRun {
 /// key that asked for the run and nobody else — and hands the view every
 /// frame verbatim. Every reading below is folded HERE; the kernel carries
 /// bytes and knows nothing about a run.
-pub fn live_run(open_run: String, connection: i64) -> ducktape_view_guest::Subscription<LiveRun> {
-    ducktape_view_guest::Subscription::run_with((open_run, connection), |(open_run, _)| {
-        let topic = format!("run-output:{open_run}");
-        let ask = serde_json::json!({
-            "topic": topic,
-            "params": { "run": open_run },
-        });
-        let frames = host::subscribe(
-            "rpc.stream",
-            &serde_json::to_vec(&ask).expect("a request encodes"),
-        )
-        .chain(stream::once(std::future::ready(Ok(Vec::new()))));
-        let initial = LiveRun {
-            dispatch_id: open_run.clone(),
-            ..LiveRun::default()
-        };
-        // the empty reading first: this subscription is keyed on the run, so
-        // a door onto another one starts here and the run before it cannot
-        // linger under the new name
-        stream::once(std::future::ready(initial.clone())).chain(frames.scan(
-            initial,
-            move |run, frame| {
-                fold_output(run, &topic, frame);
-                std::future::ready(Some(run.clone()))
-            },
-        ))
-    })
+pub fn live_run(
+    open_run: String,
+    connection: i64,
+    subscription_generation: u64,
+) -> ducktape_view_guest::Subscription<LiveRun> {
+    ducktape_view_guest::Subscription::run_with(
+        (open_run, connection, subscription_generation),
+        |(open_run, _, subscription_generation)| {
+            let topic = format!("run-output:{open_run}");
+            let ask = serde_json::json!({
+                "topic": topic,
+                "params": { "run": open_run },
+            });
+            let frames = host::subscribe(
+                "rpc.stream",
+                &serde_json::to_vec(&ask).expect("a request encodes"),
+            )
+            .chain(stream::once(std::future::ready(Ok(Vec::new()))));
+            let initial = LiveRun {
+                dispatch_id: open_run.clone(),
+                subscription_generation: *subscription_generation,
+                ..LiveRun::default()
+            };
+            // the empty reading first: this subscription is keyed on the run, so
+            // a door onto another one starts here and the run before it cannot
+            // linger under the new name
+            stream::once(std::future::ready(initial.clone())).chain(frames.scan(
+                initial,
+                move |run, frame| {
+                    fold_output(run, &topic, frame);
+                    std::future::ready(Some(run.clone()))
+                },
+            ))
+        },
+    )
 }
 
 /// One frame of the node's output stream, folded into the panel's reading.
@@ -1998,6 +2021,7 @@ fn fold_output(run: &mut LiveRun, topic: &str, frame: host::Answer) {
                 refusal_class::UNAUTHORIZED => OutputConnection::Refused(sentence),
                 _ => OutputConnection::Failed(sentence),
             };
+            run.control_snapshot_received = false;
             run.control = None;
             return;
         }
@@ -2011,6 +2035,7 @@ fn fold_output(run: &mut LiveRun, topic: &str, frame: host::Answer) {
                 "The run output connection closed. Reconnect to continue receiving updates.".into(),
             );
         }
+        run.control_snapshot_received = false;
         run.control = None;
         return;
     }
@@ -2030,12 +2055,14 @@ fn fold_output(run: &mut LiveRun, topic: &str, frame: host::Answer) {
             true => OutputConnection::Refused(detail),
             false => OutputConnection::Failed(detail),
         };
+        run.control_snapshot_received = false;
         run.control = None;
         return;
     }
     run.connection = OutputConnection::Connected;
     if value["type"] == "run_control_snapshot" {
         let control = &value["control"];
+        run.control_snapshot_received = true;
         run.control = control["turn"].as_str().map(|turn| RunControl {
             turn: turn.into(),
             steers: control["steers"].as_bool().unwrap_or(false),
@@ -2061,41 +2088,43 @@ fn fold_output(run: &mut LiveRun, topic: &str, frame: host::Answer) {
     run.trace.drain(..overflow);
     if let Ok(event) = serde_json::from_str::<serde_json::Value>(line) {
         fold_process(run, &event);
-        match (event["type"].as_str(), event["state"].as_str()) {
-            (Some("run_control"), Some("ready")) => {
-                if run.elapsed_ms.take().is_some() {
-                    run.process.clear();
-                    run.answer.clear();
-                    run.activity.clear();
-                    run.answer_preview.clear();
-                    run.present = false;
+        if run.control_snapshot_received {
+            match (event["type"].as_str(), event["state"].as_str()) {
+                (Some("run_control"), Some("ready")) => {
+                    if run.elapsed_ms.take().is_some() {
+                        run.process.clear();
+                        run.answer.clear();
+                        run.activity.clear();
+                        run.answer_preview.clear();
+                        run.present = false;
+                    }
+                    run.control = Some(RunControl {
+                        turn: event["turn"].as_str().unwrap_or_default().into(),
+                        steers: event["steers"].as_bool().unwrap_or(false),
+                        approvals: Vec::new(),
+                    });
                 }
-                run.control = Some(RunControl {
-                    turn: event["turn"].as_str().unwrap_or_default().into(),
-                    steers: event["steers"].as_bool().unwrap_or(false),
-                    approvals: Vec::new(),
-                });
-            }
-            (Some("run_control"), Some("approval")) => {
-                if let Some(control) = &mut run.control {
-                    control.approvals.push((
-                        event["request_id"].as_str().unwrap_or_default().into(),
-                        event["detail"].to_string(),
-                    ));
+                (Some("run_control"), Some("approval")) => {
+                    if let Some(control) = &mut run.control {
+                        control.approvals.push((
+                            event["request_id"].as_str().unwrap_or_default().into(),
+                            event["detail"].to_string(),
+                        ));
+                    }
                 }
-            }
-            (Some("run_control"), Some("approval_resolved")) => {
-                if let Some(control) = &mut run.control {
-                    control
-                        .approvals
-                        .retain(|(id, _)| Some(id.as_str()) != event["request_id"].as_str());
+                (Some("run_control"), Some("approval_resolved")) => {
+                    if let Some(control) = &mut run.control {
+                        control
+                            .approvals
+                            .retain(|(id, _)| Some(id.as_str()) != event["request_id"].as_str());
+                    }
                 }
+                (Some("run_control"), Some("closed")) => {
+                    run.control = None;
+                    run.elapsed_ms = event["elapsed_ms"].as_u64();
+                }
+                _ => {}
             }
-            (Some("run_control"), Some("closed")) => {
-                run.control = None;
-                run.elapsed_ms = event["elapsed_ms"].as_u64();
-            }
-            _ => {}
         }
     }
     let Some(output) = provider_output(line) else {
@@ -2895,6 +2924,19 @@ mod process_tests {
         );
     }
 
+    fn snapshot(run: &mut LiveRun, control: serde_json::Value) {
+        fold_output(
+            run,
+            "run-output:test",
+            Ok(serde_json::to_vec(&json!({
+                "type":"run_control_snapshot",
+                "topic":"run-output:test",
+                "control":control
+            }))
+            .unwrap()),
+        );
+    }
+
     #[test]
     fn output_failures_are_visible_and_never_leave_stale_controls_enabled() {
         let mut run = LiveRun::default();
@@ -3063,6 +3105,7 @@ mod process_tests {
             (u64::MAX, "Worked for 213503982334d 14h 25m 51s"),
         ] {
             let mut run = LiveRun::default();
+            snapshot(&mut run, serde_json::Value::Null);
             output(
                 &mut run,
                 json!({"type":"run_control","state":"closed","elapsed_ms":elapsed_ms}),
@@ -3079,6 +3122,7 @@ mod process_tests {
     fn duration_is_unknown_until_executor_close_and_resets_for_a_new_attempt() {
         let mut run = LiveRun::default();
         assert_eq!(run.process_label(false), "Work details");
+        snapshot(&mut run, serde_json::Value::Null);
         output(
             &mut run,
             json!({"type":"result","result":"first attempt","duration_ms":125000}),
@@ -3095,6 +3139,73 @@ mod process_tests {
         );
         assert_eq!(run.process_label(true), "Working…");
         assert!(run.answer.is_empty());
+    }
+
+    #[test]
+    fn replayed_control_lines_wait_for_a_fresh_projection_and_live_lines_still_apply() {
+        let mut run = LiveRun::default();
+        output(
+            &mut run,
+            json!({"type":"run_control","state":"ready","turn":"old","steers":true}),
+        );
+        output(
+            &mut run,
+            json!({
+                "type":"run_control",
+                "state":"approval",
+                "turn":"old",
+                "request_id":"old-approval",
+                "detail":{"tool":"Read"}
+            }),
+        );
+        assert!(
+            run.control.is_none(),
+            "ring replay must not enable controls"
+        );
+
+        snapshot(&mut run, serde_json::Value::Null);
+        assert!(run.control.is_none(), "fresh no-control projection wins");
+
+        output(
+            &mut run,
+            json!({"type":"run_control","state":"ready","turn":"new","steers":true}),
+        );
+        output(
+            &mut run,
+            json!({
+                "type":"run_control",
+                "state":"approval",
+                "turn":"new",
+                "request_id":"new-approval",
+                "detail":{"tool":"Read"}
+            }),
+        );
+        assert_eq!(
+            run.control.as_ref().map(|control| control.turn.as_str()),
+            Some("new")
+        );
+        assert_eq!(run.control.as_ref().unwrap().approvals.len(), 1);
+
+        let mut refused = LiveRun::default();
+        fold_output(
+            &mut refused,
+            "run-output:test",
+            Ok(serde_json::to_vec(&json!({
+                "type":"error",
+                "topic":"run-output:test",
+                "code":"forbidden",
+                "detail":"not this reader"
+            }))
+            .unwrap()),
+        );
+        output(
+            &mut refused,
+            json!({"type":"run_control","state":"ready","turn":"stale","steers":true}),
+        );
+        assert!(
+            refused.control.is_none(),
+            "refusal must keep controls disabled"
+        );
     }
 
     #[test]
@@ -3132,14 +3243,33 @@ mod process_tests {
         let mut run = LiveRun::default();
         output(
             &mut run,
-            json!({"type":"content_block_delta","delta":{"type":"text_delta","text":"first "}}),
+            json!({
+                "type":"message_start",
+                "message":{"id":"message-a","role":"assistant"}
+            }),
         );
         output(
             &mut run,
-            json!({"type":"content_block_delta","delta":{"type":"text_delta","text":"tail"}}),
+            json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"first "}}),
         );
-        assert_eq!(run.answer, "first tail");
-        assert_eq!(run.answer_preview, "first tail");
+        output(
+            &mut run,
+            json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"tail"}}),
+        );
+        output(&mut run, json!({"type":"message_stop"}));
+        output(
+            &mut run,
+            json!({
+                "type":"message_start",
+                "message":{"id":"message-b","role":"assistant"}
+            }),
+        );
+        output(
+            &mut run,
+            json!({"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"next"}}),
+        );
+        assert_eq!(run.answer, "next");
+        assert_eq!(run.answer_preview, "next");
         assert_eq!(run.status, "Answering");
         assert!(run.present);
     }
