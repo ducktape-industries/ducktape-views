@@ -29,10 +29,6 @@ fn provision_reply() -> Value {
         .expect("producer agent reply fixture")
 }
 
-fn assert_agent_message(payload: &Value, operation: &str) {
-    assert!(payload[operation].is_object(), "{operation}: {payload}");
-}
-
 /// Every frame a test renders is one assistive technology can name.
 fn tick_native(events: Vec<ducktape_view_guest::wire::Event>) -> ducktape_view_guest::wire::Frame {
     let frame = agents_view::tick_native(events);
@@ -500,7 +496,12 @@ fn a_new_agent_registers_from_the_form_once_its_id_is_a_label() {
     let provision = request(&frame, "op.submit");
     let payload: Value = serde_json::from_slice(&provision.payload).unwrap();
     assert_eq!(payload["target"], "agent");
-    assert_agent_message(&payload["payload"], "provision");
+    assert_eq!(
+        payload["payload"],
+        json!({"provision": {
+            "request_id": "chiefduck", "name": "ChiefDuck", "program": model_program("chiefduck")
+        }})
+    );
     assert_eq!(payload["payload"]["provision"]["request_id"], "chiefduck");
     assert_eq!(
         payload["payload"]["provision"]["program"],
@@ -523,7 +524,13 @@ fn a_new_agent_registers_from_the_form_once_its_id_is_a_label() {
     let configure = request(&frame, "op.submit");
     let payload: Value = serde_json::from_slice(&configure.payload).unwrap();
     assert_eq!(payload["target"], "runs");
-    assert_agent_message(&payload["payload"], "configure_model");
+    assert_eq!(
+        payload["payload"],
+        json!({"configure_model": {"operation": {"register_model": {
+            "account": 77, "agent_id": "chiefduck", "display_name": "ChiefDuck", "capability": "claude",
+            "skills": [{"name": "chiefduck", "source_prefix": "/shared/skills/chiefduck", "source_snapshot": null, "load": "always"}]
+        }}}})
+    );
     let record = &payload["payload"]["configure_model"]["operation"]["register_model"];
     assert_eq!(record["account"], 77);
     assert_eq!(record["agent_id"], "chiefduck");
