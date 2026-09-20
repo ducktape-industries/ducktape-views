@@ -324,6 +324,7 @@ mod tests {
         /// What a congested writer does to a control frame: the host's stream
         /// send queue is one frame deep and refuses rather than blocking.
         refuse_beacon: bool,
+        refuse_route: bool,
     }
 
     impl Host {
@@ -333,6 +334,7 @@ mod tests {
                 streams: BTreeMap::new(),
                 effects: Vec::new(),
                 refuse_beacon: false,
+                refuse_route: false,
             }
         }
         fn response(id: u64, value: Value, done: bool) -> wire::Event {
@@ -366,6 +368,17 @@ mod tests {
                             assert_eq!(route["route"], "media");
                             assert_eq!(route["path"], "/?channel=room");
                             self.streams.insert(request.kind, request.id);
+                            if self.refuse_route {
+                                events.push(wire::Event::Response {
+                                    id: request.id,
+                                    result: Err(wire::Refusal::new(
+                                        "route_unpublished",
+                                        "application route is not published",
+                                    )),
+                                    done: true,
+                                });
+                                continue;
+                            }
                             events.push(Self::response(
                                 request.id,
                                 json!({"text": r#"{"type":"ready","peers":[]}"#}),
@@ -484,6 +497,31 @@ mod tests {
                     && body["peers"][0]["image"] == "opaque-image")
         );
     }
+    #[test]
+    fn an_unpublished_media_route_is_told_as_a_fact_about_the_room() {
+        let mut host = Host::new();
+        host.refuse_route = true;
+        host.step(Vec::new());
+        host.item(
+            "call.props",
+            json!({"channel": "room", "muted": false, "source": "off"}),
+        );
+        let status = host
+            .effects
+            .iter()
+            .find(|(kind, body)| kind == "host.emit" && body["kind"] == "error")
+            .map(|(_, body)| body["status"].as_str().unwrap().to_owned())
+            .expect("the refused route ends the session with a status");
+        assert_eq!(
+            status,
+            "Voice is not on in this room: the room owner's node is not serving it."
+        );
+        assert!(
+            host.effects.iter().any(|(kind, _)| kind == "host.finish"),
+            "the session finishes instead of waiting on a route nobody serves"
+        );
+    }
+
     /// A congested writer refuses a queued frame; the host's stream send queue
     /// is one frame deep, so a beacon lands on that refusal whenever the
     /// socket is behind. Losing the room over it would turn every impaired
