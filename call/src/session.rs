@@ -33,7 +33,7 @@ enum Run {
 struct Session {
     properties: host::Subscription,
     network: host::Subscription,
-    /// The chat plane moving: the committed huddle roster may have changed.
+    /// The roster's module moving: the committed roster may have changed.
     live: host::Subscription,
     audio: host::Subscription,
     video: Option<host::Subscription>,
@@ -125,24 +125,11 @@ fn refused(refusal: host::Refusal) -> String {
 /// The room's committed huddle roster as node keys — consensus state, the
 /// same list the panel shows — which is what the hub is told to fan out to.
 async fn roster(channel: &str) -> Result<Vec<String>, String> {
-    let reply = host::request(
-        "rpc.view",
-        &bytes(&json!({"target": "chat", "query": {"channel": {"channel_id": channel}}})),
-    )
-    .await
-    .map_err(host::said)?;
-    let reply: Value = serde_json::from_slice(&reply).map_err(|error| error.to_string())?;
-    reply["channel"]["huddle"]
-        .as_array()
-        .ok_or("missing call roster")?
-        .iter()
-        .map(|seat| {
-            seat["node"]
-                .as_str()
-                .map(str::to_owned)
-                .ok_or_else(|| "missing call node".into())
-        })
-        .collect()
+    Ok(crate::source::roster(channel)
+        .await?
+        .into_iter()
+        .map(|seat| seat.node)
+        .collect())
 }
 
 pub fn run() -> LocalBoxStream<'static, Message> {
@@ -214,7 +201,7 @@ impl Session {
         let mut session = Self {
             properties: properties_stream,
             network,
-            live: host::subscribe("rpc.live", b"chat"),
+            live: host::subscribe("rpc.live", crate::source::roster_live()),
             audio: host::subscribe("media.audio", b"{}"),
             video: None,
             clock: host::subscribe("clock.ticks", &20i64.to_le_bytes()),

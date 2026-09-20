@@ -58,7 +58,7 @@ pub fn rooms(key: RoomKey) -> ducktape_view_guest::Subscription<crate::Message> 
     ducktape_view_guest::Subscription::run_with(key, |key| {
         let key = key.clone();
         let live = stream::select(
-            ducktape_view_guest::host::subscribe("rpc.live", b"chat"),
+            ducktape_view_guest::host::subscribe("rpc.live", crate::source::roster_live()),
             ducktape_view_guest::host::subscribe("rpc.live", b"identity"),
         );
         stream::once(load(key.clone())).chain(live.then(move |_| load(key.clone())))
@@ -115,16 +115,9 @@ pub fn notify_with(kind: &str, payload: &str) {
     ducktape_view_guest::host::notify(kind, payload.as_bytes());
 }
 
-async fn request(kind: &str, payload: serde_json::Value) -> Result<serde_json::Value, String> {
-    let bytes =
-        ducktape_view_guest::host::request(kind, &serde_json::to_vec(&payload).expect("query"))
-            .await
-            .map_err(ducktape_view_guest::host::said)?;
-    serde_json::from_slice(&bytes).map_err(|error| error.to_string())
-}
-
 async fn room(key: &RoomKey) -> Result<Room, String> {
     let channel = &key.channel;
+    use crate::source::{self, request};
     use serde_json::json;
     let mut names = std::collections::BTreeMap::new();
     let mut accounts_by_key = std::collections::BTreeMap::new();
@@ -186,59 +179,46 @@ async fn room(key: &RoomKey) -> Result<Room, String> {
     } else {
         format!("acct:{}", key.account)
     };
-    let reply = request(
-        "rpc.view",
-        json!({"target":"chat", "query":{"channel":{"channel_id":channel}}}),
-    )
-    .await?;
-    let info = &reply["channel"];
-    let title = info["name"].as_str().ok_or("missing call room")?.to_owned();
-    let roster = info["huddle"]
-        .as_array()
-        .ok_or("missing call roster")?
-        .iter()
+    let (title, seats) = source::room(channel).await?;
+    let roster = seats
+        .into_iter()
         .map(|seat| {
-            let party = seat["party"].as_str().ok_or("missing call identity")?;
-            let identity = canonical(party);
+            let identity = canonical(&seat.party);
             let label = names
                 .get(&identity)
                 .cloned()
                 .unwrap_or_else(|| identity.clone());
-            Ok(Person {
+            Person {
                 key: identity.clone(),
-                node: seat["node"].as_str().ok_or("missing call node")?.to_owned(),
+                node: seat.node,
                 label,
                 is_you: identity == me,
-            })
+            }
         })
-        .collect::<Result<Vec<_>, String>>()?;
+        .collect();
     let mut members = Vec::new();
     let mut after: Option<String> = None;
     loop {
-        let reply = request("rpc.view", json!({"target":"chat", "query":{"members":{"channel_id":channel,"after":after,"limit":128}}})).await?;
-        let page = &reply["members"];
-        let rows = page["members"].as_array().ok_or("missing members page")?;
-        for row in rows {
-            let party = row["party"].as_str().ok_or("missing member identity")?;
+        let page = source::members(channel, after.as_deref()).await?;
+        for party in &page.parties {
             let key = canonical(party);
             let label = names.get(&key).cloned().unwrap_or_else(|| key.clone());
             members.push(Member { key, label });
         }
-        if page["has_more"].as_bool() != Some(true) {
+        let Some(next) = page.next else {
             return Ok(Room {
                 title,
                 members,
                 roster,
             });
-        }
-        let next = page["next_after"]
-            .as_str()
-            .ok_or("missing members cursor")?;
-        let advances = after.as_deref().is_none_or(|previous| next > previous);
+        };
+        let advances = after
+            .as_deref()
+            .is_none_or(|previous| next.as_str() > previous);
         if !advances {
             return Err("members cursor did not advance".into());
         }
-        after = Some(next.to_owned());
+        after = Some(next);
     }
 }
 

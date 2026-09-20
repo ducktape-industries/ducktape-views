@@ -4,6 +4,7 @@ mod composer;
 mod panel;
 mod protocol;
 mod session;
+mod source;
 
 use ducktape_view_guest::{Subscription, Task, wire};
 
@@ -361,16 +362,10 @@ mod tests {
                         }
                         "rpc.view" => {
                             let query: Value = serde_json::from_slice(&request.payload).unwrap();
-                            assert_eq!(query["target"], "chat");
-                            assert_eq!(query["query"]["channel"]["channel_id"], "room");
-                            let seats: Vec<Value> = self
-                                .roster
-                                .iter()
-                                .map(|node| json!({"party": "acct:1", "node": node}))
-                                .collect();
+                            assert!(source::fixture::is_roster_query(&query, "room"));
                             events.push(Self::response(
                                 request.id,
-                                json!({"channel": {"name": "room", "huddle": seats}}),
+                                source::fixture::room_reply("room", "acct:1", &self.roster),
                                 true,
                             ));
                         }
