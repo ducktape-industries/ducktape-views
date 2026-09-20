@@ -357,11 +357,19 @@ impl Panel {
         } else {
             String::new()
         };
-        let header = kit::centered_row(
-            "huddle/header",
+        // The status is a sentence and gets its own line: sharing the row
+        // with the title squeezed the elapsed timer into "5:0 / 6" and broke
+        // the title mid-word in a narrow window.
+        let header = kit::column(
+            "huddle/head",
             [
-                kit::strong("huddle/title", &room.title),
-                kit::caption("huddle/elapsed", elapsed),
+                kit::centered_row(
+                    "huddle/header",
+                    [
+                        kit::strong("huddle/title", &room.title),
+                        kit::caption("huddle/elapsed", elapsed),
+                    ],
+                ),
                 kit::secondary("huddle/status", &self.status),
             ],
         );
@@ -769,6 +777,32 @@ mod tests {
         });
         assert!(rows.iter().any(|key| key == "huddle/screen"));
         assert!(!rows.iter().any(|key| key.starts_with("huddle/share/")));
+    }
+
+    /// A refusal sentence never shares the header row with the title and
+    /// the elapsed timer: the timer stays one token, the title one line.
+    #[test]
+    fn the_status_sentence_sits_under_the_header_not_beside_the_timer() {
+        let panel: Panel = serde_json::from_value(serde_json::json!({
+            "status": "Voice is not on in this room: the room owner's node is not serving it.",
+            "joined_at": 1, "now": 306,
+        }))
+        .unwrap();
+        let mut tree = panel.view(&Room::default(), &Default::default(), "");
+        let mut header_children = Vec::new();
+        let mut status_seen = false;
+        tree.for_each_mut(&mut |node| match node {
+            wire::Node::Linear { key, children, .. } if key == "huddle/header" => {
+                header_children = children
+                    .iter()
+                    .filter_map(|child| child.key().map(str::to_owned))
+                    .collect();
+            }
+            wire::Node::Text { key, .. } if key == "huddle/status" => status_seen = true,
+            _ => {}
+        });
+        assert_eq!(header_children, ["huddle/title", "huddle/elapsed"]);
+        assert!(status_seen, "the status still reaches the screen");
     }
 
     /// With video live the roster and the tiles share the height in
