@@ -184,7 +184,18 @@ impl Session {
             &bytes(&json!({"account": owner, "route": "media", "method": "get",
             "path": format!("/?channel={}", escaped(&props.channel)), "headers": [], "body": []})),
         );
-        let ready = network_message(&answer(network.next().await)?)?;
+        // The host refuses the media route with `route_unpublished` when the
+        // room owner's node is not serving voice; that is a fact about the
+        // room, so the person reads it as one, not as the host's own words.
+        let first = match network.next().await {
+            Some(Err(refused)) if refused.reason == "route_unpublished" => {
+                return Err(
+                    "Voice is not on in this room: the room owner's node is not serving it.".into(),
+                );
+            }
+            item => answer(item)?,
+        };
+        let ready = network_message(&first)?;
         let Network::Text(ready) = ready else {
             return Err("media service sent no ready message".into());
         };
