@@ -9,8 +9,8 @@ pub(crate) enum Act {
 pub struct ForgeView {
     #[serde(skip)]
     pub(crate) upload_handles: std::collections::HashMap<String, ducktape_view_guest::task::Handle>,
-    pub(crate) composers: std::collections::BTreeMap<String, ducktape_view_composer::Draft>,
-    pub(crate) composer_choices: Vec<ducktape_view_composer::MentionChoice>,
+    pub(crate) composers: std::collections::BTreeMap<String, crate::composer::Draft>,
+    pub(crate) composer_choices: Vec<crate::composer::MentionChoice>,
     pub(crate) connected: bool,
     pub(crate) dark: bool,
     pub(crate) org: String,
@@ -477,7 +477,7 @@ mod snapshot_schema {
             // A draft carries an editor document, which refuses to restore
             // from a byte the tracer made up, so the draft is described by a
             // value that reaches every field it holds.
-            shape.sample(&ducktape_view_composer::Draft::schema_sample());
+            shape.sample(&crate::composer::Draft::schema_sample());
         });
     }
 }

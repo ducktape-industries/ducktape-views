@@ -1,17 +1,17 @@
-//! Conversation payloads and attachment uploads run in the guest.
+//! Conversation payloads and attachment uploads run in this view.
 use super::{AttachmentState, Send};
+pub use crate::files::SelectedFile;
 use ducktape_view_guest::host;
 use serde::{Deserialize, Serialize};
 
-pub use ducktape_view_files::SelectedFile;
-/// Re-exported so a composer site converts a refusal with the same
-/// `host::said` its neighbours use, rather than spelling the guest crate out.
 pub use ducktape_view_guest::host::said;
+
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct Clipboard {
     pub text: String,
     pub files: Vec<SelectedFile>,
 }
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Target {
     Post {
@@ -29,18 +29,22 @@ pub async fn pick() -> Result<Vec<SelectedFile>, host::Refusal> {
     let bytes = host::request("fs.pick", b"{}").await?;
     serde_json::from_slice(&bytes).map_err(|error| host::malformed(error.to_string()))
 }
+
 pub async fn clipboard() -> Result<Clipboard, host::Refusal> {
     let bytes = host::request("clipboard.read", b"{}").await?;
     serde_json::from_slice(&bytes).map_err(|error| host::malformed(error.to_string()))
 }
+
 pub async fn copy(text: &str) -> Result<(), host::Refusal> {
     host::request("clipboard.write", text.as_bytes())
         .await
         .map(|_| ())
 }
+
 pub async fn release(token: &str) {
     let _ = host::request("fs.release", token.as_bytes()).await;
 }
+
 pub async fn id() -> Result<String, host::Refusal> {
     let bytes = host::request("host.id", b"message").await?;
     String::from_utf8(bytes).map_err(|error| host::malformed(error.to_string()))
@@ -55,6 +59,7 @@ pub fn body(send: &Send) -> String {
     }
     lines.join("\n")
 }
+
 fn safe_name(name: &str) -> String {
     name.chars()
         .map(|c| {
@@ -69,8 +74,7 @@ fn safe_name(name: &str) -> String {
 
 pub async fn submit(id: String, send: &Send, target: &Target) -> Result<(), host::Refusal> {
     let body = body(send);
-    let invalid_body = body.is_empty() || body.len() > 16 * 1024;
-    if invalid_body {
+    if body.is_empty() || body.len() > 16 * 1024 {
         return Err(host::Refusal::new(
             "invalid_body",
             "Message must contain between 1 byte and 16 KiB",
@@ -98,10 +102,6 @@ pub async fn submit(id: String, send: &Send, target: &Target) -> Result<(), host
     .map(|_| ())
 }
 
-/// Uploads `file` and answers the address every member opens it by, on
-/// `chain` (the view's `<label>#<salt>`). The address is built FIRST: a name
-/// or a chain that has no address is refused before a byte is stored, so a
-/// refusal never leaves an attachment nobody can link to.
 pub async fn upload(file: SelectedFile, chain: String) -> Result<String, host::Refusal> {
     let attachment_id = String::from_utf8(host::request("host.id", b"attachment").await?)
         .map_err(|error| host::malformed(error.to_string()))?;
@@ -109,8 +109,8 @@ pub async fn upload(file: SelectedFile, chain: String) -> Result<String, host::R
         "/shared/attachments/{attachment_id}/{}",
         safe_name(&file.name)
     );
-    let address = ducktape_view_files::file_address(&chain, &path)
+    let address = crate::files::file_address(&chain, &path)
         .map_err(|refused| host::Refusal::new(refused.reason, refused.sentence))?;
-    ducktape_view_files::upload(file, path).await?;
+    crate::files::upload(file, path).await?;
     Ok(address)
 }

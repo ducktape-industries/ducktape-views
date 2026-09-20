@@ -142,7 +142,7 @@ impl ::std::fmt::Debug for FilesView {
 pub enum Message {
     // the readings
     SessionArrived(crate::host::SessionItem),
-    FilesDropped(Result<Vec<ducktape_view_files::SelectedFile>, String>),
+    FilesDropped(Result<Vec<crate::file_policy::SelectedFile>, String>),
     FilesUploaded(u64, Result<(), String>),
     GrantsReleased,
     RouteTo(String),

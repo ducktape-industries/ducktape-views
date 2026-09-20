@@ -17,10 +17,11 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 
-use duck_address::chat::MessageAddress;
-use duck_address::identity::AccountAddress;
-use duck_address::runs::RunAddress;
-use duck_address::{Address, ChainId, Refused};
+#[path = "address.rs"]
+mod address;
+
+use self::address::{AccountAddress, MessageAddress, RunAddress};
+use duck_address::{Address, ChainId};
 use ducktape_view_guest::host;
 use futures::{FutureExt, Stream, StreamExt, stream};
 use serde::{Deserialize, Serialize};
@@ -152,7 +153,7 @@ pub fn is_picture(name: &str) -> bool {
 /// The absolute duckfs path a `duck://<chain>/files/…` link names, or ""
 /// when the link names no file.
 pub fn attachment_file_path(link: &str) -> String {
-    ducktape_view_files::address_path(link).unwrap_or_default()
+    crate::composer::host::address_path(link).unwrap_or_default()
 }
 
 /// Every picture attachment across the timeline and the thread, once each,
@@ -754,9 +755,7 @@ thread_local! {
 }
 
 /// Canonical mention tokens come from the guest's identity directory.
-pub(crate) fn composer_choices(
-    members: &[ChatMember],
-) -> Vec<ducktape_view_composer::MentionChoice> {
+pub(crate) fn composer_choices(members: &[ChatMember]) -> Vec<crate::composer::MentionChoice> {
     NAMES.with_borrow(|(_, names)| {
         let mut choices: BTreeMap<String, String> = names
             .by_account
@@ -777,7 +776,7 @@ pub(crate) fn composer_choices(
         }
         choices
             .into_iter()
-            .map(|(token, label)| ducktape_view_composer::MentionChoice { token, label })
+            .map(|(token, label)| crate::composer::MentionChoice { token, label })
             .collect()
     })
 }
@@ -3135,11 +3134,11 @@ pub fn own_chain(session: &Session) -> String {
 
 /// `address` on `chain` (`<label>#<salt>`) as a `duck://` link, or "" when
 /// there is none to give: no chain known, or a tail its module refuses.
-fn minted(chain: &str, address: impl FnOnce(ChainId) -> Result<Address, Refused>) -> String {
+fn minted(chain: &str, address: impl FnOnce(ChainId) -> Option<Address>) -> String {
     chain
         .parse()
         .ok()
-        .and_then(|chain| address(chain).ok())
+        .and_then(address)
         .map(|address| address.to_string())
         .unwrap_or_default()
 }

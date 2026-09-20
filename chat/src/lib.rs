@@ -1,5 +1,6 @@
 //! Guest-owned conversations, composers, and module operations.
 
+mod composer;
 pub mod host;
 mod hydration;
 mod live;

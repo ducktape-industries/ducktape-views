@@ -21,7 +21,11 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 
-use duck_address::pages::PageAddress;
+#[path = "address.rs"]
+mod address;
+
+use self::address::PageAddress;
+use duck_address::ChainId;
 use ducktape_view_guest::host;
 use futures::{Stream, StreamExt, stream};
 use serde::{Deserialize, Serialize};
@@ -2013,7 +2017,7 @@ async fn picked_picture(page_id: String, chain: String) -> Result<PictureItem, S
         return Err("open a page before adding a picture".into());
     }
     let chosen = host::request("fs.pick", b"{}").await.map_err(host::said)?;
-    let files: Vec<ducktape_view_files::SelectedFile> =
+    let files: Vec<crate::file_policy::SelectedFile> =
         serde_json::from_slice(&chosen).map_err(|error| error.to_string())?;
     // The picker offers several; a document line holds one.
     let Some(file) = files.into_iter().next() else {
@@ -2025,14 +2029,14 @@ async fn picked_picture(page_id: String, chain: String) -> Result<PictureItem, S
     let id = mint("picture").await?;
     let path = format!("/shared/pages/{page_id}/{id}/{}", file_name(&file.name));
     // A picture no address can name is refused before its bytes leave.
-    let uri = match ducktape_view_files::file_address(&chain, &path) {
+    let uri = match crate::file_policy::file_address(&chain, &path) {
         Ok(uri) => uri,
         Err(refused) => {
-            ducktape_view_files::release(&file.token).await;
+            crate::file_policy::release(&file.token).await;
             return Err(refused.sentence);
         }
     };
-    ducktape_view_files::upload(file, path)
+    crate::file_policy::upload(file, path)
         .await
         .map_err(host::said)?;
     Ok(PictureItem {
@@ -2121,7 +2125,7 @@ pub fn document_pictures(text: &str) -> Vec<String> {
 /// The duckfs path of a line that is one picture and nothing else.
 fn picture_line_path(line: &str) -> Option<String> {
     let (_alt, src) = crate::rich_document::picture_line(line)?;
-    ducktape_view_files::address_path(src).ok()
+    crate::file_policy::address_path(src).ok()
 }
 
 /// Ask the host to page in one duckfs picture and decode it into this view's
@@ -2139,7 +2143,7 @@ pub async fn load_picture(path: String) -> String {
 /// is the view's `<label>#<salt>`; without one, or without a page, there is
 /// no link to give: a link that names no network opens nowhere.
 pub fn page_address(page_id: &str, chain: &str) -> String {
-    let Ok(chain) = chain.parse::<duck_address::ChainId>() else {
+    let Ok(chain) = chain.parse::<ChainId>() else {
         return String::new();
     };
     PageAddress {
