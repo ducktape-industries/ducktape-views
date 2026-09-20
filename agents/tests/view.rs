@@ -153,7 +153,9 @@ fn reply_for(request: &Request) -> Option<Value> {
     match (request.kind.as_str(), target) {
         ("rpc.status", _) => Some(json!({ "chain_id": "duck-1#a1b2c3d4" })),
         ("rpc.query", "identity") => Some(accounts()),
-        ("rpc.query", "capability") => Some(json!({ "all": [[[1, 2], ["claude", "codex"]]] })),
+        ("rpc.query", "capability") => Some(
+            json!({ "all": [[[1, 2], ["agent", "compute", "airlock", "claude", "codex", "pi", "claude:sonnet", "codex:gpt-6", "pi:model", "claude"]]] }),
+        ),
         ("rpc.query", "runs") if named("model") => Some(json!({ "model": { "agents": [
             model("reviewer-bot", "Reviewer Bot", "active"),
             model("scribe", "Scribe", "paused"),
@@ -448,6 +450,33 @@ fn the_controller_pauses_a_record_with_a_signed_op() {
     assert_eq!(submit.kind, "op.submit");
     let op: Value = serde_json::from_slice(&submit.payload).expect("an op decodes");
     assert_eq!(op, fixture("configure-model-pause"));
+}
+
+#[test]
+fn executor_picker_excludes_service_kinds_and_keeps_model_variants() {
+    let (frame, _) = registered("7");
+    let frame = tick_native(press(&frame, "Runs"));
+    let frame = tick_native(press(&frame, "New agent"));
+    fn options(node: &Node) -> Option<&Vec<String>> {
+        if let Node::PickList { key, options, .. } = node
+            && key == CAPABILITY_PICK
+        {
+            return Some(options);
+        }
+        node.children().iter().find_map(|child| options(child))
+    }
+    let options = options(frame.root.as_ref().expect("form root")).expect("executor picker");
+    assert_eq!(
+        options,
+        &[
+            "claude",
+            "claude:sonnet",
+            "codex",
+            "codex:gpt-6",
+            "pi",
+            "pi:model"
+        ]
+    );
 }
 
 /// Registration provisions an account, reads its controller-scoped receipt,
