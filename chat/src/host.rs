@@ -17,10 +17,11 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 
-use duck_address::chat::MessageAddress;
-use duck_address::identity::AccountAddress;
-use duck_address::runs::RunAddress;
-use duck_address::{Address, ChainId, Refused};
+#[path = "address.rs"]
+mod address;
+
+use self::address::{AccountAddress, MessageAddress, RunAddress};
+use duck_address::{Address, ChainId};
 use ducktape_view_guest::host;
 use futures::{FutureExt, Stream, StreamExt, stream};
 use serde::{Deserialize, Serialize};
@@ -3133,11 +3134,11 @@ pub fn own_chain(session: &Session) -> String {
 
 /// `address` on `chain` (`<label>#<salt>`) as a `duck://` link, or "" when
 /// there is none to give: no chain known, or a tail its module refuses.
-fn minted(chain: &str, address: impl FnOnce(ChainId) -> Result<Address, Refused>) -> String {
+fn minted(chain: &str, address: impl FnOnce(ChainId) -> Option<Address>) -> String {
     chain
         .parse()
         .ok()
-        .and_then(|chain| address(chain).ok())
+        .and_then(address)
         .map(|address| address.to_string())
         .unwrap_or_default()
 }

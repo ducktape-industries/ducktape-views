@@ -22,8 +22,10 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 
-use duck_address::forge::{ForgeLocator, ForgeRepoAddress, ForgeTarget};
-use duck_address::identity::AccountAddress;
+#[path = "address.rs"]
+mod address;
+
+use self::address::{AccountAddress, ForgeLocator, ForgeRepoAddress, ForgeTarget};
 use duck_address::{Address, ChainId};
 use ducktape_view_guest::host;
 use futures::{Stream, StreamExt, stream};
@@ -1158,15 +1160,15 @@ pub fn pressed_link(link: String, chain: &str) -> String {
     chain
         .parse::<ChainId>()
         .ok()
-        .and_then(|chain| AccountAddress { account }.address(chain).ok())
+        .and_then(|chain| AccountAddress { account }.address(chain))
         .map(|address| address.to_string())
         .unwrap_or_default()
 }
 
 fn forge_address(chain: &str, repo: &str, target: ForgeTarget) -> Option<String> {
     let chain = chain.parse::<ChainId>().ok()?;
-    let repo = ForgeRepoAddress::from_name(repo).ok()?;
-    let address = ForgeLocator { repo, target }.address(chain).ok()?;
+    let repo = ForgeRepoAddress::from_name(repo)?;
+    let address = ForgeLocator { repo, target }.address(chain)?;
     Some(address.to_string())
 }
 
@@ -1524,18 +1526,17 @@ pub fn forge_link(url: &str) -> ForgeLink {
     let Ok(address) = Address::parse(url) else {
         return ForgeLink::default();
     };
-    let named = ForgeRepoAddress::name;
-    if let Ok(repo) = ForgeRepoAddress::try_from(&address) {
+    if let Some(repo) = ForgeRepoAddress::from_address(&address) {
         return ForgeLink {
-            repo: named(&repo),
+            repo: repo.name(),
             ..ForgeLink::default()
         };
     }
-    let Ok(locator) = ForgeLocator::try_from(&address) else {
+    let Some(locator) = ForgeLocator::from_address(&address) else {
         return ForgeLink::default();
     };
     let link = ForgeLink {
-        repo: named(&locator.repo),
+        repo: locator.repo.name(),
         ..ForgeLink::default()
     };
     let counted = |number: u64| i64::try_from(number).unwrap_or(0);
