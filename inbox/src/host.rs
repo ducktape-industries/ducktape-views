@@ -576,7 +576,11 @@ async fn source_detail(item: &Item, row: &mut Row, chain: &str) -> Result<(), St
 }
 
 async fn chat_message(object: &str, row: &mut Row, chain: &str) -> Result<(), String> {
-    let reply = view("chat", serde_json::json!({"message":{"message_id":object}})).await?;
+    let reply = view(
+        "chat",
+        serde_json::json!({"message":{"message_id":object,"viewer_handles":[]}}),
+    )
+    .await?;
     let message = reply.get("message").ok_or("wrong message reply")?;
     if message.is_null() {
         row.detail = "Message not found".into();
@@ -650,18 +654,18 @@ async fn page_comment(object: &str, row: &mut Row, chain: &str) -> Result<(), St
         serde_json::json!({"thread_of_comment":{"comment_id":object}}),
     )
     .await?;
-    let thread = reply.get("thread").ok_or("wrong comment reply")?;
-    if thread.is_null() {
+    let result = reply
+        .get("thread_of_comment")
+        .ok_or("wrong comment reply")?;
+    if result.is_null() {
         row.detail = "Comment not found".into();
         return Ok(());
     }
-    let comment = thread["comments"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|comment| comment["id"].as_str() == Some(object))
-        .ok_or("wrong comment")?
-        .clone();
+    let thread = &result["thread"];
+    let comment = &result["comment"];
+    if comment["id"].as_str() != Some(object) {
+        return Err("wrong comment".into());
+    }
     if comment["deleted"].as_bool().unwrap_or_default() {
         row.detail = "Comment deleted".into();
         return Ok(());

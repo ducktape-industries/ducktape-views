@@ -1111,6 +1111,8 @@ pub struct RoomKey {
     pub land: i64,
     /// how many older pages the reader has asked for beyond the first
     pub pages: i64,
+    /// one canonical row refresh after a reaction; zero means a full window
+    pub refresh_seq: i64,
 }
 
 pub fn room_key(serial: i64, names: i64, channel: &str, land: i64, pages: i64) -> RoomKey {
@@ -1120,12 +1122,30 @@ pub fn room_key(serial: i64, names: i64, channel: &str, land: i64, pages: i64) -
         channel: channel.to_owned(),
         land,
         pages,
+        refresh_seq: 0,
+    }
+}
+
+pub fn room_reaction_key(
+    serial: i64,
+    names: i64,
+    channel: &str,
+    land: i64,
+    pages: i64,
+    seq: i64,
+) -> RoomKey {
+    RoomKey {
+        refresh_seq: seq,
+        ..room_key(serial, names, channel, land, pages)
     }
 }
 
 /// One reading of the room on screen: its record, its roster and its window.
 #[derive(Clone, Debug, Default, Hash, PartialEq)]
 pub struct RoomItem {
+    pub serial: i64,
+    pub names: i64,
+    pub refresh_seq: i64,
     pub channel: String,
     pub name: String,
     pub archived: bool,
@@ -1383,19 +1403,23 @@ pub fn room(key: RoomKey) -> ducktape_view_guest::Subscription<RoomItem> {
     ducktape_view_guest::Subscription::run_with(key, |key| {
         let key = key.clone();
         let live = host::subscribe("rpc.live", b"chat");
-        let first = read_room(key.clone());
-        stream::once(first).chain(live.then(move |_| read_room(key.clone())))
+        let first = read_room(key.clone(), true);
+        stream::once(first).chain(live.then(move |_| read_room(key.clone(), false)))
     })
 }
 
-async fn read_room(key: RoomKey) -> RoomItem {
+async fn read_room(key: RoomKey, scoped_refresh: bool) -> RoomItem {
     if key.channel.is_empty() {
         return RoomItem::default();
     }
     let names = names_at(key.names).await;
-    match read_room_now(&key, &names).await {
+    let viewer_handles = viewer_handles();
+    match read_room_now(&key, &names, &viewer_handles, scoped_refresh).await {
         Ok(item) => item,
         Err(error) => RoomItem {
+            serial: key.serial,
+            names: key.names,
+            refresh_seq: key.refresh_seq,
             channel: key.channel,
             error,
             ..RoomItem::default()
@@ -1403,15 +1427,34 @@ async fn read_room(key: RoomKey) -> RoomItem {
     }
 }
 
-async fn read_room_now(key: &RoomKey, names: &Names) -> Result<RoomItem, String> {
+async fn read_room_now(
+    key: &RoomKey,
+    names: &Names,
+    viewer_handles: &[String],
+    scoped_refresh: bool,
+) -> Result<RoomItem, String> {
+    if scoped_refresh && key.refresh_seq > 0 {
+        return Ok(RoomItem {
+            serial: key.serial,
+            names: key.names,
+            refresh_seq: key.refresh_seq,
+            channel: key.channel.clone(),
+            messages: read_message_refresh(&key.channel, key.refresh_seq, names, viewer_handles)
+                .await?,
+            ..RoomItem::default()
+        });
+    }
     let record = view(
         "channel",
         serde_json::json!({ "channel": { "channel_id": key.channel } }),
     )
     .await?;
     let head_seq = record["head_seq"].as_i64().unwrap_or(0);
-    let window = read_window(key, names, head_seq).await?;
+    let window = read_window(key, names, viewer_handles, head_seq).await?;
     Ok(RoomItem {
+        serial: key.serial,
+        names: key.names,
+        refresh_seq: 0,
         channel: key.channel.clone(),
         name: record["name"].as_str().unwrap_or_default().to_owned(),
         archived: record["archived"].as_bool().unwrap_or(false),
@@ -1425,6 +1468,30 @@ async fn read_room_now(key: &RoomKey, names: &Names) -> Result<RoomItem, String>
     })
 }
 
+async fn read_message_refresh(
+    channel: &str,
+    seq: i64,
+    names: &Names,
+    viewer_handles: &[String],
+) -> Result<Vec<ChatMessage>, String> {
+    let rows = view(
+        "messages",
+        serde_json::json!({
+            "messages_around": { "channel_id": channel, "seq": seq,
+                "viewer_handles": viewer_handles, "limit": 1 },
+        }),
+    )
+    .await?
+    .as_array()
+    .cloned()
+    .unwrap_or_default();
+    Ok(rows
+        .iter()
+        .filter(|row| row["seq"].as_i64() == Some(seq))
+        .map(|row| fold_message(row, names))
+        .collect())
+}
+
 #[derive(Default)]
 struct Window {
     messages: Vec<ChatMessage>,
@@ -1435,9 +1502,14 @@ struct Window {
 
 /// The rows on screen: the live tail (plus every older page the reader has
 /// asked for), or the window centred on a landing seq.
-async fn read_window(key: &RoomKey, names: &Names, head_seq: i64) -> Result<Window, String> {
+async fn read_window(
+    key: &RoomKey,
+    names: &Names,
+    viewer_handles: &[String],
+    head_seq: i64,
+) -> Result<Window, String> {
     if key.land > 0 {
-        return read_landing_window(key, names, head_seq).await;
+        return read_landing_window(key, names, viewer_handles, head_seq).await;
     }
     let mut rows: Vec<serde_json::Value> = Vec::new();
     let mut before: Option<u64> = None;
@@ -1449,7 +1521,8 @@ async fn read_window(key: &RoomKey, names: &Names, head_seq: i64) -> Result<Wind
         let page = view(
             "roots",
             serde_json::json!({
-                "roots": { "channel_id": key.channel, "before_seq": before, "limit": PAGE_LIMIT },
+                "roots": { "channel_id": key.channel, "viewer_handles": viewer_handles,
+                    "before_seq": before, "limit": PAGE_LIMIT },
             }),
         )
         .await?;
@@ -1476,12 +1549,14 @@ async fn read_window(key: &RoomKey, names: &Names, head_seq: i64) -> Result<Wind
 async fn read_landing_window(
     key: &RoomKey,
     names: &Names,
+    viewer_handles: &[String],
     head_seq: i64,
 ) -> Result<Window, String> {
     let around = view(
         "messages",
         serde_json::json!({
-            "messages_around": { "channel_id": key.channel, "seq": key.land, "limit": PAGE_LIMIT },
+            "messages_around": { "channel_id": key.channel, "seq": key.land,
+                "viewer_handles": viewer_handles, "limit": PAGE_LIMIT },
         }),
     )
     .await?;
@@ -1513,7 +1588,7 @@ async fn read_landing_window(
         .first()
         .and_then(|row| row["seq"].as_u64())
         .unwrap_or(0);
-    let has_older = older_roots_exist(&key.channel, floor).await?;
+    let has_older = older_roots_exist(&key.channel, viewer_handles, floor).await?;
     let (messages, clipped) = fold_window(&roots, names, HOT_WINDOW_LIMIT);
     Ok(Window {
         messages,
@@ -1523,14 +1598,19 @@ async fn read_landing_window(
     })
 }
 
-async fn older_roots_exist(channel: &str, floor: u64) -> Result<bool, String> {
+async fn older_roots_exist(
+    channel: &str,
+    viewer_handles: &[String],
+    floor: u64,
+) -> Result<bool, String> {
     if floor == 0 {
         return Ok(false);
     }
     let page = view(
         "roots",
         serde_json::json!({
-            "roots": { "channel_id": channel, "before_seq": floor, "limit": 1 },
+            "roots": { "channel_id": channel, "viewer_handles": viewer_handles,
+                "before_seq": floor, "limit": 1 },
         }),
     )
     .await?;
@@ -1577,6 +1657,8 @@ pub struct ThreadKey {
     pub target: i64,
     /// how many reply pages beyond the first the reader has asked for
     pub pages: i64,
+    /// one canonical row refresh after a reaction; zero means a full thread
+    pub refresh_seq: i64,
 }
 
 pub fn thread_key(
@@ -1594,11 +1676,30 @@ pub fn thread_key(
         root,
         target,
         pages,
+        refresh_seq: 0,
+    }
+}
+
+pub fn thread_reaction_key(
+    serial: i64,
+    names: i64,
+    channel: &str,
+    root: i64,
+    target: i64,
+    pages: i64,
+    seq: i64,
+) -> ThreadKey {
+    ThreadKey {
+        refresh_seq: seq,
+        ..thread_key(serial, names, channel, root, target, pages)
     }
 }
 
 #[derive(Clone, Debug, Default, Hash, PartialEq)]
 pub struct ThreadItem {
+    pub serial: i64,
+    pub names: i64,
+    pub refresh_seq: i64,
     pub root_seq: i64,
     pub target_seq: i64,
     pub messages: Vec<ChatMessage>,
@@ -1613,19 +1714,23 @@ pub fn thread(key: ThreadKey) -> ducktape_view_guest::Subscription<ThreadItem> {
     ducktape_view_guest::Subscription::run_with(key, |key| {
         let key = key.clone();
         let live = host::subscribe("rpc.live", b"chat");
-        let first = read_thread(key.clone());
-        stream::once(first).chain(live.then(move |_| read_thread(key.clone())))
+        let first = read_thread(key.clone(), true);
+        stream::once(first).chain(live.then(move |_| read_thread(key.clone(), false)))
     })
 }
 
-async fn read_thread(key: ThreadKey) -> ThreadItem {
+async fn read_thread(key: ThreadKey, scoped_refresh: bool) -> ThreadItem {
     if key.channel.is_empty() || key.root <= 0 {
         return ThreadItem::default();
     }
     let names = names_at(key.names).await;
-    match read_thread_now(&key, &names).await {
+    let viewer_handles = viewer_handles();
+    match read_thread_now(&key, &names, &viewer_handles, scoped_refresh).await {
         Ok(item) => item,
         Err(error) => ThreadItem {
+            serial: key.serial,
+            names: key.names,
+            refresh_seq: key.refresh_seq,
             root_seq: key.root,
             target_seq: key.target,
             error,
@@ -1634,7 +1739,24 @@ async fn read_thread(key: ThreadKey) -> ThreadItem {
     }
 }
 
-async fn read_thread_now(key: &ThreadKey, names: &Names) -> Result<ThreadItem, String> {
+async fn read_thread_now(
+    key: &ThreadKey,
+    names: &Names,
+    viewer_handles: &[String],
+    scoped_refresh: bool,
+) -> Result<ThreadItem, String> {
+    if scoped_refresh && key.refresh_seq > 0 {
+        return Ok(ThreadItem {
+            serial: key.serial,
+            names: key.names,
+            refresh_seq: key.refresh_seq,
+            root_seq: key.root,
+            target_seq: key.target,
+            messages: read_message_refresh(&key.channel, key.refresh_seq, names, viewer_handles)
+                .await?,
+            ..ThreadItem::default()
+        });
+    }
     let mut rows: Vec<serde_json::Value> = Vec::new();
     let mut root = serde_json::Value::Null;
     let mut after: Option<u64> = None;
@@ -1645,6 +1767,7 @@ async fn read_thread_now(key: &ThreadKey, names: &Names) -> Result<ThreadItem, S
             serde_json::json!({
                 "thread": {
                     "channel_id": key.channel,
+                    "viewer_handles": viewer_handles,
                     "root_seq": key.root,
                     "after_reply_seq": after,
                     "limit": PAGE_LIMIT,
@@ -1674,6 +1797,9 @@ async fn read_thread_now(key: &ThreadKey, names: &Names) -> Result<ThreadItem, S
     let (replies, clipped) = fold_window(&rows, names, HOT_WINDOW_LIMIT);
     messages.extend(replies);
     Ok(ThreadItem {
+        serial: key.serial,
+        names: key.names,
+        refresh_seq: 0,
         root_seq: key.root,
         target_seq: key.target,
         messages,
@@ -1689,20 +1815,28 @@ pub struct SearchKey {
     pub serial: i64,
     pub names: i64,
     pub query: String,
+    pub after: Option<String>,
 }
 
-pub fn search_key(serial: i64, names: i64, query: &str) -> SearchKey {
+pub fn search_key(serial: i64, names: i64, query: &str, after: Option<&str>) -> SearchKey {
     SearchKey {
         serial,
         names,
         query: query.trim().to_owned(),
+        after: after.map(str::to_owned),
     }
 }
 
 #[derive(Clone, Debug, Default, Hash, PartialEq)]
 pub struct SearchItem {
+    pub serial: i64,
+    pub names: i64,
     pub query: String,
     pub hits: Vec<ChatSearchHit>,
+    pub capped: bool,
+    pub has_more: bool,
+    pub next_after: Option<String>,
+    pub after: Option<String>,
     pub error: String,
 }
 
@@ -1711,17 +1845,50 @@ pub fn search(key: SearchKey) -> ducktape_view_guest::Subscription<SearchItem> {
     ducktape_view_guest::Subscription::run_with(key, |key| stream::once(read_search(key.clone())))
 }
 
-fn search_query(text: &str, channel: Option<&str>) -> serde_json::Value {
+fn search_query(
+    text: &str,
+    channel: Option<&str>,
+    viewer_handles: &[String],
+    after: Option<&str>,
+) -> serde_json::Value {
     // A `#tag` query filters by the exact hashtag (the index's tag postings);
     // anything else is full-text search.
     match text.strip_prefix('#').filter(|tag| !tag.is_empty()) {
         Some(tag) => serde_json::json!({
-            "tag_search": { "tag": tag.to_lowercase(), "channel_id": channel, "limit": 50 },
+            "tag_search": { "tag": tag.to_lowercase(), "channel_id": channel,
+                "viewer_handles": viewer_handles, "after": after, "limit": 50 },
         }),
         None => serde_json::json!({
-            "search": { "text": text, "channel_id": channel, "limit": 50 },
+            "search": { "text": text, "channel_id": channel,
+                "viewer_handles": viewer_handles, "limit": 50 },
         }),
     }
+}
+
+async fn search_payload(
+    text: &str,
+    channel: Option<&str>,
+    viewer_handles: &[String],
+    after: Option<&str>,
+) -> Result<serde_json::Value, String> {
+    let reply = ask(
+        "rpc.view",
+        &serde_json::json!({
+            "target": "chat",
+            "query": search_query(text, channel, viewer_handles, after),
+        }),
+    )
+    .await?;
+    let variant = if text
+        .strip_prefix('#')
+        .filter(|tag| !tag.is_empty())
+        .is_some()
+    {
+        "tag_hits"
+    } else {
+        "hits"
+    };
+    Ok(reply[variant].clone())
 }
 
 async fn read_search(key: SearchKey) -> SearchItem {
@@ -1729,16 +1896,28 @@ async fn read_search(key: SearchKey) -> SearchItem {
         return SearchItem::default();
     }
     let names = names_at(key.names).await;
-    let query = search_query(&key.query, None);
-    match view("hits", query).await {
+    let viewer_handles = viewer_handles();
+    match search_payload(&key.query, None, &viewer_handles, key.after.as_deref()).await {
         Ok(reply) => SearchItem {
+            serial: key.serial,
+            names: key.names,
             hits: fold_hits(&reply, &names),
+            capped: reply["capped"].as_bool().unwrap_or(false),
+            has_more: reply["has_more"].as_bool().unwrap_or(false),
+            next_after: reply["next_after"].as_str().map(str::to_owned),
+            after: key.after,
             query: key.query,
             error: String::new(),
         },
         Err(error) => SearchItem {
+            serial: key.serial,
+            names: key.names,
             query: key.query,
             hits: Vec::new(),
+            capped: false,
+            has_more: false,
+            next_after: None,
+            after: key.after,
             error,
         },
     }
@@ -1748,7 +1927,7 @@ async fn read_search(key: SearchKey) -> SearchItem {
 /// "message 12", never `#12`: a bare `#12` reads as a CHANNEL in this app.
 /// The room is the view's to name — it holds the channel list.
 pub fn fold_hits(reply: &serde_json::Value, names: &Names) -> Vec<ChatSearchHit> {
-    reply
+    reply["hits"]
         .as_array()
         .cloned()
         .unwrap_or_default()
@@ -1766,6 +1945,20 @@ pub fn fold_hits(reply: &serde_json::Value, names: &Names) -> Vec<ChatSearchHit>
             }
         })
         .collect()
+}
+
+pub fn append_unique_search_hits(
+    hits: &mut Vec<ChatSearchHit>,
+    incoming: impl IntoIterator<Item = ChatSearchHit>,
+) {
+    for hit in incoming {
+        if !hits
+            .iter()
+            .any(|current| current.channel_id == hit.channel_id && current.seq == hit.seq)
+        {
+            hits.push(hit);
+        }
+    }
 }
 
 // ---------- the fold: an index row becomes a rendered message ----------
@@ -1858,30 +2051,28 @@ pub fn fold_message(row: &serde_json::Value, names: &Names) -> ChatMessage {
         avatar_kind: avatar_kind(author, names).to_owned(),
         height: row["height"].as_i64().unwrap_or(0),
         time: row["time"].as_i64().unwrap_or(0),
-        reactions: fold_reactions(&row["reactions"], names),
+        reactions: fold_reactions(&row["reactions"]),
         render_rev: 0,
     };
     seed_render_rev(message)
 }
 
-/// The reader's OWN signing key decides `by me`, never the account: a phone's
-/// reaction must not light up on the laptop just because both keys share one.
-fn fold_reactions(reactions: &serde_json::Value, names: &Names) -> Vec<ChatReaction> {
-    let me = ME.with_borrow(Clone::clone);
+/// Reaction count and ownership are canonical server summaries. The query's
+/// viewer handles decide `reacted_by_me`; this fold never rebuilds either fact
+/// from local reactor lists or a stale key-only cache.
+fn fold_reactions(reactions: &serde_json::Value) -> Vec<ChatReaction> {
     reactions
         .as_array()
         .cloned()
         .unwrap_or_default()
         .iter()
-        .map(|reaction| {
-            let reactors = reaction["reactors"].as_array().cloned().unwrap_or_default();
-            ChatReaction {
-                emoji: reaction["emoji"].as_str().unwrap_or_default().to_owned(),
-                count: count_i64(reactors.len()),
-                reacted_by_me: reactors
-                    .iter()
-                    .any(|reactor| owns_handle(reactor.as_str().unwrap_or_default(), &me, names)),
-            }
+        .map(|reaction| ChatReaction {
+            emoji: reaction["emoji"].as_str().unwrap_or_default().to_owned(),
+            count: reaction["count"]
+                .as_u64()
+                .and_then(|count| i64::try_from(count).ok())
+                .unwrap_or(i64::MAX),
+            reacted_by_me: reaction["reacted_by_me"].as_bool().unwrap_or(false),
         })
         .collect()
 }
@@ -1907,6 +2098,22 @@ pub fn seat_reader(handle: &str, key_hex: &str) -> bool {
         };
     });
     true
+}
+
+/// The SDK's exact ownership query: the active signing key, plus its current
+/// account when the key is seated in one. An empty session is an anonymous read.
+pub fn viewer_handles() -> Vec<String> {
+    ME.with_borrow(|me| {
+        let mut handles = Vec::new();
+        if !me.key_hex.is_empty() {
+            handles.push(format!("user:{}", me.key_hex));
+        }
+        if me.handle.starts_with("acct:") {
+            handles.push(me.handle.clone());
+        }
+        handles.dedup();
+        handles
+    })
 }
 
 /// An ACCOUNT record belongs to its current keys; a historic KEY record
@@ -2326,11 +2533,25 @@ fn count_i64(value: usize) -> i64 {
 #[derive(Clone, Debug, Default, Hash, PartialEq)]
 pub struct ActItem {
     pub error: String,
+    pub channel: String,
+    pub viewer_handles: Vec<String>,
+    pub refresh_seq: i64,
+    pub order: i64,
+    pub tracked: bool,
+}
+
+struct PendingAct {
+    response: host::Response,
+    channel: String,
+    viewer_handles: Vec<String>,
+    refresh_seq: i64,
+    order: i64,
 }
 
 #[derive(Default)]
 struct Acts {
-    pending: Vec<host::Response>,
+    pending: Vec<PendingAct>,
+    next_order: i64,
     waker: Option<Waker>,
 }
 
@@ -2342,8 +2563,31 @@ thread_local! {
 fn submit(message: serde_json::Value) -> bool {
     let op = serde_json::json!({ "target": "chat", "payload": message });
     let response = host::request("op.submit", &serde_json::to_vec(&op).expect("encodes"));
+    let payload = &op["payload"];
+    let action = payload
+        .get("add_reaction")
+        .or_else(|| payload.get("remove_reaction"));
+    let channel = action
+        .and_then(|action| action["channel_id"].as_str())
+        .unwrap_or_default()
+        .to_owned();
+    let refresh_seq = action
+        .and_then(|action| action["seq"].as_i64())
+        .unwrap_or_default();
     ACTS.with_borrow_mut(|acts| {
-        acts.pending.push(response);
+        let order = if action.is_some() {
+            acts.next_order += 1;
+            acts.next_order
+        } else {
+            0
+        };
+        acts.pending.push(PendingAct {
+            response,
+            channel,
+            viewer_handles: viewer_handles(),
+            refresh_seq,
+            order,
+        });
         if let Some(waker) = acts.waker.take() {
             waker.wake();
         }
@@ -2364,19 +2608,33 @@ impl Stream for ActStream {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<ActItem>> {
         ACTS.with_borrow_mut(|acts| {
             let mut finished = None;
-            for (index, response) in acts.pending.iter_mut().enumerate() {
-                if let Poll::Ready(answer) = Pin::new(response).poll(cx) {
-                    finished = Some((index, answer));
+            for (index, pending) in acts.pending.iter_mut().enumerate() {
+                if let Poll::Ready(answer) = Pin::new(&mut pending.response).poll(cx) {
+                    finished = Some((
+                        index,
+                        answer,
+                        pending.channel.clone(),
+                        pending.viewer_handles.clone(),
+                        pending.refresh_seq,
+                        pending.order,
+                    ));
                     break;
                 }
             }
-            let Some((index, answer)) = finished else {
+            let Some((index, answer, channel, viewer_handles, refresh_seq, order)) = finished
+            else {
                 acts.waker = Some(cx.waker().clone());
                 return Poll::Pending;
             };
             acts.pending.remove(index);
+            let tracked = refresh_seq > 0 && !channel.is_empty();
             Poll::Ready(Some(ActItem {
                 error: answer.err().map(host::said).unwrap_or_default(),
+                channel,
+                viewer_handles,
+                refresh_seq,
+                order,
+                tracked,
             }))
         })
     }
@@ -2513,6 +2771,7 @@ pub async fn cancel_run(run_id: String) -> ActItem {
         host::request("op.submit", &serde_json::to_vec(&request).expect("encodes")).await;
     ActItem {
         error: response.err().map(host::said).unwrap_or_default(),
+        ..Default::default()
     }
 }
 
@@ -2708,38 +2967,23 @@ pub fn reaction_refusal(archived: bool, banner: &str) -> String {
     }
 }
 
-/// The reaction chip as the tap leaves it, before the block lands. Rides the
-/// canonical reactor-set fold, so the settled row replaces it without drifting.
-pub fn reaction_applied(
+/// Replace one visible row with the server's canonical snapshot. A missing
+/// canonical row removes the old one, so a delete cannot be resurrected by an
+/// older refresh; rows outside this surface are never appended.
+pub fn replace_canonical_message(
     messages: &[ChatMessage],
     seq: i64,
-    emoji: &str,
-    added: bool,
+    canonical: Option<ChatMessage>,
 ) -> Vec<ChatMessage> {
-    let mut rows = messages.to_vec();
-    let Some(message) = rows.iter_mut().find(|message| message.seq == seq) else {
-        return rows;
-    };
-    let chip = message
-        .reactions
-        .iter_mut()
-        .find(|reaction| reaction.emoji == emoji);
-    match chip {
-        Some(chip) if chip.reacted_by_me != added => {
-            chip.reacted_by_me = added;
-            chip.count = (chip.count + if added { 1 } else { -1 }).max(0);
-        }
-        Some(_) => return rows,
-        None if added => message.reactions.push(ChatReaction {
-            emoji: emoji.to_owned(),
-            count: 1,
-            reacted_by_me: true,
-        }),
-        None => return rows,
-    }
-    message.reactions.retain(|reaction| reaction.count > 0);
-    message.render_rev = message.render_rev.wrapping_add(1);
-    rows
+    messages
+        .iter()
+        .filter_map(|message| {
+            if message.seq != seq {
+                return Some(message.clone());
+            }
+            canonical.clone()
+        })
+        .collect()
 }
 
 /// WHICH LIST A RANGE ADDRESSES. The surface the shift-click landed in picks
@@ -2820,10 +3064,18 @@ pub fn menu_origin(press: (f64, f64), size: (f64, f64), viewport: (f64, f64)) ->
 }
 
 /// The line over a search's hits: how many, for what.
-pub fn search_summary(hits: usize, query: &str) -> String {
-    match hits {
+pub fn search_summary(hits: usize, query: &str, capped: bool, has_more: bool) -> String {
+    let summary = match hits {
         1 => format!("1 result for “{query}”"),
         hits => format!("{hits} results for “{query}”"),
+    };
+    if capped {
+        return format!("{summary} · results capped; narrow your search");
+    }
+    if has_more {
+        format!("{summary} · more results available")
+    } else {
+        summary
     }
 }
 
@@ -3311,7 +3563,8 @@ async fn background_search(
     }
     let names = read_names(0).await;
     let channel = (!channel.is_empty()).then_some(channel.as_str());
-    let reply = view("hits", search_query(text, channel)).await?;
+    let viewer_handles = viewer_handles();
+    let reply = search_payload(text, channel, &viewer_handles, None).await?;
     let mut hits = fold_hits(&reply, &names);
     for hit in &mut hits {
         hit.meta = format!("{} · #{}", hit.channel_id, hit.seq);
@@ -3320,7 +3573,12 @@ async fn background_search(
         })
         .0;
     }
-    Ok(serde_json::json!({"hits":hits}))
+    Ok(serde_json::json!({
+        "hits": hits,
+        "capped": reply["capped"].as_bool().unwrap_or(false),
+        "has_more": reply["has_more"].as_bool().unwrap_or(false),
+        "next_after": reply["next_after"].as_str(),
+    }))
 }
 
 async fn participate(intent: BackgroundRequest) -> Result<serde_json::Value, BackgroundError> {

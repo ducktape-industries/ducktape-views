@@ -244,6 +244,7 @@ fn answered(kind: &'static str, label: &'static str) -> Leg {
         kind,
         label,
         hits: Some(vec![hit(kind)]),
+        capped: false,
     }
 }
 
@@ -252,6 +253,7 @@ fn silent(kind: &'static str, label: &'static str) -> Leg {
         kind,
         label,
         hits: None,
+        capped: false,
     }
 }
 

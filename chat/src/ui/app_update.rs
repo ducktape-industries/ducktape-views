@@ -26,6 +26,7 @@ impl super::ChatView {
             Message::SearchArrived(item) => self.on_search_arrived(item),
             Message::ActDone(item) => self.on_act_done(item),
             Message::SearchChatSubmit => self.on_search_chat_submit(),
+            Message::LoadMoreSearch => self.on_load_more_search(),
             Message::ClearChatSearch => self.on_clear_chat_search(),
             Message::OpenChatSearchHit(channel_id, _root_seq, target_seq) => {
                 self.on_open_chat_search_hit(channel_id, _root_seq, target_seq)
@@ -236,7 +237,9 @@ impl super::ChatView {
         self.copy_chord_serial = next.copy_chord_serial;
         let changed_reader = self.endpoint != next.endpoint
             || self.network_chain_id != crate::host::own_chain(&next)
-            || self.me_key != next.me_key;
+            || self.me != next.me
+            || self.me_key != next.me_key
+            || self.names_serial != next.names_serial;
         let requested_dm =
             next.connected && !next.dm_peer.is_empty() && next.dm_serial != self.dm_request_serial;
         let changed_dm_reader = changed_reader || self.me != next.me;
@@ -285,6 +288,14 @@ impl super::ChatView {
             ::std::convert::AsRef::as_ref(&(next.me_key)),
         );
         self.names_serial = next.names_serial;
+        if rebound {
+            self.search_key = crate::host::search_key(
+                self.connection_serial,
+                self.names_serial,
+                &self.search_query,
+                None,
+            );
+        }
         let changed_channel = self.active_channel != next.active_channel;
         let changed_room_identity = changed_reader || changed_channel;
         if changed_room_identity {
@@ -549,14 +560,27 @@ impl super::ChatView {
         &mut self,
         item: crate::host::RoomItem,
     ) -> ducktape_view_guest::Task<Message> {
-        self.host_error = crate::host::failure_note("Couldn’t read this room", &item.error);
-        self.history_loading = false;
-        if item.channel != self.active_channel {
+        let current = item.serial == self.room_key.serial
+            && item.names == self.names_serial
+            && item.channel == self.active_channel;
+        if !current {
             return ::ducktape_view_guest::Task::none();
         }
+        self.host_error = crate::host::failure_note("Couldn’t read this room", &item.error);
+        self.history_loading = false;
         self.room_channel = item.channel.to_owned();
         self.loading = self.session_loading || self.dm_opening.is_some();
         if !(item.error).is_empty() {
+            return ::ducktape_view_guest::Task::none();
+        }
+        if item.refresh_seq > 0 {
+            self.room_messages = crate::host::replace_canonical_message(
+                &self.room_messages,
+                item.refresh_seq,
+                item.messages.first().cloned(),
+            );
+            self.messages =
+                crate::host::with_pending(&self.room_messages, &self.pending_sends, 0, &self.me);
             return ::ducktape_view_guest::Task::none();
         }
         self.active_channel_name = item.name.to_owned();
@@ -628,12 +652,26 @@ impl super::ChatView {
         &mut self,
         item: crate::host::ThreadItem,
     ) -> ducktape_view_guest::Task<Message> {
-        self.host_error = crate::host::failure_note("Couldn’t read this thread", &item.error);
-        self.thread_loading = false;
-        if item.root_seq != self.active_thread_seq {
+        let current = item.serial == self.thread_key.serial
+            && item.names == self.names_serial
+            && item.root_seq == self.active_thread_seq;
+        if !current {
             return ::ducktape_view_guest::Task::none();
         }
+        self.host_error = crate::host::failure_note("Couldn’t read this thread", &item.error);
+        self.thread_loading = false;
         if !(item.error).is_empty() {
+            return ::ducktape_view_guest::Task::none();
+        }
+        if item.refresh_seq > 0 {
+            let next = crate::host::replace_canonical_message(
+                &self.thread_messages,
+                item.refresh_seq,
+                item.messages.first().cloned(),
+            );
+            if ::ducktape_view_guest::state_changed!(self.thread_messages, next) {
+                self.thread_messages = next;
+            }
             return ::ducktape_view_guest::Task::none();
         }
         self.sending
@@ -667,11 +705,24 @@ impl super::ChatView {
         &mut self,
         item: crate::host::SearchItem,
     ) -> ducktape_view_guest::Task<Message> {
-        self.host_error = crate::host::failure_note("Search didn’t go through", &item.error);
-        if (item.query).is_empty() || (item.query != self.search_query) {
+        let current = item.serial == self.search_key.serial
+            && item.names == self.search_key.names
+            && item.query == self.search_query
+            && item.after == self.search_key.after
+            && self.search_draft.trim() == self.search_query;
+        if !current {
             return ::ducktape_view_guest::Task::none();
         }
-        self.search_hits = item.hits.clone();
+        self.host_error = crate::host::failure_note("Search didn’t go through", &item.error);
+        if item.after.is_some() {
+            crate::host::append_unique_search_hits(&mut self.search_hits, item.hits);
+        } else {
+            self.search_hits = item.hits;
+        }
+        self.search_capped = item.capped;
+        self.search_has_more = item.has_more;
+        self.search_next_after = item.next_after;
+        self.search_loading = false;
         match crate::host::search_outcome((item.error).is_empty()) {
             SearchOutcome::Answered => {
                 self.search_phase = SearchPhase::Done;
@@ -685,6 +736,15 @@ impl super::ChatView {
         }
     }
     fn on_act_done(&mut self, item: crate::host::ActItem) -> ducktape_view_guest::Task<Message> {
+        if item.tracked {
+            if item.channel != self.active_channel
+                || item.viewer_handles != crate::host::viewer_handles()
+                || item.order < self.reaction_order
+            {
+                return ::ducktape_view_guest::Task::none();
+            }
+            self.reaction_order = item.order;
+        }
         self.busy = self.session_busy;
         self.host_error = crate::host::failure_note("That didn’t go through", &item.error);
         self.selected_message_seq = 0;
@@ -697,21 +757,43 @@ impl super::ChatView {
         self.thread_edit_draft = "".to_owned();
         self.member_key_draft = "".to_owned();
         self.room_serial += 1;
-        self.room_key = crate::host::room_key(
-            self.connection_serial + self.room_serial,
-            self.names_serial,
-            ::std::convert::AsRef::as_ref(&(self.active_channel)),
-            self.land_seq,
-            self.history_pages,
-        );
-        self.thread_key = crate::host::thread_key(
-            self.connection_serial + self.room_serial,
-            self.names_serial,
-            ::std::convert::AsRef::as_ref(&(self.active_channel)),
-            self.active_thread_seq,
-            self.thread_target_seq,
-            self.thread_pages,
-        );
+        let serial = self.connection_serial + self.room_serial;
+        self.room_key = match item.error.is_empty() && item.refresh_seq > 0 {
+            true => crate::host::room_reaction_key(
+                serial,
+                self.names_serial,
+                &self.active_channel,
+                self.land_seq,
+                self.history_pages,
+                item.refresh_seq,
+            ),
+            false => crate::host::room_key(
+                serial,
+                self.names_serial,
+                &self.active_channel,
+                self.land_seq,
+                self.history_pages,
+            ),
+        };
+        self.thread_key = match item.error.is_empty() && item.refresh_seq > 0 {
+            true => crate::host::thread_reaction_key(
+                serial,
+                self.names_serial,
+                &self.active_channel,
+                self.active_thread_seq,
+                self.thread_target_seq,
+                self.thread_pages,
+                item.refresh_seq,
+            ),
+            false => crate::host::thread_key(
+                serial,
+                self.names_serial,
+                &self.active_channel,
+                self.active_thread_seq,
+                self.thread_target_seq,
+                self.thread_pages,
+            ),
+        };
         ::ducktape_view_guest::Task::none()
     }
     fn on_search_chat_submit(&mut self) -> ducktape_view_guest::Task<Message> {
@@ -720,12 +802,34 @@ impl super::ChatView {
         }
         self.search_phase = SearchPhase::Searching;
         self.search_hits = Vec::new();
+        self.search_capped = false;
+        self.search_has_more = false;
+        self.search_next_after = None;
+        self.search_loading = true;
         self.search_query = (self.search_draft).trim().to_owned();
         self.host_error = "".to_owned();
         self.search_key = crate::host::search_key(
             self.connection_serial,
             self.names_serial,
             ::std::convert::AsRef::as_ref(&(self.search_query)),
+            None,
+        );
+        ::ducktape_view_guest::Task::none()
+    }
+    fn on_load_more_search(&mut self) -> ducktape_view_guest::Task<Message> {
+        if self.search_loading
+            || self.search_query.strip_prefix('#').is_none()
+            || self.search_next_after.is_none()
+        {
+            return ::ducktape_view_guest::Task::none();
+        }
+        let after = self.search_next_after.clone();
+        self.search_loading = true;
+        self.search_key = crate::host::search_key(
+            self.connection_serial,
+            self.names_serial,
+            &self.search_query,
+            after.as_deref(),
         );
         ::ducktape_view_guest::Task::none()
     }
@@ -733,11 +837,16 @@ impl super::ChatView {
         self.search_draft = "".to_owned();
         self.search_query = "".to_owned();
         self.search_hits = Vec::new();
+        self.search_capped = false;
+        self.search_has_more = false;
+        self.search_next_after = None;
+        self.search_loading = false;
         self.search_phase = SearchPhase::Idle;
         self.search_key = crate::host::search_key(
             self.connection_serial,
             self.names_serial,
             ::std::convert::AsRef::as_ref(&("")),
+            None,
         );
         ::ducktape_view_guest::Task::none()
     }
@@ -1402,29 +1511,6 @@ impl super::ChatView {
             return ::ducktape_view_guest::Task::none();
         }
         self.host_error = "".to_owned();
-        self.room_messages = crate::host::reaction_applied(
-            ::std::convert::AsRef::as_ref(&(self.room_messages)),
-            self.selected_message_seq,
-            ::std::convert::AsRef::as_ref(&(emoji)),
-            true,
-        );
-        self.messages = crate::host::with_pending(
-            ::std::convert::AsRef::as_ref(&(self.room_messages)),
-            ::std::convert::AsRef::as_ref(&(self.pending_sends)),
-            0,
-            ::std::convert::AsRef::as_ref(&(self.me)),
-        );
-        {
-            let next = crate::host::reaction_applied(
-                ::std::convert::AsRef::as_ref(&(self.thread_messages)),
-                self.selected_message_seq,
-                ::std::convert::AsRef::as_ref(&(emoji)),
-                true,
-            );
-            if ::ducktape_view_guest::state_changed!(self.thread_messages, next) {
-                self.thread_messages = next;
-            }
-        }
         self.sent = crate::host::write_reaction(
             ::std::convert::AsRef::as_ref(&(self.active_channel)),
             self.selected_message_seq,
@@ -1449,29 +1535,6 @@ impl super::ChatView {
             return ::ducktape_view_guest::Task::none();
         }
         self.host_error = "".to_owned();
-        self.room_messages = crate::host::reaction_applied(
-            ::std::convert::AsRef::as_ref(&(self.room_messages)),
-            seq,
-            ::std::convert::AsRef::as_ref(&(emoji)),
-            true,
-        );
-        self.messages = crate::host::with_pending(
-            ::std::convert::AsRef::as_ref(&(self.room_messages)),
-            ::std::convert::AsRef::as_ref(&(self.pending_sends)),
-            0,
-            ::std::convert::AsRef::as_ref(&(self.me)),
-        );
-        {
-            let next = crate::host::reaction_applied(
-                ::std::convert::AsRef::as_ref(&(self.thread_messages)),
-                seq,
-                ::std::convert::AsRef::as_ref(&(emoji)),
-                true,
-            );
-            if ::ducktape_view_guest::state_changed!(self.thread_messages, next) {
-                self.thread_messages = next;
-            }
-        }
         self.sent = crate::host::write_reaction(
             ::std::convert::AsRef::as_ref(&(self.active_channel)),
             seq,
@@ -1496,29 +1559,6 @@ impl super::ChatView {
             return ::ducktape_view_guest::Task::none();
         }
         self.host_error = "".to_owned();
-        self.room_messages = crate::host::reaction_applied(
-            ::std::convert::AsRef::as_ref(&(self.room_messages)),
-            seq,
-            ::std::convert::AsRef::as_ref(&(emoji)),
-            false,
-        );
-        self.messages = crate::host::with_pending(
-            ::std::convert::AsRef::as_ref(&(self.room_messages)),
-            ::std::convert::AsRef::as_ref(&(self.pending_sends)),
-            0,
-            ::std::convert::AsRef::as_ref(&(self.me)),
-        );
-        {
-            let next = crate::host::reaction_applied(
-                ::std::convert::AsRef::as_ref(&(self.thread_messages)),
-                seq,
-                ::std::convert::AsRef::as_ref(&(emoji)),
-                false,
-            );
-            if ::ducktape_view_guest::state_changed!(self.thread_messages, next) {
-                self.thread_messages = next;
-            }
-        }
         self.sent = crate::host::write_reaction(
             ::std::convert::AsRef::as_ref(&(self.active_channel)),
             seq,

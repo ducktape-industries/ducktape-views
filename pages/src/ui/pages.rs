@@ -464,20 +464,28 @@ impl PagesView {
 
     fn search_panel(&self) -> Node {
         let results = if self.page_search_hits.is_empty() {
-            kit::empty_state(
-                "pages/search/empty-state",
-                "No matching pages",
-                "Try another word; titles and every block are searched.",
-            )
+            let guidance = if self.page_search_capped {
+                "Results capped; narrow your search for more."
+            } else {
+                "Try another word; titles and every block are searched."
+            };
+            kit::empty_state("pages/search/empty-state", "No matching pages", guidance)
         } else {
+            let mut content = vec![kit::caption(
+                "pages/search/cap",
+                if self.page_search_capped {
+                    "Results capped; narrow your search for more."
+                } else {
+                    ""
+                },
+            )];
+            content.extend(self.page_search_hits.iter().map(|hit| self.search_result(hit)));
             kit::scroll(
                 "pages/search/scroll",
                 kit::spaced(
                     kit::column(
                         "pages/search/results",
-                        self.page_search_hits
-                            .iter()
-                            .map(|hit| self.search_result(hit)),
+                        content,
                     ),
                     2.,
                 ),
@@ -701,6 +709,28 @@ impl PagesView {
                     .iter()
                     .map(|thread| self.comment_thread(thread)),
             );
+        }
+        for target in self
+            .target_pages
+            .iter()
+            .filter(|target| target.has_more)
+            .filter(|target| self.scope_target.is_empty() || self.scope_target == target.target)
+        {
+            let label = crate::host::comment_target_label(
+                &self.blocks,
+                &target.target,
+                &self.active_page,
+            );
+            threads.push(leading(
+                format!("pages/comments/load-target/{}", target.target),
+                action(
+                    format!("pages/comments/load-target/{}/button", target.target),
+                    format!("Load more threads on {label}"),
+                    Message::LoadMoreTarget(target.target.clone()),
+                    !disabled,
+                    ButtonPreset::Text,
+                ),
+            ));
         }
         if !resolved.is_empty() {
             threads.push(leading(

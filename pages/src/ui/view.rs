@@ -71,6 +71,7 @@ pub struct PagesView {
     pub(crate) active_page_parent: String,
     pub(crate) page_searching: bool,
     pub(crate) page_search_hits: Vec<crate::host::PageSearchHit>,
+    pub(crate) page_search_capped: bool,
     pub(crate) page_search_query: String,
     pub(crate) page_search_serial: i64,
     pub(crate) page_delete_armed: bool,
@@ -83,6 +84,8 @@ pub struct PagesView {
     pub(crate) scope_pinned: bool,
     pub(crate) thread_total: i64,
     pub(crate) comment_rows: Vec<crate::host::PageCommentThreadRow>,
+    pub(crate) target_pages: Vec<crate::host::ThreadTargetPage>,
+    pub(crate) comment_generation: i64,
     /// The agent an "Ask AI" was just posted to, and how many comments the
     /// page carried when it went out. The answer arrives as another comment,
     /// so a page that has grown one has been answered.
@@ -151,6 +154,10 @@ pub enum Message {
     ResolveThreadSubmit(String, bool),
     SelectReplyThread(String),
     ToggleThreadReplies(String),
+    LoadMoreTarget(String),
+    LoadMoreReplies(String),
+    TargetPageArrived(crate::host::TargetPageItem),
+    ReplyPageArrived(crate::host::ReplyPageItem),
     ToggleResolvedComments,
     PostThreadReply(String),
     PostBlockCommentSubmit,
@@ -231,6 +238,7 @@ impl PagesView {
             active_page_parent: "".to_owned(),
             page_searching: false,
             page_search_hits: Vec::new(),
+            page_search_capped: false,
             page_search_query: "".to_owned(),
             page_search_serial: 0,
             page_delete_armed: false,
@@ -243,6 +251,8 @@ impl PagesView {
             scope_pinned: false,
             thread_total: 0,
             comment_rows: Vec::new(),
+            target_pages: Vec::new(),
+            comment_generation: 0,
             awaiting_agent: String::new(),
             awaiting_comments: 0,
             threads_loading: false,
@@ -266,7 +276,7 @@ impl PagesView {
     pub(crate) const PREFERRED_WINDOW_SIZE: &'static str = "none";
     /// This state's layout, digested — `snapshot_schema` holds it here.
     const SNAPSHOT_SCHEMA: &'static str =
-        "37094f89e5c6a00384a2f4c7ca7c349ef30b1b99216bc3bb86c6caaa9fed58e0";
+        "5ffddd6b58c8f22e5cae7a3d94e61010e5f313fe73ddeb2e9b4eebde636c25ec";
     pub(crate) fn snapshot(&self) -> Result<Vec<u8>, String> {
         self.validate_snapshot()?;
         wire::Snapshot {
@@ -839,6 +849,61 @@ mod tests {
             ..Default::default()
         }));
         assert!(app.awaiting_agent.is_empty(), "the answer ends the wait");
+    }
+
+    #[test]
+    fn stale_comment_continuations_cannot_replace_the_new_page() {
+        let (mut app, _) = PagesView::boot();
+        app.active_page = "page-new".into();
+        app.register_serial = 7;
+        app.comment_generation = 3;
+        app.threads_loading = true;
+        app.target_pages = vec![crate::host::ThreadTargetPage {
+            target: "block-new".into(),
+            has_more: true,
+            next_after: Some("cursor-new".into()),
+        }];
+        app.comment_rows = vec![crate::host::PageCommentThreadRow {
+            thread: crate::host::PageCommentThread {
+                id: "thread-new".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }];
+
+        app.update(Message::TargetPageArrived(crate::host::TargetPageItem {
+            page: "page-old".into(),
+            serial: 6,
+            generation: 2,
+            target: "block-new".into(),
+            after: Some("cursor-new".into()),
+            rows: vec![crate::host::PageCommentThreadRow {
+                thread: crate::host::PageCommentThread {
+                    id: "thread-stale".into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }],
+            ..Default::default()
+        }));
+        assert!(app.threads_loading);
+        assert_eq!(app.comment_rows[0].thread.id, "thread-new");
+        assert_eq!(app.target_pages[0].next_after.as_deref(), Some("cursor-new"));
+
+        app.update(Message::ReplyPageArrived(crate::host::ReplyPageItem {
+            page: "page-old".into(),
+            serial: 6,
+            generation: 2,
+            thread_id: "thread-new".into(),
+            after: "reply-old".into(),
+            thread: Some(crate::host::PageCommentThread {
+                id: "thread-new".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }));
+        assert!(app.threads_loading);
+        assert!(app.comment_rows[0].thread.comments.is_empty());
     }
 
     #[test]

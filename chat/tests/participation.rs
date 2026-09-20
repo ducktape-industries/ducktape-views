@@ -132,11 +132,13 @@ fn background_search_names_the_room_once_without_requesting_a_signature() {
         assert_eq!(payload(search)["query"]["search"]["channel_id"], "room");
         let frame = tick_native(vec![answer(
             search.id,
-            br#"{"hits":[{"channel_id":"room","seq":12,"author":"system","text":"needle"}]}"#,
+            br#"{"hits":{"hits":[{"channel_id":"room","seq":12,"author":"system","text":"needle"}],"capped":false,"has_more":true,"next_after":"opaque-1"}}"#,
         )]);
         let response = payload(request(&frame, "host.emit"));
         assert_eq!(response["hits"][0]["meta"], "room · #12");
         assert_eq!(response["hits"][0]["text"], "needle");
+        assert_eq!(response["has_more"], true);
+        assert_eq!(response["next_after"], "opaque-1");
         assert!(
             !frame
                 .requests

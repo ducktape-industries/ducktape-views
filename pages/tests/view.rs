@@ -40,10 +40,10 @@ fn search_results_show_page_titles_and_excerpts_not_internal_block_ids() {
     let (frame, _) = connected_with_register();
     let frame = tick_native(type_into(&frame, "Search pages…", "needle"));
     let frame = tick_native(submit(&frame, "Search pages…"));
-    let reply = serde_json::json!({"hits": [{
+    let reply = serde_json::json!({"hits": {"hits": [{
         "page_id": "gamma", "block_id": "private-block-identifier",
         "kind": "paragraph", "text": "A matching needle excerpt"
-    }]});
+    }], "capped": false}});
     let frame = tick_native(vec![answer(
         request(&frame, "rpc.view").id,
         reply.to_string().as_bytes(),
@@ -64,6 +64,21 @@ fn search_results_show_page_titles_and_excerpts_not_internal_block_ids() {
             .any(|text| text.contains("private-block-identifier")),
         "{shown:?}"
     );
+}
+
+#[test]
+fn a_capped_empty_page_search_explains_how_to_continue() {
+    let (frame, _) = connected_with_register();
+    let frame = tick_native(type_into(&frame, "Search pages…", "common"));
+    let frame = tick_native(submit(&frame, "Search pages…"));
+    let frame = tick_native(vec![answer(
+        request(&frame, "rpc.view").id,
+        br#"{"hits":{"hits":[],"capped":true}}"#,
+    )]);
+    assert!(has_text(
+        &frame,
+        "Results capped; narrow your search for more."
+    ));
 }
 
 fn kinds(requests: &[Request]) -> Vec<&str> {
@@ -131,21 +146,23 @@ fn page_blocks() -> Vec<u8> {
 fn threads() -> Vec<u8> {
     serde_json::json!({ "threads": [
         { "target": "alpha", "threads": [
-            { "id": "t-page", "target": "alpha", "opener": "acct:1", "resolved": false,
-              "comments": [{ "id": "c1", "author": "acct:1", "text": "the page reads well" }] }
-        ]},
+            { "thread": { "id": "t-page", "target": "alpha", "opener": "c1", "resolved": false },
+              "opener": { "id": "c1", "author": "acct:1", "text": "the page reads well" },
+              "comments": [], "comment_count": 1, "has_more": false, "next_after": null }
+        ], "has_more": false, "next_after": null},
         { "target": "alpha-1", "threads": [
-            { "id": "t-block", "target": "alpha-1", "opener": "acct:1", "resolved": false,
+            { "thread": { "id": "t-block", "target": "alpha-1", "opener": "c2", "resolved": false },
+              "opener": { "id": "c2", "author": "acct:1", "text": "the opening claim" },
               "comments": [
-                  { "id": "c2", "author": "acct:1", "text": "the opening claim" },
                   { "id": "c3", "author": "acct:2", "text": "first reply" },
                   { "id": "c4", "author": "acct:2", "text": "second reply" },
                   { "id": "c5", "author": "acct:2", "text": "third reply" },
                   { "id": "c6", "author": "acct:2", "text": "fourth reply" }
-              ] },
-            { "id": "t-done", "target": "alpha-1", "opener": "acct:1", "resolved": true,
-              "comments": [{ "id": "c7", "author": "acct:1", "text": "settled already" }] }
-        ]}
+              ], "comment_count": 5, "has_more": true, "next_after": "reply-cursor" },
+            { "thread": { "id": "t-done", "target": "alpha-1", "opener": "c7", "resolved": true },
+              "opener": { "id": "c7", "author": "acct:1", "text": "settled already" },
+              "comments": [], "comment_count": 1, "has_more": false, "next_after": null }
+        ], "has_more": true, "next_after": "target-cursor"}
     ]})
     .to_string()
     .into_bytes()
@@ -180,7 +197,55 @@ fn answered(request: &Request) -> Vec<u8> {
     match query {
         _ if !query["list_pages"].is_null() => page_list(),
         _ if !query["get_page"].is_null() => page_blocks(),
-        _ if !query["threads_for_targets"].is_null() => threads(),
+        _ if !query["threads_for_targets"].is_null() => {
+            let target = query["threads_for_targets"]["targets"][0]["target"]
+                .as_str()
+                .unwrap_or_default();
+            let mut reply: serde_json::Value =
+                serde_json::from_slice(&threads()).expect("thread fixture decodes");
+            let after = query["threads_for_targets"]["targets"][0]["after"].as_str();
+            let group = reply["threads"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|group| group["target"] == target)
+                .cloned()
+                .unwrap_or_else(|| {
+                    serde_json::json!({
+                        "target": target,
+                        "threads": [],
+                        "has_more": false,
+                        "next_after": null,
+                    })
+                });
+            let group = if target == "alpha-1" && after == Some("target-cursor") {
+                serde_json::json!({
+                    "target": "alpha-1",
+                    "threads": [
+                        { "thread": { "id": "t-block", "target": "alpha-1", "opener": "c2", "resolved": false },
+                          "opener": { "id": "c2", "author": "acct:1", "text": "the opening claim" },
+                          "comments": [], "comment_count": 5, "has_more": true, "next_after": "reply-cursor" },
+                        { "thread": { "id": "t-tail", "target": "alpha-1", "opener": "c9", "resolved": false },
+                          "opener": { "id": "c9", "author": "acct:2", "text": "tail thread" },
+                          "comments": [], "comment_count": 1, "has_more": false, "next_after": null }
+                    ], "has_more": false, "next_after": null
+                })
+            } else {
+                group
+            };
+            reply["threads"] = serde_json::json!([group]);
+            reply.to_string().into_bytes()
+        }
+        _ if !query["get_thread"].is_null() => serde_json::json!({"thread": {
+            "thread": { "id": "t-block", "target": "alpha-1", "opener": "c2", "resolved": false },
+            "opener": { "id": "c2", "author": "acct:1", "text": "the opening claim" },
+            "comments": [
+                { "id": "c6", "author": "acct:2", "text": "fourth reply" },
+                { "id": "c8", "author": "acct:2", "text": "fifth reply" }
+            ], "comment_count": 7, "has_more": false, "next_after": null
+        }})
+        .to_string()
+        .into_bytes(),
         other => panic!("unexpected view ask {other}"),
     }
 }
@@ -565,6 +630,75 @@ fn the_card_lists_every_open_thread_expanded_under_its_anchor() {
         "a settled thread is filed away: {:?}",
         texts(&frame)
     );
+}
+
+#[test]
+fn target_and_reply_load_more_are_independent_explicit_cursor_reads() {
+    let frame = page_card();
+    assert!(has_text(
+        &frame,
+        "Load more threads on “the first paragraph”"
+    ));
+
+    let frame = tick_native(press(&frame, "Load more threads on “the first paragraph”"));
+    let target_read = request(&frame, "rpc.view");
+    let target_ask: serde_json::Value = serde_json::from_slice(&target_read.payload).unwrap();
+    assert_eq!(
+        target_ask["query"]["threads_for_targets"]["targets"][0]["after"],
+        "target-cursor"
+    );
+    let frame = tick_native(vec![answer(target_read.id, &threads_for_target_tail())]);
+    let names = request(&frame, "rpc.query");
+    let frame = tick_native(vec![answer(names.id, br#"{"accounts":[]}"#)]);
+    assert!(has_text(&frame, "tail thread"), "{:?}", texts(&frame));
+
+    let frame = tick_native(press(&frame, "Show every reply"));
+    let frame = tick_native(press(&frame, "Load more replies"));
+    let reply_read = request(&frame, "rpc.view");
+    let reply_ask: serde_json::Value = serde_json::from_slice(&reply_read.payload).unwrap();
+    assert_eq!(reply_ask["query"]["get_thread"]["after"], "reply-cursor");
+    let frame = tick_native(vec![answer(reply_read.id, &reply_page_tail())]);
+    let names = request(&frame, "rpc.query");
+    let frame = tick_native(vec![answer(names.id, br#"{"accounts":[]}"#)]);
+    let shown = texts(&frame);
+    assert!(has_text(&frame, "fifth reply"), "{shown:?}");
+    assert_eq!(
+        shown
+            .iter()
+            .filter(|text| text.as_str() == "the opening claim")
+            .count(),
+        1,
+        "the repeated opener renders once: {shown:?}"
+    );
+}
+
+fn threads_for_target_tail() -> Vec<u8> {
+    serde_json::json!({"threads": [{
+        "target": "alpha-1",
+        "threads": [
+            { "thread": { "id": "t-block", "target": "alpha-1", "opener": "c2", "resolved": false },
+              "opener": { "id": "c2", "author": "acct:1", "text": "the opening claim" },
+              "comments": [], "comment_count": 5, "has_more": true, "next_after": "reply-cursor" },
+            { "thread": { "id": "t-tail", "target": "alpha-1", "opener": "c9", "resolved": false },
+              "opener": { "id": "c9", "author": "acct:2", "text": "tail thread" },
+              "comments": [], "comment_count": 1, "has_more": false, "next_after": null }
+        ], "has_more": false, "next_after": null
+    }]})
+    .to_string()
+    .into_bytes()
+}
+
+fn reply_page_tail() -> Vec<u8> {
+    serde_json::json!({"thread": {
+        "thread": { "id": "t-block", "target": "alpha-1", "opener": "c2", "resolved": false },
+        "opener": { "id": "c2", "author": "acct:1", "text": "the opening claim" },
+        "comments": [
+            { "id": "c6", "author": "acct:2", "text": "fourth reply" },
+            { "id": "c8", "author": "acct:2", "text": "fifth reply" }
+        ], "comment_count": 7, "has_more": false, "next_after": null
+    }})
+    .to_string()
+    .into_bytes()
 }
 
 /// The fold is the reader's own: unfolding one thread shows its whole tail and
@@ -1326,11 +1460,11 @@ fn background_search_preserves_full_hits_and_survives_a_failed_title_lookup() {
             br#"{"background":{"text":"needle","page":""}}"#,
         )]);
         let content = "needle ".repeat(6000);
-        let hits = serde_json::json!({"hits":[
+        let hits = serde_json::json!({"hits":{"hits":[
             {"page_id":"named","block_id":"block","kind":"paragraph","text":content},
             {"page_id":"untitled","block_id":"second","kind":"paragraph","text":"needle"},
             {"page_id":"missing","block_id":"third","kind":"paragraph","text":"needle"}
-        ]});
+        ], "capped": false}});
         let frame = tick_native(vec![answer(
             request(&frame, "rpc.view").id,
             hits.to_string().as_bytes(),

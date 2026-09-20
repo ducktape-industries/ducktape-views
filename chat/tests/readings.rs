@@ -3,10 +3,10 @@
 //! becomes a rendered message here; nothing is asked of the host.
 
 use chat_view::host::{
-    ChatMember, ChatMessage, PendingSend, copy_range_count, copy_range_label, copy_range_text,
-    edit_body_of, first_unread_seq, fold_message, fold_names, near_scroll_tail, near_scroll_top,
-    post_gate, preview_box, preview_room, reaction_applied, readable, run_of_message, seat_reader,
-    with_pending,
+    ChatMember, ChatMessage, ChatReaction, PendingSend, copy_range_count, copy_range_label,
+    copy_range_text, edit_body_of, first_unread_seq, fold_message, fold_names, near_scroll_tail,
+    near_scroll_top, post_gate, preview_box, preview_room, readable, replace_canonical_message,
+    run_of_message, seat_reader, with_pending,
 };
 
 fn names() -> chat_view::host::Names {
@@ -131,15 +131,15 @@ fn an_edit_opens_on_the_row_it_was_armed_on() {
     assert_eq!(edit_body_of(&rows, 99, 0), "");
 }
 
-/// THE READER'S OWN KEY DECIDES `by me`, never the account alone — but a seat
-/// taken under any key of that account is still hers.
+/// The server has already resolved ownership using the exact viewer handles;
+/// the view renders only the resulting boolean and count.
 #[test]
-fn reactions_are_mine_by_my_key_and_by_my_account() {
+fn reactions_render_the_server_owned_boolean_and_count() {
     seat_reader("acct:7", "aa");
     let mut reacted = row(serde_json::json!([]));
     reacted["reactions"] = serde_json::json!([
-        { "emoji": "👍", "reactors": ["acct:7", "user:cc"] },
-        { "emoji": "🎉", "reactors": ["user:cc"] }
+        { "emoji": "👍", "count": 2, "reacted_by_me": true },
+        { "emoji": "🎉", "count": 1, "reacted_by_me": false }
     ]);
     let message = fold_message(&reacted, &names());
     assert_eq!(message.reactions[0].count, 2);
@@ -147,24 +147,48 @@ fn reactions_are_mine_by_my_key_and_by_my_account() {
     assert!(!message.reactions[1].reacted_by_me);
 }
 
-/// The tap counts before the block does, and taking it back counts down.
 #[test]
-fn a_tapped_reaction_shows_before_it_settles() {
-    let row = ChatMessage {
+fn viewer_handles_are_exact_account_and_current_key_or_empty() {
+    seat_reader("acct:7", "aa");
+    assert_eq!(
+        chat_view::host::viewer_handles(),
+        ["user:aa", "acct:7"].map(str::to_owned)
+    );
+    seat_reader("acct:7", "cc");
+    assert_eq!(chat_view::host::viewer_handles(), ["user:cc", "acct:7"]);
+    seat_reader("acct:8", "aa");
+    assert_eq!(
+        chat_view::host::viewer_handles(),
+        ["user:aa", "acct:8"],
+        "an unrelated current account does not inherit account 7's keys"
+    );
+    seat_reader("user:cc", "cc");
+    assert_eq!(chat_view::host::viewer_handles(), ["user:cc"]);
+    seat_reader("", "");
+    assert!(chat_view::host::viewer_handles().is_empty());
+}
+
+/// A canonical row replaces the visible row as a whole; local code never
+/// derives a reaction count or membership bit.
+#[test]
+fn a_canonical_reaction_refresh_replaces_or_removes_one_row() {
+    let old = ChatMessage {
         seq: 3,
+        body: "old body".into(),
         ..ChatMessage::default()
     };
-    let added = reaction_applied(std::slice::from_ref(&row), 3, "🔥", true);
-    assert_eq!(added[0].reactions.len(), 1);
-    assert_eq!(added[0].reactions[0].count, 1);
-    assert!(added[0].reactions[0].reacted_by_me);
-    let removed = reaction_applied(&added, 3, "🔥", false);
-    assert!(
-        removed[0].reactions.is_empty(),
-        "the last reactor takes the chip with them"
-    );
-    let elsewhere = reaction_applied(&added, 99, "🔥", true);
-    assert_eq!(elsewhere[0].reactions[0].count, 1);
+    let mut canonical = old.clone();
+    canonical.body = "edited later".into();
+    canonical.reactions = vec![ChatReaction {
+        emoji: "🔥".into(),
+        count: 2,
+        reacted_by_me: false,
+    }];
+    let replaced = replace_canonical_message(&[old], 3, Some(canonical));
+    assert_eq!(replaced[0].body, "edited later");
+    assert_eq!(replaced[0].reactions[0].count, 2);
+    assert!(!replaced[0].reactions[0].reacted_by_me);
+    assert!(replace_canonical_message(&replaced, 3, None).is_empty());
 }
 
 /// A send in flight is a row at the tail of its own surface, never of the other
