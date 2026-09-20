@@ -76,7 +76,6 @@ pub struct Person {
     key: String,
     node: String,
     label: String,
-    initials: String,
     is_you: bool,
 }
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -205,12 +204,6 @@ async fn room(key: &RoomKey) -> Result<Room, String> {
                 .get(&identity)
                 .cloned()
                 .unwrap_or_else(|| identity.clone());
-            let initials = label
-                .split_whitespace()
-                .filter_map(|word| word.chars().next())
-                .take(2)
-                .collect::<String>()
-                .to_uppercase();
             Ok(Person {
                 key: identity.clone(),
                 node: seat["node"]
@@ -218,7 +211,6 @@ async fn room(key: &RoomKey) -> Result<Room, String> {
                     .ok_or("missing huddle node")?
                     .to_owned(),
                 label,
-                initials,
                 is_you: identity == me,
             })
         })
@@ -416,18 +408,16 @@ impl Panel {
                 (false, false) => "",
             };
             let key = format!("huddle/person/{}", person.node);
-            let color = if speaking {
-                kit::palette().success
+            // the kit's disc, as members draws people; speaking lights it
+            let tone = if speaking {
+                kit::Tone::Success
             } else {
-                kit::palette().muted
+                kit::Tone::Neutral
             };
             kit::centered_row(
                 &key,
                 [
-                    kit::colored(
-                        kit::strong(format!("{key}/avatar"), &person.initials),
-                        color,
-                    ),
+                    kit::avatar(format!("{key}/avatar"), kit::initials(&person.label), tone),
                     kit::text(format!("{key}/label"), &person.label),
                     kit::caption(format!("{key}/caption"), caption),
                 ],
@@ -526,21 +516,20 @@ impl Panel {
                 button("huddle/leave", "Leave huddle", Action::Leave, Style::Danger),
             ],
         );
-        let tree = kit::sized(
-            kit::column(
-                "huddle",
-                [
-                    header,
-                    kit::sized(
-                        kit::column("huddle/body", body),
-                        Some(Length::Fill),
-                        Some(Length::Fill),
-                    ),
-                    controls,
-                ],
-            ),
-            Some(Length::Fill),
-            Some(Length::Fill),
+        // The kit's page, as every other view frames itself: the header,
+        // the body and the controls sit inside its inset instead of on the
+        // window's edges, and the control row keeps its bottom border.
+        let tree = kit::page(
+            "huddle",
+            [
+                header,
+                kit::sized(
+                    kit::column("huddle/body", body),
+                    Some(Length::Fill),
+                    Some(Length::Fill),
+                ),
+                controls,
+            ],
         );
         // Every tree the crate's own tests render is one assistive
         // technology can read.
@@ -570,29 +559,25 @@ impl Panel {
                 Style::Secondary,
             )
         }));
-        let tree = kit::sized(
-            kit::column(
-                "huddle",
-                [
-                    header,
-                    kit::sized(
-                        kit::scroll("huddle/share-scroll", kit::column("huddle/share", body)),
-                        Some(Length::Fill),
-                        Some(Length::Fill),
-                    ),
-                    kit::wrapped_row(
-                        "huddle/share-controls",
-                        [button(
-                            "huddle/share-cancel",
-                            "Cancel",
-                            Action::ShareCancel,
-                            Style::Text,
-                        )],
-                    ),
-                ],
-            ),
-            Some(Length::Fill),
-            Some(Length::Fill),
+        let tree = kit::page(
+            "huddle",
+            [
+                header,
+                kit::sized(
+                    kit::scroll("huddle/share-scroll", kit::column("huddle/share", body)),
+                    Some(Length::Fill),
+                    Some(Length::Fill),
+                ),
+                kit::wrapped_row(
+                    "huddle/share-controls",
+                    [button(
+                        "huddle/share-cancel",
+                        "Cancel",
+                        Action::ShareCancel,
+                        Style::Text,
+                    )],
+                ),
+            ],
         );
         #[cfg(test)]
         ducktape_view_guest::testing::assert_accessible(&tree);
@@ -653,7 +638,6 @@ mod tests {
                 node: "node-a".into(),
                 label: "Alice".into(),
                 is_you: true,
-                ..Default::default()
             }],
         };
         let mut tree = panel.view(&room, &Default::default(), "");
@@ -693,7 +677,6 @@ mod tests {
                 node: "node-a".into(),
                 label: "Alice".into(),
                 is_you: true,
-                ..Default::default()
             }],
         };
         let mut panel: Panel = serde_json::from_value(serde_json::json!({
@@ -724,7 +707,6 @@ mod tests {
                 node: "node-a".into(),
                 label: "Alice".into(),
                 is_you: true,
-                ..Default::default()
             }],
         };
         let mut tree = panel.view(&room, &Default::default(), "");
@@ -923,5 +905,66 @@ mod tests {
             !text.iter().any(|line| line.starts_with("Sharing ")),
             "{text:?}"
         );
+    }
+
+    /// The huddle is framed like every other view: the kit's page inset on
+    /// all four edges, so nothing sits on the window's edge and the control
+    /// row — the last child — keeps its bottom border. The picker too.
+    #[test]
+    fn the_huddle_sits_in_the_kits_page_with_the_controls_last() {
+        let frame = |tree: &wire::Node, controls: &str| {
+            let wire::Node::Linear {
+                key,
+                padding,
+                children,
+                ..
+            } = tree
+            else {
+                panic!("the huddle's root is a layout")
+            };
+            assert_eq!(key, "huddle");
+            assert_eq!(*padding, Some(wire::Edges::all(20.)));
+            assert_eq!(children.last().and_then(|node| node.key()), Some(controls));
+        };
+        let mut panel = Panel::default();
+        frame(
+            &panel.view(&Room::default(), &Default::default(), ""),
+            "huddle/controls",
+        );
+        panel.share_targets = vec!["Display 1".into()];
+        frame(
+            &panel.view(&Room::default(), &Default::default(), ""),
+            "huddle/share-controls",
+        );
+    }
+
+    /// A person in the roster is the kit's avatar disc with their initials,
+    /// as the members view draws them — not a bare glyph.
+    #[test]
+    fn roster_rows_draw_people_as_avatar_discs() {
+        let room = Room {
+            title: "Engineering".into(),
+            members: Vec::new(),
+            roster: vec![Person {
+                key: "user:aa".into(),
+                node: "node-a".into(),
+                label: "Alice Smith".into(),
+                is_you: true,
+            }],
+        };
+        let mut tree = Panel::default().view(&room, &Default::default(), "");
+        let mut disc = None;
+        let mut initials = None;
+        tree.for_each_mut(&mut |node| match node {
+            wire::Node::Container {
+                key, background, ..
+            } if key == "huddle/person/node-a/avatar" => disc = Some(background.is_some()),
+            wire::Node::Text { key, content, .. } if key == "huddle/person/node-a/avatar/text" => {
+                initials = Some(content.clone())
+            }
+            _ => {}
+        });
+        assert_eq!(disc, Some(true), "the disc has a wash behind the initials");
+        assert_eq!(initials.as_deref(), Some("AS"));
     }
 }
