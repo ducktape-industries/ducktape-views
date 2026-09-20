@@ -394,7 +394,7 @@ mod tests {
     fn rich_message_fixture_matches_the_producer_json() {
         let actual = super::parse_message("Hello **world** <@7>\n> quote");
         let expected: serde_json::Value =
-            serde_json::from_str(include_str!("../tests/fixtures/message-rich.json")).unwrap();
+            serde_json::from_str(include_str!("../../tests/fixtures/message-rich.json")).unwrap();
         assert_eq!(serde_json::to_value(actual).unwrap(), expected);
     }
 }

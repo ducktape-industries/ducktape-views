@@ -254,7 +254,7 @@ async fn room(key: &RoomKey) -> Result<Room, String> {
 }
 
 pub async fn invite(channel: String, room: String, key: String) -> Result<(), String> {
-    use ducktape_view_composer::{Send, host as composer};
+    use crate::composer::{Send, host as composer};
     let mention = match key.strip_prefix("acct:") {
         Some(account) => format!("<@{account}>"),
         None => format!("<@key:{key}>"),

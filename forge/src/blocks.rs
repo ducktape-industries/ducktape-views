@@ -229,8 +229,8 @@ impl Names {
     pub fn composer_choices(
         &self,
         members: &[crate::host::ChatMember],
-    ) -> Vec<ducktape_view_composer::MentionChoice> {
-        use ducktape_view_composer::MentionChoice;
+    ) -> Vec<crate::composer::MentionChoice> {
+        use crate::composer::MentionChoice;
         let mut choices = self
             .by_account
             .iter()

@@ -729,7 +729,7 @@ pub struct ChatMember {
 pub struct DiscussionItem {
     pub channel_id: String,
     pub messages: Vec<ChatMessage>,
-    pub choices: Vec<ducktape_view_composer::MentionChoice>,
+    pub choices: Vec<crate::composer::MentionChoice>,
     /// Older notes than the window holds: the list says so rather than
     /// pretending the discussion starts where it does.
     pub clipped: bool,

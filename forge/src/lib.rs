@@ -16,6 +16,8 @@ pub(crate) const TRACKER_FILTER_KEY: &str = "ForgeView/forge/tracker-filter";
 pub(crate) const PAGE_KEY: &str = "ForgeView/page";
 
 pub mod blocks;
+mod composer;
+mod files;
 pub mod host;
 
 #[path = "ui/app.rs"]

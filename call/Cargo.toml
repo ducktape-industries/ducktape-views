@@ -12,4 +12,3 @@ futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 ducktape-view-guest.workspace = true
-ducktape-view-composer.workspace = true
