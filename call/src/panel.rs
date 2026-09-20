@@ -333,10 +333,13 @@ impl Panel {
                     Some(Length::Fill),
                 )
             });
+        // Two parts video to one part roster: at any window height both
+        // stay visible instead of a fixed roster squeezing the tiles to
+        // nothing.
         kit::sized(
             kit::column("huddle/tiles", rows),
             Some(Length::Fill),
-            Some(Length::Fill),
+            Some(Length::FillPortion(2)),
         )
     }
 
@@ -423,7 +426,7 @@ impl Panel {
             )
         });
         let height = if self.video_live {
-            Length::Fixed(150.)
+            Length::FillPortion(1)
         } else {
             Length::Fill
         };
@@ -766,6 +769,41 @@ mod tests {
         });
         assert!(rows.iter().any(|key| key == "huddle/screen"));
         assert!(!rows.iter().any(|key| key.starts_with("huddle/share/")));
+    }
+
+    /// With video live the roster and the tiles share the height in
+    /// portions, so neither band can be squeezed to nothing by the other
+    /// at a small window.
+    #[test]
+    fn video_and_roster_share_the_height_in_portions() {
+        let panel: Panel = serde_json::from_value(serde_json::json!({
+            "video_live": true, "tiles": ["image:a", "image:b"],
+        }))
+        .unwrap();
+        let mut tree = panel.view(&Room::default(), &Default::default(), "");
+        let mut heights = Vec::new();
+        tree.for_each_mut(&mut |node| match node {
+            wire::Node::Linear { key, height, .. } if key == "huddle/tiles" => {
+                heights.push((key.clone(), *height))
+            }
+            wire::Node::Scroll { key, height, .. } if key == "huddle/roster-scroll" => {
+                heights.push((key.clone(), *height))
+            }
+            _ => {}
+        });
+        assert_eq!(
+            heights,
+            [
+                (
+                    "huddle/tiles".to_owned(),
+                    Some(wire::Length::FillPortion(2))
+                ),
+                (
+                    "huddle/roster-scroll".to_owned(),
+                    Some(wire::Length::FillPortion(1))
+                ),
+            ]
+        );
     }
 
     /// An unread roster is the kit's empty state, an error the danger
