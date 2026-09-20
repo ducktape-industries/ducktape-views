@@ -659,7 +659,7 @@ fn the_runs_panel_lists_every_run_and_opens_one_journal_at_a_time() {
 }
 
 #[test]
-fn the_session_table_folds_runs_under_agents_and_keeps_unknown_fields_explicit() {
+fn the_run_table_folds_runs_under_agents_and_keeps_unknown_fields_explicit() {
     let (frame, _) = registered("7");
     let frame = tick_native(press(&frame, "Runs"));
     for expected in [
@@ -1051,7 +1051,7 @@ fn a_running_run_sends_steering_to_its_current_turn_and_preserves_new_typing() {
     let _frame = tick_native(vec![item(stream.id,json!({"type":"run_control_snapshot","topic":"run-output:dispatch-live","control":{"turn":"turn-b","steers":true,"approvals":[]}}).to_string().as_bytes())]);
     let frame = tick_native(vec![answer(request.id, b"{}")]);
     assert!(
-        has_text(&frame, "Received by the session"),
+        has_text(&frame, "Instructions received"),
         "{:?}",
         texts(&frame)
     );
@@ -1298,7 +1298,7 @@ fn stream_errors_show_outside_the_disclosure_and_reconnect_the_same_run() {
     let frame = tick_native(press(&frame, "Trace"));
     assert!(has_text(
         &frame,
-        "Connected to the session. Waiting for its first process details…"
+        "Connected to this run. Waiting for its first process details…"
     ));
 }
 

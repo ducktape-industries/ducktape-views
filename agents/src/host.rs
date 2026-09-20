@@ -1574,7 +1574,7 @@ impl LiveRun {
                 "This output contains no thinking or tool steps. Raw events are available in the Raw tab."
             }
             OutputConnection::Connected if self.control.is_some() => {
-                "Connected to the session. Waiting for its first process details…"
+                "Connected to this run. Waiting for its first process details…"
             }
             OutputConnection::Connected if state == "dispatched" => {
                 "Waiting for a worker to start this run."
@@ -2545,13 +2545,6 @@ pub fn run_named(runs: &[RunRow], run_id: &str) -> RunRow {
         .find(|run| run.run_id == run_id)
         .cloned()
         .unwrap_or_default()
-}
-
-/// The current log/control identity. C4 machine sessions will add a separate
-/// provider `session_id`; existing run-backed rows only prove this dispatch
-/// identity, so never manufacture a session id from it.
-pub fn session_identity(run: &RunRow) -> String {
-    run.dispatch_id.clone()
 }
 
 /// The run listed under `dispatch_id`; an empty row when the list has none.
