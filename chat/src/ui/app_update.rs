@@ -288,12 +288,14 @@ impl super::ChatView {
             ::std::convert::AsRef::as_ref(&(next.me_key)),
         );
         self.names_serial = next.names_serial;
-        self.search_key = crate::host::search_key(
-            self.connection_serial,
-            self.names_serial,
-            &self.search_query,
-            None,
-        );
+        if rebound {
+            self.search_key = crate::host::search_key(
+                self.connection_serial,
+                self.names_serial,
+                &self.search_query,
+                None,
+            );
+        }
         let changed_channel = self.active_channel != next.active_channel;
         let changed_room_identity = changed_reader || changed_channel;
         if changed_room_identity {

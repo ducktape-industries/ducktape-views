@@ -777,6 +777,32 @@ mod tests {
     }
 
     #[test]
+    fn routine_session_updates_preserve_the_search_continuation() {
+        let mut state = ChatView::state();
+        let next = crate::host::Session {
+            connected: true,
+            ..Default::default()
+        };
+        let session = || {
+            Message::SessionArrived(Box::new(crate::host::SessionItem {
+                next: next.clone(),
+                ..Default::default()
+            }))
+        };
+        let _ = state.update(session());
+        state.search_query = "#topic".into();
+        state.search_draft = "#topic".into();
+        state.search_key = crate::host::search_key(
+            state.connection_serial,
+            state.names_serial,
+            "#topic",
+            Some("next-page"),
+        );
+        let _ = state.update(session());
+        assert_eq!(state.search_key.after.as_deref(), Some("next-page"));
+    }
+
+    #[test]
     fn a_session_that_reads_again_takes_back_only_its_own_note() {
         let mut state = ChatView::state();
         let session = |error: &str| {
