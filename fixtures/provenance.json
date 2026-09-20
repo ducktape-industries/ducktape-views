@@ -1,7 +1,7 @@
 {
   "sdk_revision": "8c764093d5974b4328c0b90de157d72597540020",
-  "generator": "fixtures/generate-producer-fixtures.sh",
-  "generator_project": "fixtures/producer-generator",
+  "historical_generator_revision": "f150990d0943e457adb7765abb70f0a9434e2b6e",
+  "historical_generator_path": "fixtures/producer-generator",
   "production_graph": false,
   "inputs": {
     "model_program": {"agent_id": "chiefduck"},
