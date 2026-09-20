@@ -1,13 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, VecDeque};
 
-/// The largest audio payload this room moves: one encoded 20 ms frame, the
-/// same ceiling `media_service::call_wire` checks. The guest never decodes
-/// one — the host encodes at the microphone and decodes at the speaker — so
-/// this is a bound, not a shape.
-pub const MAX_AUDIO_PAYLOAD: usize = 1275;
+use crate::call_wire::{self, MAX_AUDIO_PAYLOAD};
+
 const MAX_PEERS: usize = 32;
 const JITTER_FRAMES: usize = 3;
+/// The hub mixes every peer into one playout stream, so the host decodes it
+/// with one decoder under this name.
+pub const HUB: &str = "hub";
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
@@ -46,11 +46,11 @@ pub enum Event {
         peer: String,
         beacon: Beacon,
     },
-    Left(String),
-    RemoteAudio {
-        peer: String,
-        frame: Vec<u8>,
-    },
+    /// The room's committed huddle roster, as node keys: the fan-out set the
+    /// hub is steered with, and the list a peer has left when it is gone from.
+    Roster(Vec<String>),
+    /// One frame of the hub's mixed playout.
+    RemoteAudio(Vec<u8>),
     RemoteImage {
         peer: String,
         jpeg: Vec<u8>,
@@ -65,10 +65,9 @@ pub enum Effect {
     SelfState(Beacon),
     Capture(String),
     Mute(bool),
-    /// This tick's audio, one encoded frame per peer that had one. The host
-    /// decodes each with that peer's decoder and mixes: a codec is stateful
-    /// per stream, so mixing cannot happen before decoding and decoding
-    /// cannot happen without knowing whose frame it is.
+    /// This tick's audio: the hub's mixed frame, if one was due, under
+    /// [`HUB`]. The host decodes each named stream with its own decoder —
+    /// a codec is stateful per stream — so the name stays on the frame.
     Play(Vec<(String, Vec<u8>)>),
     Image {
         peer: String,
@@ -81,7 +80,7 @@ pub enum Effect {
 pub struct Machine {
     pub props: Props,
     pub peers: BTreeMap<String, Beacon>,
-    audio: BTreeMap<String, VecDeque<Vec<u8>>>,
+    audio: VecDeque<Vec<u8>>,
     ticks: u64,
     last_sound: Option<u64>,
     speaking: bool,
@@ -94,8 +93,8 @@ impl Machine {
             Event::LocalAudio { frame, sound } => self.local_audio(frame, sound),
             Event::LocalImage { timestamp_ms, jpeg } => self.local_image(timestamp_ms, jpeg),
             Event::Peer { peer, beacon } => self.peer(peer, beacon),
-            Event::Left(peer) => self.left(peer),
-            Event::RemoteAudio { peer, frame } => self.remote_audio(peer, frame),
+            Event::Roster(peers) => self.roster(peers),
+            Event::RemoteAudio(frame) => self.remote_audio(frame),
             Event::RemoteImage { peer, jpeg } => self.remote_image(peer, jpeg),
             Event::Tick => self.tick(),
         }
@@ -148,9 +147,7 @@ impl Machine {
                 effects.extend(self.beacon());
             }
         }
-        let mut bytes = vec![1];
-        bytes.extend(frame);
-        effects.push(Effect::SendBinary(bytes));
+        effects.push(Effect::SendBinary(call_wire::encode_audio(&frame)));
         effects
     }
 
@@ -159,10 +156,12 @@ impl Machine {
         if !capturing || jpeg.len() > 65_530 {
             return Vec::new();
         }
-        let mut frame = vec![2, 1];
-        frame.extend_from_slice(&timestamp_ms.to_be_bytes());
-        frame.extend(jpeg);
-        vec![Effect::SendBinary(frame)]
+        // every captured image stands alone, so every one is a keyframe
+        vec![Effect::SendBinary(call_wire::encode_captured(
+            true,
+            timestamp_ms,
+            &jpeg,
+        ))]
     }
 
     fn peer(&mut self, peer: String, beacon: Beacon) -> Vec<Effect> {
@@ -178,23 +177,32 @@ impl Machine {
         effects
     }
 
-    fn left(&mut self, peer: String) -> Vec<Effect> {
-        self.peers.remove(&peer);
-        self.audio.remove(&peer);
-        vec![Effect::DropImage(peer)]
+    fn roster(&mut self, peers: Vec<String>) -> Vec<Effect> {
+        let gone: Vec<String> = self
+            .peers
+            .keys()
+            .filter(|peer| !peers.contains(peer))
+            .cloned()
+            .collect();
+        for peer in &gone {
+            self.peers.remove(peer);
+        }
+        let mut effects = vec![Effect::SendText(
+            serde_json::json!({"type": "recipients", "peers": peers}),
+        )];
+        effects.extend(gone.into_iter().map(Effect::DropImage));
+        effects
     }
 
-    fn remote_audio(&mut self, peer: String, frame: Vec<u8>) -> Vec<Effect> {
+    fn remote_audio(&mut self, frame: Vec<u8>) -> Vec<Effect> {
         let carries_one_frame = !frame.is_empty() && frame.len() <= MAX_AUDIO_PAYLOAD;
-        let valid = self.peers.contains_key(&peer) && carries_one_frame;
-        if !valid {
+        if !carries_one_frame {
             return Vec::new();
         }
-        let queue = self.audio.entry(peer).or_default();
-        if queue.len() == JITTER_FRAMES {
-            queue.pop_front();
+        if self.audio.len() == JITTER_FRAMES {
+            self.audio.pop_front();
         }
-        queue.push_back(frame);
+        self.audio.push_back(frame);
         Vec::new()
     }
 
@@ -220,13 +228,13 @@ impl Machine {
             self.speaking = false;
             effects.extend(self.beacon());
         }
-        // one frame per talking peer, in roster order; the host decodes each
-        // with that peer's decoder and mixes. An empty list is the silence a
-        // playout tick still has to hear about.
+        // the hub's mixed frame, if one is due. An empty list is the silence
+        // a playout tick still has to hear about.
         let due: Vec<(String, Vec<u8>)> = self
             .audio
-            .iter_mut()
-            .filter_map(|(peer, queue)| Some((peer.clone(), queue.pop_front()?)))
+            .pop_front()
+            .map(|frame| (HUB.to_owned(), frame))
+            .into_iter()
             .collect();
         effects.push(Effect::Play(due));
         effects
@@ -234,17 +242,13 @@ impl Machine {
 }
 
 pub fn binary(bytes: &[u8]) -> Result<Event, String> {
-    let hex = |bytes: &[u8]| bytes.iter().map(|byte| format!("{byte:02x}")).collect();
-    match bytes.first() {
-        Some(4) if bytes.len() > 41 && bytes.len() <= 41 + MAX_AUDIO_PAYLOAD => {
-            Ok(Event::RemoteAudio {
-                peer: hex(&bytes[9..41]),
-                frame: bytes[41..].to_vec(),
-            })
-        }
-        Some(3) if bytes.len() > 38 && bytes.len() <= 65_568 => Ok(Event::RemoteImage {
-            peer: hex(&bytes[6..38]),
-            jpeg: bytes[38..].to_vec(),
+    if let Some(frame) = call_wire::decode_audio(bytes) {
+        return Ok(Event::RemoteAudio(frame.to_vec()));
+    }
+    match call_wire::decode_peer(bytes) {
+        Some(frame) if frame.data.len() <= 65_530 => Ok(Event::RemoteImage {
+            peer: frame.peer,
+            jpeg: frame.data,
         }),
         _ => Err("invalid media frame".into()),
     }
@@ -324,10 +328,7 @@ mod tests {
                 timestamp_ms: 7,
                 jpeg: vec![7u8; 16 * 1024],
             }),
-            ("remote_audio", &|| Event::RemoteAudio {
-                peer: format!("{:064x}", 0),
-                frame: vec![9u8; 80],
-            }),
+            ("remote_audio", &|| Event::RemoteAudio(vec![9u8; 80])),
             ("remote_image", &|| Event::RemoteImage {
                 peer: format!("{:064x}", 0),
                 jpeg: vec![7u8; 16 * 1024],
@@ -371,30 +372,56 @@ mod tests {
             machine.step(Event::Tick);
         }
         assert!(!machine.speaking);
+        for _ in 0..20 {
+            machine.step(Event::RemoteAudio(voice(9)));
+        }
+        assert_eq!(machine.audio.len(), JITTER_FRAMES);
+        // the tick hands the host the hub's mixed frame, named, for it to
+        // decode — the guest moves audio it cannot read.
+        assert!(
+            matches!(machine.step(Event::Tick).as_slice(), [Effect::Play(due)]
+                if due.len() == 1 && due[0].0 == HUB && due[0].1 == voice(9))
+        );
+        machine.audio.clear();
+        assert!(
+            matches!(machine.step(Event::Tick).as_slice(), [Effect::Play(due)] if due.is_empty())
+        );
+    }
+
+    /// The roster is what the hub is told to fan out to, and a peer gone
+    /// from it is gone from the room — the hub sends no leave.
+    #[test]
+    fn the_roster_steers_fan_out_and_retires_peers_gone_from_it() {
+        let mut machine = Machine::default();
         for peer in ["a", "b"] {
             machine.step(Event::Peer {
                 peer: peer.into(),
-                beacon: Beacon::default(),
+                beacon: Beacon {
+                    camera_on: true,
+                    ..Beacon::default()
+                },
             });
-            for _ in 0..20 {
-                machine.step(Event::RemoteAudio {
-                    peer: peer.into(),
-                    frame: voice(9),
-                });
-            }
-            assert_eq!(machine.audio[peer].len(), JITTER_FRAMES);
         }
-        // the tick hands the host one frame per talking peer, named, for it
-        // to decode and mix — the guest moves audio it cannot read.
+        let effects = machine.step(Event::Roster(vec!["b".into(), "c".into()]));
+        assert!(matches!(&effects[0], Effect::SendText(text)
+            if *text == serde_json::json!({"type":"recipients","peers":["b","c"]})));
+        assert!(matches!(&effects[1], Effect::DropImage(peer) if peer == "a"));
+        assert_eq!(effects.len(), 2);
+        assert_eq!(machine.peers.keys().collect::<Vec<_>>(), ["b"]);
+    }
+
+    #[test]
+    fn frames_off_the_wire_become_events_or_nothing() {
+        assert!(matches!(binary(&[1, 5, 5]), Ok(Event::RemoteAudio(frame)) if frame == [5, 5]));
+        let mut video = vec![3, 1, 0, 0, 0, 7];
+        video.extend_from_slice(&[2; 32]);
+        video.push(9);
         assert!(
-            matches!(machine.step(Event::Tick).as_slice(), [Effect::Play(due)]
-                if due.len() == 2 && due[0].0 == "a" && due[0].1 == voice(9))
+            matches!(binary(&video), Ok(Event::RemoteImage { peer, jpeg })
+            if peer == "02".repeat(32) && jpeg == [9])
         );
-        machine.step(Event::Left("a".into()));
-        assert!(!machine.audio.contains_key("a"));
-        assert!(
-            matches!(machine.step(Event::Tick).as_slice(), [Effect::Play(due)] if due.len() == 1)
-        );
+        assert!(binary(&[4, 0, 0]).is_err());
+        assert!(binary(&video[..38]).is_err());
     }
 
     /// A frame the host could not have produced is refused at the seam it
@@ -416,11 +443,8 @@ mod tests {
                     })
                     .is_empty()
             );
-            machine.step(Event::RemoteAudio {
-                peer: "a".into(),
-                frame,
-            });
-            assert!(!machine.audio.contains_key("a"));
+            machine.step(Event::RemoteAudio(frame));
+            assert!(machine.audio.is_empty());
         }
         assert!(!machine.speaking, "a dropped frame is not a spoken one");
     }

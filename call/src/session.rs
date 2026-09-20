@@ -11,12 +11,14 @@ use crate::protocol::{self, Beacon, Effect, Event, Machine, Props};
 
 /// One item off a host subscription, or `None` when the stream ended. The
 /// refusal is converted to its sentence at [`answer`], the one place this view
-/// leaves the host's shape — nothing below branches on a token.
+/// leaves the host's shape — nothing below branches on a token, except the
+/// hub's own four at [`refused`].
 type Answer = Option<host::Answer>;
 
 enum Input {
     Props(Answer),
     Network(Answer),
+    Live(Answer),
     Audio(Answer),
     Video(Answer),
     Clock(Answer),
@@ -31,6 +33,8 @@ enum Run {
 struct Session {
     properties: host::Subscription,
     network: host::Subscription,
+    /// The chat plane moving: the committed huddle roster may have changed.
+    live: host::Subscription,
     audio: host::Subscription,
     video: Option<host::Subscription>,
     clock: host::Subscription,
@@ -38,9 +42,10 @@ struct Session {
     images: BTreeMap<String, (u64, String)>,
     preview: String,
     presentation: Option<Presentation>,
-    /// The newest peer state the transport has not accepted yet. Beacons are
-    /// absolute and last-write-wins, so only the newest one is worth keeping.
-    unsent_beacon: Option<Value>,
+    /// The newest control frame of each kind the transport has not accepted
+    /// yet. Beacons and recipients are absolute and last-write-wins, so only
+    /// the newest of each is worth keeping.
+    unsent: BTreeMap<String, Value>,
 }
 
 #[derive(PartialEq, Eq, Serialize)]
@@ -102,14 +107,40 @@ fn properties(bytes: &[u8]) -> Result<Props, String> {
     Ok(props)
 }
 
-fn escaped(value: &str) -> String {
-    value
-        .bytes()
-        .map(|byte| match byte {
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                (byte as char).to_string()
-            }
-            _ => format!("%{byte:02X}"),
+/// The hub refuses the huddle with one of four reasons; each is a fact about
+/// the room or the node, so the person reads it as one, not as the host's own
+/// words. Any other refusal is shown as the host said it.
+fn refused(refusal: host::Refusal) -> String {
+    match refusal.reason.as_str() {
+        "key_without_account" => {
+            "To join a huddle, create or join an account in Settings → Account.".into()
+        }
+        "not_in_huddle" => "You are not in this huddle.".into(),
+        "no_call_hub" => "Voice is not on in this network: the node runs no call hub.".into(),
+        "node_unreachable" => "Your node did not answer.".into(),
+        _ => host::said(refusal),
+    }
+}
+
+/// The room's committed huddle roster as node keys — consensus state, the
+/// same list the panel shows — which is what the hub is told to fan out to.
+async fn roster(channel: &str) -> Result<Vec<String>, String> {
+    let reply = host::request(
+        "rpc.view",
+        &bytes(&json!({"target": "chat", "query": {"channel": {"channel_id": channel}}})),
+    )
+    .await
+    .map_err(host::said)?;
+    let reply: Value = serde_json::from_slice(&reply).map_err(|error| error.to_string())?;
+    reply["channel"]["huddle"]
+        .as_array()
+        .ok_or("missing huddle roster")?
+        .iter()
+        .map(|seat| {
+            seat["node"]
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| "missing huddle node".into())
         })
         .collect()
 }
@@ -166,45 +197,24 @@ async fn begin() -> Result<(Message, Run), String> {
 impl Session {
     async fn connect(properties_stream: host::Subscription, props: Props) -> Result<Self, String> {
         status("connecting", "");
-        let channel = host::request(
-            "rpc.query",
-            &bytes(&json!({"target": "chat", "query": {"channel": {"channel_id": props.channel}}})),
-        )
-        .await
-        .map_err(host::said)?;
-        let channel: Value = serde_json::from_slice(&channel).map_err(|error| error.to_string())?;
-        let owner = channel
-            .get("channel")
-            .and_then(|channel| channel.get("owner"))
-            .and_then(|owner| owner.get("account"))
-            .and_then(Value::as_u64)
-            .ok_or("room has no account-owned media route")?;
-        let mut network = host::subscribe(
-            "net.stream",
-            &bytes(&json!({"account": owner, "route": "media", "method": "get",
-            "path": format!("/?channel={}", escaped(&props.channel)), "headers": [], "body": []})),
-        );
-        // The host refuses the media route with `route_unpublished` when the
-        // room owner's node is not serving voice; that is a fact about the
-        // room, so the person reads it as one, not as the host's own words.
+        // The room's huddle lives on this member's own node: the host resolves
+        // the channel to its hub, so the view names no account and no gateway leg.
+        let mut network = host::subscribe("voice.hub", &bytes(&json!({"channel": props.channel})));
         let first = match network.next().await {
-            Some(Err(refused)) if refused.reason == "route_unpublished" => {
-                return Err(
-                    "Voice is not on in this room: the room owner's node is not serving it.".into(),
-                );
-            }
+            Some(Err(refusal)) => return Err(refused(refusal)),
             item => answer(item)?,
         };
-        let ready = network_message(&first)?;
-        let Network::Text(ready) = ready else {
-            return Err("media service sent no ready message".into());
+        let Network::Text(ready) = network_message(&first)? else {
+            return Err("the call hub sent no ready message".into());
         };
         if ready.get("type").and_then(Value::as_str) != Some("ready") {
-            return Err("media service refused session".into());
+            return Err("the call hub refused the session".into());
         }
+        let peers = roster(&props.channel).await?;
         let mut session = Self {
             properties: properties_stream,
             network,
+            live: host::subscribe("rpc.live", b"chat"),
             audio: host::subscribe("media.audio", b"{}"),
             video: None,
             clock: host::subscribe("clock.ticks", &20i64.to_le_bytes()),
@@ -212,11 +222,9 @@ impl Session {
             images: BTreeMap::new(),
             preview: String::new(),
             presentation: None,
-            unsent_beacon: None,
+            unsent: BTreeMap::new(),
         };
-        let initial = session.machine.step(Event::Properties(props));
-        session.execute(initial).await?;
-        for event in control(ready)? {
+        for event in [Event::Properties(props), Event::Roster(peers)] {
             let effects = session.machine.step(event);
             session.execute(effects).await?;
         }
@@ -228,6 +236,7 @@ impl Session {
         let input = {
             let properties = self.properties.next().fuse();
             let network = self.network.next().fuse();
+            let live = self.live.next().fuse();
             let audio = self.audio.next().fuse();
             let clock = self.clock.next().fuse();
             let video = async {
@@ -237,16 +246,17 @@ impl Session {
                 }
             }
             .fuse();
-            futures::pin_mut!(properties, network, audio, clock, video);
+            futures::pin_mut!(properties, network, live, audio, clock, video);
             futures::select_biased! {
                 item = properties => Input::Props(item),
                 item = network => Input::Network(item),
+                item = live => Input::Live(item),
                 item = clock => Input::Clock(item),
                 item = audio => Input::Audio(item),
                 item = video => Input::Video(item),
             }
         };
-        let events = self.events(input)?;
+        let events = self.events(input).await?;
         for event in events {
             let effects = self.machine.step(event);
             self.execute(effects).await?;
@@ -254,10 +264,16 @@ impl Session {
         Ok(())
     }
 
-    fn events(&mut self, input: Input) -> Result<Vec<Event>, String> {
+    async fn events(&mut self, input: Input) -> Result<Vec<Event>, String> {
         match input {
             Input::Props(item) => self.changed_properties(item),
             Input::Network(item) => self.received(item),
+            Input::Live(item) => {
+                answer(item)?;
+                Ok(vec![Event::Roster(
+                    roster(&self.machine.props.channel).await?,
+                )])
+            }
             Input::Audio(item) => self.captured_audio(item),
             Input::Video(item) => self.captured_video(item),
             Input::Clock(item) => self.clock_tick(item),
@@ -336,13 +352,13 @@ impl Session {
     }
 
     async fn execute(&mut self, effects: Vec<Effect>) -> Result<(), String> {
-        // A beacon an earlier turn could not hand over goes out ahead of this
-        // turn's effects, so peer state still reaches the room in the order
-        // the machine decided it.
-        self.flush_beacon().await;
+        // A control frame an earlier turn could not hand over goes out ahead
+        // of this turn's effects, so state still reaches the room in the
+        // order the machine decided it.
+        self.flush().await;
         for effect in effects {
             match effect {
-                Effect::SendText(text) => self.send_beacon(text).await,
+                Effect::SendText(text) => self.send_text(text).await,
                 Effect::SendBinary(binary) => notify(
                     "net.send",
                     json!({"stream": self.network.id(), "frame": {"binary": binary}}),
@@ -373,31 +389,32 @@ impl Session {
         Ok(())
     }
 
-    async fn send_beacon(&mut self, text: Value) {
-        self.unsent_beacon = Some(text);
-        self.flush_beacon().await;
+    async fn send_text(&mut self, text: Value) {
+        let kind = text["type"].as_str().unwrap_or_default().to_owned();
+        self.unsent.insert(kind, text);
+        self.flush().await;
     }
 
-    /// Peer state is absolute and last-write-wins, so a transport that REFUSES
-    /// to queue a beacon keeps the newest one and offers it again on the next
-    /// turn rather than ending the call. A congested writer refuses exactly
-    /// this way, and losing the room because a control frame arrived a tick
-    /// late is a worse outcome than the late tick.
+    /// Control frames (beacon, recipients) are absolute and last-write-wins
+    /// per kind, so a transport that REFUSES to queue one keeps the newest
+    /// and offers it again on the next turn rather than ending the call. A
+    /// congested writer refuses exactly this way, and losing the room because
+    /// a control frame arrived a tick late is a worse outcome than the late
+    /// tick.
     ///
     /// A transport that is genuinely gone still ends the session: the network
     /// subscription delivers its own terminal item and `received` fails on it.
     /// Every turn emits `Effect::Play`, so the retry runs at the playout tick.
-    async fn flush_beacon(&mut self) {
-        let Some(text) = self.unsent_beacon.take() else {
-            return;
-        };
-        let queued = host::request(
-            "net.send",
-            &bytes(&json!({"stream": self.network.id(), "frame": {"text": text.to_string()}})),
-        )
-        .await;
-        if queued.is_err() {
-            self.unsent_beacon = Some(text);
+    async fn flush(&mut self) {
+        for (kind, text) in std::mem::take(&mut self.unsent) {
+            let queued = host::request(
+                "net.send",
+                &bytes(&json!({"stream": self.network.id(), "frame": {"text": text.to_string()}})),
+            )
+            .await;
+            if queued.is_err() {
+                self.unsent.insert(kind, text);
+            }
         }
     }
 
@@ -533,32 +550,15 @@ fn control(value: Value) -> Result<Vec<Event>, String> {
             .ok_or_else(|| "invalid peer".into())
     }
     match value.get("type").and_then(Value::as_str) {
-        Some("ready") => {
-            let peers = value
-                .get("peers")
-                .and_then(Value::as_array)
-                .ok_or("missing room roster")?;
-            if peers.len() > 32 {
-                return Err("room roster exceeds limit".into());
-            }
-            peers
-                .iter()
-                .map(|item| {
-                    Ok(Event::Peer {
-                        peer: peer(item)?,
-                        beacon: serde_json::from_value(
-                            item.get("state").cloned().ok_or("missing peer state")?,
-                        )
-                        .map_err(|error| error.to_string())?,
-                    })
-                })
-                .collect()
-        }
         Some("peer_beacon") => Ok(vec![Event::Peer {
             peer: peer(&value)?,
             beacon: serde_json::from_value(value).map_err(|error| error.to_string())?,
         }]),
-        Some("peer_left") => Ok(vec![Event::Left(peer(&value)?)]),
+        // `ready` names no peers (the roster is consensus state); every
+        // captured image already stands alone, so a keyframe request is
+        // met; and a rate hint has no knob on this side yet.
+        Some("ready" | "keyframe_request") => Ok(Vec::new()),
+        Some("rate_hint") if value["max_kbps"].is_u64() => Ok(Vec::new()),
         _ => Err("unknown call control".into()),
     }
 }
