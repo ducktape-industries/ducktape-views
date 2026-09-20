@@ -841,7 +841,7 @@ impl ChatView {
             key.clone(),
             native::wrapping(native::text(
                 format!("{key}/text"),
-                "Your signing key holds no account on this network, and every message here is posted by one. Create an account to write; until then the room is yours to read.",
+                "To send messages, create or join an account in Settings → Account. You can read this channel without an account.",
             )),
             Tone::Warning,
         )

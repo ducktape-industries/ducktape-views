@@ -1006,7 +1006,7 @@ impl SettingsView {
                 "",
                 kit::wrapping(kit::secondary(
                     "settings/updates-unavailable",
-                    "Updates unavailable: not installed through the launcher.",
+                    "Automatic updates are unavailable in this copy of Ducktape. Open the installed app to check for updates.",
                 )),
             );
         }
@@ -1036,7 +1036,7 @@ impl SettingsView {
             rows.push(kit::kv(
                 "settings/update-staged-row",
                 if refused {
-                    "Refused"
+                    "Update cannot be installed"
                 } else {
                     "Ready to install"
                 },
@@ -1086,6 +1086,12 @@ impl SettingsView {
             ));
         }
         let mut body = vec![setting_list("settings/update-rows", rows)];
+        if refused {
+            body.push(kit::wrapping(kit::caption(
+                "settings/update-recovery/help",
+                "Keep using your current version. Choose Check now to look for a newer update, or Discard to remove this download.",
+            )));
+        }
         if !self.update_note.is_empty() {
             body.push(kit::wrapping(kit::caption(
                 "settings/update-note",
@@ -1459,7 +1465,7 @@ impl SettingsView {
                 "settings/identity",
                 "settings/identity-title",
                 "Your identity",
-                "This device holds a key but no account yet.",
+                "Create an account below, or join your existing account from another device.",
                 identity,
             ));
             content.push(settings_section(
@@ -1473,7 +1479,7 @@ impl SettingsView {
                         setting_row(
                             "settings/create-row",
                             "New account",
-                            "This device founds it and holds its first key.",
+                            "Choose a name to create your account on this network.",
                             "",
                             kit::wrapped_row(
                                 "settings/create-controls",
@@ -1496,7 +1502,7 @@ impl SettingsView {
                         setting_row(
                             "settings/join-row",
                             "Join with a ticket",
-                            "A device that already signs for the account mints it.",
+                            "Get a ticket from a device already signed in to your account, then paste it here.",
                             "",
                             kit::wrapped_row(
                                 "settings/join-controls",
@@ -1519,7 +1525,7 @@ impl SettingsView {
                         setting_row(
                             "settings/login-row",
                             "Passkey",
-                            "Or let a passkey from another device admit this one.",
+                            "Use a passkey from another device to sign in to your account.",
                             "",
                             settings_action(
                                 "settings/login",
