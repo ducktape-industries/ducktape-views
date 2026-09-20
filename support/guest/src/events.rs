@@ -17,10 +17,11 @@ mod tests {
     #[derive(Clone)]
     enum Message {
         Window(crate::wire::events::Window),
-        Size((f32, f32)),
+        Size(u32, (f32, f32)),
     }
 
     struct LifecycleApp {
+        identity: u32,
         windows: Vec<crate::wire::events::Window>,
         sizes: Vec<(f32, f32)>,
     }
@@ -31,6 +32,7 @@ mod tests {
         fn boot() -> (Self, Task<Self::Message>) {
             (
                 Self {
+                    identity: 0,
                     windows: Vec::new(),
                     sizes: Vec::new(),
                 },
@@ -39,7 +41,9 @@ mod tests {
         }
 
         fn view(&self) -> crate::wire::Node {
-            let size = crate::slots::handler(Box::new(|size| Some(Message::Size(size))));
+            let identity = self.identity;
+            let size =
+                crate::slots::handler(Box::new(move |size| Some(Message::Size(identity, size))));
             crate::wire::Node::Sensor {
                 key: "layer/viewport".into(),
                 reset: None,
@@ -55,7 +59,10 @@ mod tests {
         fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
             match message {
                 Message::Window(event) => self.windows.push(event),
-                Message::Size(size) => self.sizes.push(size),
+                Message::Size(identity, size) => {
+                    assert_eq!(identity, self.identity, "callback belongs to this driver");
+                    self.sizes.push(size);
+                }
             }
             Task::none()
         }
@@ -86,7 +93,7 @@ mod tests {
     }
 
     #[test]
-    fn layer_resize_and_window_lifecycle_observations_reach_the_active_instance() {
+    fn sensor_resize_and_os_window_observations_reach_the_driver() {
         let mut driver = Driver::<LifecycleApp>::new();
         let first = driver.tick(vec![]);
         assert_eq!(
@@ -137,6 +144,8 @@ mod tests {
     fn lifecycle_events_and_resize_do_not_cross_driver_instances() {
         let mut first = Driver::<LifecycleApp>::new();
         let mut second = Driver::<LifecycleApp>::new();
+        first.app.identity = 1;
+        second.app.identity = 2;
         let first_frame = first.tick(vec![]);
         let second_frame = second.tick(vec![]);
         let handler = |frame: &crate::wire::Frame| match frame.root.as_ref() {
@@ -161,6 +170,21 @@ mod tests {
         );
         assert!(second.app.sizes.is_empty());
         assert!(second.app.windows.is_empty());
-        assert_eq!(handler(&second_frame), handler(&second.tick(vec![])));
+        second.tick(vec![crate::wire::Event::Size {
+            handler: handler(&second_frame),
+            width: 900.0,
+            height: 600.0,
+        }]);
+        second.tick(vec![observation(crate::wire::events::Window::Unfocused)]);
+        assert_eq!(second.app.sizes, vec![(900.0, 600.0)]);
+        assert_eq!(
+            second.app.windows,
+            vec![crate::wire::events::Window::Unfocused]
+        );
+        assert_eq!(first.app.sizes, vec![(640.0, 360.0)]);
+        assert_eq!(
+            first.app.windows,
+            vec![crate::wire::events::Window::Focused]
+        );
     }
 }
