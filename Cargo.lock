@@ -16,11 +16,11 @@ name = "agents-view"
 version = "0.1.0"
 dependencies = [
  "duck-address",
- "ducktape-view-guest",
  "futures",
  "refusal-class",
  "serde",
  "serde_json",
+ "view-guest",
  "view-wire",
 ]
 
@@ -96,21 +96,21 @@ dependencies = [
 name = "call-view"
 version = "0.1.0"
 dependencies = [
- "ducktape-view-guest",
  "futures",
  "serde",
  "serde_json",
+ "view-guest",
 ]
 
 [[package]]
 name = "canvas-view"
 version = "0.1.0"
 dependencies = [
- "ducktape-view-guest",
  "futures",
  "refusal-class",
  "serde",
  "serde_json",
+ "view-guest",
  "wasmtime",
 ]
 
@@ -138,13 +138,13 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "duck-address",
- "ducktape-view-guest",
  "futures",
  "serde",
  "serde_json",
  "sha2",
  "unicode-normalization",
  "unicode-segmentation",
+ "view-guest",
  "view-wire",
 ]
 
@@ -374,7 +374,7 @@ dependencies = [
 [[package]]
 name = "design"
 version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#8c764093d5974b4328c0b90de157d72597540020"
+source = "git+https://github.com/ducktape-industries/ducktape-sdk?rev=fb71df31ffed916d659fef0df81d792ccd21fdc8#fb71df31ffed916d659fef0df81d792ccd21fdc8"
 
 [[package]]
 name = "digest"
@@ -410,20 +410,9 @@ dependencies = [
 [[package]]
 name = "duck-address"
 version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#8c764093d5974b4328c0b90de157d72597540020"
+source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#fb71df31ffed916d659fef0df81d792ccd21fdc8"
 dependencies = [
  "refusal-class",
-]
-
-[[package]]
-name = "ducktape-view-guest"
-version = "0.1.0"
-dependencies = [
- "design",
- "futures",
- "serde_json",
- "view-wire",
- "wit-bindgen",
 ]
 
 [[package]]
@@ -488,10 +477,10 @@ dependencies = [
 name = "explorer-view"
 version = "0.1.0"
 dependencies = [
- "ducktape-view-guest",
  "futures",
  "serde",
  "serde_json",
+ "view-guest",
  "view-wire",
 ]
 
@@ -501,12 +490,12 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "duck-address",
- "ducktape-view-guest",
  "futures",
  "serde",
  "serde_json",
  "sha2",
  "unicode-normalization",
+ "view-guest",
  "view-wire",
 ]
 
@@ -534,13 +523,13 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "duck-address",
- "ducktape-view-guest",
  "futures",
  "serde",
  "serde_json",
  "sha2",
  "unicode-normalization",
  "unicode-segmentation",
+ "view-guest",
  "view-wire",
 ]
 
@@ -689,10 +678,10 @@ dependencies = [
 name = "governance-view"
 version = "0.1.0"
 dependencies = [
- "ducktape-view-guest",
  "futures",
  "serde",
  "serde_json",
+ "view-guest",
  "view-wire",
 ]
 
@@ -724,10 +713,10 @@ name = "home-view"
 version = "0.1.0"
 dependencies = [
  "duck-address",
- "ducktape-view-guest",
  "futures",
  "serde",
  "serde_json",
+ "view-guest",
  "view-wire",
 ]
 
@@ -742,11 +731,11 @@ name = "inbox-view"
 version = "0.1.0"
 dependencies = [
  "duck-address",
- "ducktape-view-guest",
  "futures",
  "serde",
  "serde_json",
  "sha2",
+ "view-guest",
  "view-wire",
 ]
 
@@ -847,10 +836,10 @@ dependencies = [
 name = "members-view"
 version = "0.1.0"
 dependencies = [
- "ducktape-view-guest",
  "futures",
  "serde",
  "serde_json",
+ "view-guest",
  "view-wire",
 ]
 
@@ -900,10 +889,10 @@ checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 name = "node-view"
 version = "0.1.0"
 dependencies = [
- "ducktape-view-guest",
  "futures",
  "serde",
  "serde_json",
+ "view-guest",
  "view-wire",
 ]
 
@@ -930,10 +919,10 @@ name = "pages-editor-binding-fixture"
 version = "0.1.0"
 dependencies = [
  "design",
- "ducktape-view-guest",
  "futures",
  "pulldown-cmark",
  "serde",
+ "view-guest",
  "view-wire",
  "wasmtime",
 ]
@@ -945,13 +934,13 @@ dependencies = [
  "base64",
  "design",
  "duck-address",
- "ducktape-view-guest",
  "futures",
  "pulldown-cmark",
  "serde",
  "serde_json",
  "sha2",
  "unicode-normalization",
+ "view-guest",
  "view-wire",
 ]
 
@@ -960,10 +949,10 @@ name = "palette-view"
 version = "0.1.0"
 dependencies = [
  "duck-address",
- "ducktape-view-guest",
  "futures",
  "serde",
  "serde_json",
+ "view-guest",
  "view-wire",
 ]
 
@@ -1101,7 +1090,7 @@ dependencies = [
 [[package]]
 name = "refusal-class"
 version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#8c764093d5974b4328c0b90de157d72597540020"
+source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#fb71df31ffed916d659fef0df81d792ccd21fdc8"
 
 [[package]]
 name = "regalloc2"
@@ -1235,10 +1224,10 @@ dependencies = [
 name = "settings-view"
 version = "0.1.0"
 dependencies = [
- "ducktape-view-guest",
  "futures",
  "serde",
  "serde_json",
+ "view-guest",
  "view-wire",
 ]
 
@@ -1466,9 +1455,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "view-guest"
+version = "0.1.0"
+source = "git+https://github.com/ducktape-industries/ducktape-sdk?rev=fb71df31ffed916d659fef0df81d792ccd21fdc8#fb71df31ffed916d659fef0df81d792ccd21fdc8"
+dependencies = [
+ "design",
+ "futures",
+ "serde_json",
+ "view-wire",
+ "wit-bindgen",
+]
+
+[[package]]
 name = "view-wire"
 version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#8c764093d5974b4328c0b90de157d72597540020"
+source = "git+https://github.com/ducktape-industries/ducktape-sdk?rev=fb71df31ffed916d659fef0df81d792ccd21fdc8#fb71df31ffed916d659fef0df81d792ccd21fdc8"
 dependencies = [
  "bincode",
  "design",
