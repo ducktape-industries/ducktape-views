@@ -14,6 +14,7 @@ pub mod editor;
 pub mod editor_binding;
 pub mod editor_menu;
 pub mod editor_view;
+pub(crate) mod file_policy;
 #[path = "editor_format.rs"]
 pub mod format;
 pub mod host;

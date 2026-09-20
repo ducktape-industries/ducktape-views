@@ -58,7 +58,7 @@ impl FilesView {
 
     fn on_files_dropped(
         &mut self,
-        files: Result<Vec<ducktape_view_files::SelectedFile>, String>,
+        files: Result<Vec<crate::file_policy::SelectedFile>, String>,
     ) -> Task<Message> {
         let files = match files {
             Ok(files) => files,
@@ -72,7 +72,7 @@ impl FilesView {
             return Task::perform(
                 async move {
                     for file in files {
-                        ducktape_view_files::release(&file.token).await;
+                        crate::file_policy::release(&file.token).await;
                     }
                 },
                 |_| Message::GrantsReleased,
@@ -212,7 +212,7 @@ impl FilesView {
     /// reads. The same address twice is the same two subscription keys, so
     /// the generation is what makes the second push read again.
     fn on_route_to(&mut self, address: String) -> Task<Message> {
-        let target = match ducktape_view_files::address_path(&address) {
+        let target = match crate::file_policy::address_path(&address) {
             Ok(path) => path,
             Err(refused) => {
                 self.notice = refused.sentence;
