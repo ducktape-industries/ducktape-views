@@ -138,13 +138,13 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "duck-address",
- "ducktape-view-composer",
- "ducktape-view-files",
  "ducktape-view-guest",
  "futures",
  "serde",
  "serde_json",
  "sha2",
+ "unicode-normalization",
+ "unicode-segmentation",
  "view-wire",
 ]
 
@@ -536,11 +536,13 @@ name = "files-view"
 version = "0.1.0"
 dependencies = [
  "base64",
- "ducktape-view-files",
+ "duck-address",
  "ducktape-view-guest",
  "futures",
  "serde",
  "serde_json",
+ "sha2",
+ "unicode-normalization",
  "view-wire",
 ]
 
@@ -976,14 +978,16 @@ dependencies = [
 name = "pages-view"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "design",
  "duck-address",
- "ducktape-view-files",
  "ducktape-view-guest",
  "futures",
  "pulldown-cmark",
  "serde",
  "serde_json",
+ "sha2",
+ "unicode-normalization",
  "view-wire",
 ]
 

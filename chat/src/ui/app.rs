@@ -58,7 +58,7 @@ pub struct ChatView {
     #[serde(skip)]
     pub(crate) upload_handles: std::collections::HashMap<String, ducktape_view_guest::task::Handle>,
     pub(crate) sending: std::collections::BTreeMap<String, (String, crate::host::PendingSend)>,
-    pub(crate) composers: std::collections::BTreeMap<String, ducktape_view_composer::Draft>,
+    pub(crate) composers: std::collections::BTreeMap<String, crate::composer::Draft>,
     pub(crate) endpoint: String,
     pub(crate) network_name: String,
     pub(crate) network_chain_id: String,
@@ -1939,7 +1939,7 @@ mod snapshot_schema {
             // A draft carries an editor document, which refuses to restore
             // from a byte the tracer made up, so it is described by a value
             // that reaches every field it holds.
-            shape.sample(&ducktape_view_composer::Draft::schema_sample());
+            shape.sample(&crate::composer::Draft::schema_sample());
         });
     }
 }

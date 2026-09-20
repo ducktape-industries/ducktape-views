@@ -982,8 +982,7 @@ fn head_within(text: &str, limit: usize) -> (String, bool) {
     (text[..text.floor_char_boundary(limit)].to_owned(), true)
 }
 
-/// The files read lane's wire: standard alphabet, padded — the same engine
-/// duckfs-core encodes with, so both ends share one reading of a byte.
+/// The files read lane's wire: standard alphabet, padded.
 fn base64_encode(bytes: &[u8]) -> String {
     use base64::Engine as _;
     base64::engine::general_purpose::STANDARD.encode(bytes)
@@ -998,7 +997,7 @@ fn base64_decode(input: &str) -> Option<Vec<u8>> {
 
 /// OS drops are opaque, guest-scoped grants; destination and commit policy stay here.
 pub fn drops()
--> ducktape_view_guest::Subscription<Result<Vec<ducktape_view_files::SelectedFile>, String>> {
+-> ducktape_view_guest::Subscription<Result<Vec<crate::file_policy::SelectedFile>, String>> {
     ducktape_view_guest::Subscription::run(|| {
         host::subscribe("fs.drops", b"{}").map(|reply| {
             reply
@@ -1009,7 +1008,7 @@ pub fn drops()
 }
 
 pub async fn upload_files(
-    files: Vec<ducktape_view_files::SelectedFile>,
+    files: Vec<crate::file_policy::SelectedFile>,
     directory: String,
 ) -> Result<(), String> {
     let refusal = write_refusal(&directory);
@@ -1018,7 +1017,7 @@ pub async fn upload_files(
     });
     if !refusal.is_empty() || !safe_names {
         for file in files {
-            ducktape_view_files::release(&file.token).await;
+            crate::file_policy::release(&file.token).await;
         }
         return Err(if refusal.is_empty() {
             "The dropped file name is invalid".into()
@@ -1030,10 +1029,10 @@ pub async fn upload_files(
     while let Some(file) = files.next() {
         let path = fs_child(&directory, &file.name);
         let token = file.token.clone();
-        if let Err(error) = ducktape_view_files::upload(file, path).await {
-            ducktape_view_files::release(&token).await;
+        if let Err(error) = crate::file_policy::upload(file, path).await {
+            crate::file_policy::release(&token).await;
             for pending in files {
-                ducktape_view_files::release(&pending.token).await;
+                crate::file_policy::release(&pending.token).await;
             }
             return Err(refusal_line(error));
         }
