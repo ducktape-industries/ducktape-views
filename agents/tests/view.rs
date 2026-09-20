@@ -29,8 +29,15 @@ fn provision_reply() -> Value {
         .expect("producer agent reply fixture")
 }
 
-fn assert_agent_message(payload: &Value, operation: &str) {
-    assert!(payload[operation].is_object(), "{operation}: {payload}");
+fn fixture(name: &str) -> Value {
+    let source = match name {
+        "provision-request" => include_str!("fixtures/provision-request.json"),
+        "configure-model-register" => include_str!("fixtures/configure-model-register.json"),
+        "configure-model-update" => include_str!("fixtures/configure-model-update.json"),
+        "configure-model-pause" => include_str!("fixtures/configure-model-pause.json"),
+        _ => panic!("unknown fixture {name}"),
+    };
+    serde_json::from_str(source).expect("producer request fixture")
 }
 
 /// Every frame a test renders is one assistive technology can name.
@@ -389,18 +396,7 @@ fn the_controller_edits_the_whole_record_and_saves_it_in_one_write() {
     let submit = one_intent(&frame);
     assert_eq!(submit.kind, "op.submit");
     let op: Value = serde_json::from_slice(&submit.payload).expect("an op decodes");
-    assert_eq!(op["target"], "runs");
-    let update = &op["payload"]["configure_model"]["operation"]["update_model"];
-    assert_eq!(update["agent_id"], "reviewer-bot");
-    assert_eq!(update["display_name"], "Reviewer Bot");
-    assert_eq!(update["capability"], "claude");
-    let always = update["skills"]
-        .as_array()
-        .expect("the skills ride the op")
-        .iter()
-        .filter(|skill| skill["load"] == "always")
-        .count();
-    assert_eq!(always, 2, "{update}");
+    assert_eq!(op, fixture("configure-model-update"));
 }
 
 #[test]
@@ -451,12 +447,7 @@ fn the_controller_pauses_a_record_with_a_signed_op() {
     let submit = one_intent(&frame);
     assert_eq!(submit.kind, "op.submit");
     let op: Value = serde_json::from_slice(&submit.payload).expect("an op decodes");
-    assert_eq!(
-        op,
-        json!({ "target": "runs", "payload": { "configure_model": { "operation": {
-            "pause_model": { "agent_id": "reviewer-bot" }
-        }}}})
-    );
+    assert_eq!(op, fixture("configure-model-pause"));
 }
 
 /// Registration provisions an account, reads its controller-scoped receipt,
@@ -499,13 +490,7 @@ fn a_new_agent_registers_from_the_form_once_its_id_is_a_label() {
     )]);
     let provision = request(&frame, "op.submit");
     let payload: Value = serde_json::from_slice(&provision.payload).unwrap();
-    assert_eq!(payload["target"], "agent");
-    assert_agent_message(&payload["payload"], "provision");
-    assert_eq!(payload["payload"]["provision"]["request_id"], "chiefduck");
-    assert_eq!(
-        payload["payload"]["provision"]["program"],
-        model_program("chiefduck")
-    );
+    assert_eq!(payload, fixture("provision-request"));
     assert!(
         !frame
             .requests
@@ -522,18 +507,7 @@ fn a_new_agent_registers_from_the_form_once_its_id_is_a_label() {
     let frame = tick_native(vec![answer(receipt.id, &response)]);
     let configure = request(&frame, "op.submit");
     let payload: Value = serde_json::from_slice(&configure.payload).unwrap();
-    assert_eq!(payload["target"], "runs");
-    assert_agent_message(&payload["payload"], "configure_model");
-    let record = &payload["payload"]["configure_model"]["operation"]["register_model"];
-    assert_eq!(record["account"], 77);
-    assert_eq!(record["agent_id"], "chiefduck");
-    assert_eq!(record["display_name"], "ChiefDuck");
-    assert_eq!(record["capability"], "claude");
-    assert_eq!(
-        record["skills"][0]["source_prefix"],
-        "/shared/skills/chiefduck"
-    );
-    assert_eq!(record["skills"][0]["load"], "always");
+    assert_eq!(payload, fixture("configure-model-register"));
     let _ = tick_native(vec![answer(configure.id, b"{}")]);
 }
 

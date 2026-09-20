@@ -1,0 +1,22 @@
+{
+  "payload": {
+    "configure_model": {
+      "operation": {
+        "register_model": {
+          "account": 77,
+          "agent_id": "chiefduck",
+          "capability": "claude",
+          "display_name": "ChiefDuck",
+          "skills": [
+            {
+              "load": "always",
+              "name": "chiefduck",
+              "source_prefix": "/shared/skills/chiefduck"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "target": "runs"
+}

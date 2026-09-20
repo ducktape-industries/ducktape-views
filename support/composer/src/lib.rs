@@ -3,7 +3,7 @@
 mod binding;
 mod editing;
 pub mod host;
-pub mod message;
+mod message;
 pub use binding::{Event, Outcome, view};
 
 use ducktape_view_guest::{Editor, wire};

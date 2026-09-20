@@ -2305,12 +2305,15 @@ fn skills_wire(skills: &[AgentSkill]) -> serde_json::Value {
         .iter()
         .map(|skill| {
             let pinned = !skill.source_snapshot.is_empty();
-            serde_json::json!({
+            let mut reference = serde_json::json!({
                 "name": skill.name,
                 "source_prefix": skill.source_prefix,
-                "source_snapshot": pinned.then(|| skill.source_snapshot.clone()),
                 "load": match skill.always { true => "always", false => "on_demand" },
-            })
+            });
+            if pinned {
+                reference["source_snapshot"] = skill.source_snapshot.clone().into();
+            }
+            reference
         })
         .collect();
     serde_json::Value::Array(refs)
