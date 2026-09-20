@@ -1,0 +1,9 @@
+[package]
+name = "views-policy"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Workspace-wide rules over every view's source and manifest; tests only, nothing links it"
+
+[lib]
+path = "lib.rs"
