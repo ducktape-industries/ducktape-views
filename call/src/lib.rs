@@ -1,4 +1,5 @@
 //! Deployed call protocol over generic media devices and Gateway streams.
+mod composer;
 mod panel;
 mod protocol;
 mod session;

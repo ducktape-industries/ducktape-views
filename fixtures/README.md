@@ -12,8 +12,8 @@ semantics rather than a local type round-trip.
 | Consumer path | Producer input | Fixture |
 | --- | --- | --- |
 | Canvas board read/write | `boards-wire::Reply::Board` and `Operation::Edit` | `canvas/tests/fixtures/boards/` |
-| Composer rich text | `chat-message::parse_message` | `support/composer/tests/fixtures/message-rich.json` |
-| File address support | `files-wire::FileAddress` | `support/files/tests/fixtures/file-address.json` |
+| Composer rich text | `chat-message::parse_message` | `chat/tests/fixtures/message-rich.json` |
+| File address support | `files-wire::FileAddress` | `forge/tests/fixtures/file-address.json` |
 | Pages address consumers | `duck_address::pages::PageAddress` (the producer type formerly re-exported by `pages-wire`) | `pages/tests/fixtures/page-address.json` |
 | Agents registration | `runs-wire::model_program`, `agent-wire::AgentReply::Provision`, `agent-wire::AgentMsg::Provision`, `runs-wire::RunsMsg::ConfigureModel` | `agents/tests/fixtures/` |
 

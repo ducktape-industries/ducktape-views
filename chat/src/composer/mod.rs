@@ -76,6 +76,7 @@ impl Draft {
     /// because a shape the sample does not reach is a shape the tag does not
     /// describe. The literal is exhaustive on purpose: a field added to
     /// `Draft` is a field the compiler makes you reach here too.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn schema_sample() -> Self {
         let attachments = vec![
             Attachment {
@@ -176,6 +177,7 @@ impl Draft {
         self.redo.clear();
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn body(&self) -> String {
         self.body_of(self.editor.state_view().text)
     }

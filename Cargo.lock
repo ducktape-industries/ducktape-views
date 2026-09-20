@@ -96,7 +96,6 @@ dependencies = [
 name = "call-view"
 version = "0.1.0"
 dependencies = [
- "ducktape-view-composer",
  "ducktape-view-guest",
  "futures",
  "serde",
@@ -139,13 +138,13 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "duck-address",
- "ducktape-view-composer",
- "ducktape-view-files",
  "ducktape-view-guest",
  "futures",
  "serde",
  "serde_json",
  "sha2",
+ "unicode-normalization",
+ "unicode-segmentation",
  "view-wire",
 ]
 
@@ -417,42 +416,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "duckfs-core"
-version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#8c764093d5974b4328c0b90de157d72597540020"
-dependencies = [
- "base64",
- "refusal-class",
- "serde",
- "serde_json",
- "sha2",
- "unicode-normalization",
-]
-
-[[package]]
-name = "ducktape-view-composer"
-version = "0.1.0"
-dependencies = [
- "ducktape-view-files",
- "ducktape-view-guest",
- "serde",
- "serde_json",
- "unicode-segmentation",
-]
-
-[[package]]
-name = "ducktape-view-files"
-version = "0.1.0"
-dependencies = [
- "base64",
- "duck-address",
- "duckfs-core",
- "ducktape-view-guest",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "ducktape-view-guest"
 version = "0.1.0"
 dependencies = [
@@ -537,11 +500,13 @@ name = "files-view"
 version = "0.1.0"
 dependencies = [
  "base64",
- "ducktape-view-files",
+ "duck-address",
  "ducktape-view-guest",
  "futures",
  "serde",
  "serde_json",
+ "sha2",
+ "unicode-normalization",
  "view-wire",
 ]
 
@@ -569,11 +534,13 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "duck-address",
- "ducktape-view-composer",
  "ducktape-view-guest",
  "futures",
  "serde",
  "serde_json",
+ "sha2",
+ "unicode-normalization",
+ "unicode-segmentation",
  "view-wire",
 ]
 
@@ -975,14 +942,16 @@ dependencies = [
 name = "pages-view"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "design",
  "duck-address",
- "ducktape-view-files",
  "ducktape-view-guest",
  "futures",
  "pulldown-cmark",
  "serde",
  "serde_json",
+ "sha2",
+ "unicode-normalization",
  "view-wire",
 ]
 

@@ -152,7 +152,7 @@ pub fn is_picture(name: &str) -> bool {
 /// The absolute duckfs path a `duck://<chain>/files/…` link names, or ""
 /// when the link names no file.
 pub fn attachment_file_path(link: &str) -> String {
-    ducktape_view_files::address_path(link).unwrap_or_default()
+    crate::composer::host::address_path(link).unwrap_or_default()
 }
 
 /// Every picture attachment across the timeline and the thread, once each,
@@ -754,9 +754,7 @@ thread_local! {
 }
 
 /// Canonical mention tokens come from the guest's identity directory.
-pub(crate) fn composer_choices(
-    members: &[ChatMember],
-) -> Vec<ducktape_view_composer::MentionChoice> {
+pub(crate) fn composer_choices(members: &[ChatMember]) -> Vec<crate::composer::MentionChoice> {
     NAMES.with_borrow(|(_, names)| {
         let mut choices: BTreeMap<String, String> = names
             .by_account
@@ -777,7 +775,7 @@ pub(crate) fn composer_choices(
         }
         choices
             .into_iter()
-            .map(|(token, label)| ducktape_view_composer::MentionChoice { token, label })
+            .map(|(token, label)| crate::composer::MentionChoice { token, label })
             .collect()
     })
 }

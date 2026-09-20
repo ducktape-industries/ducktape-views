@@ -1,0 +1,11 @@
+[
+  {
+    "paragraph": [
+      {"text": "Hello ", "marks": []},
+      {"text": "world", "marks": ["bold"]},
+      {"text": " ", "marks": []},
+      {"text": "<@7>", "marks": [{"mention": {"account": 7}}]}
+    ]
+  },
+  {"quote": [{"text": "quote", "marks": []}]}
+]

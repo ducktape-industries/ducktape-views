@@ -19,9 +19,9 @@
     {"path": "agents/tests/fixtures/configure-model-register.json", "producer": "runs-wire::RunsMsg::ConfigureModel(ModelMsg::RegisterModel)", "legacy_b66": "new_at_8c"},
     {"path": "agents/tests/fixtures/configure-model-update.json", "producer": "runs-wire::RunsMsg::ConfigureModel(ModelMsg::UpdateModel)", "legacy_b66": "new_at_8c"},
     {"path": "agents/tests/fixtures/configure-model-pause.json", "producer": "runs-wire::RunsMsg::ConfigureModel(ModelMsg::PauseModel)", "legacy_b66": "new_at_8c"},
-    {"path": "support/composer/tests/fixtures/message-rich.json", "producer": "chat-message::parse_message", "legacy_b66": "byte_equivalent"},
+    {"path": "chat/tests/fixtures/message-rich.json", "producer": "chat-message::parse_message", "legacy_b66": "byte_equivalent"},
     {"path": "canvas/tests/fixtures/boards/", "producer": "boards-wire::Reply::Board and Operation::Edit", "legacy_b66": "producer_source_byte_equivalent"},
-    {"path": "support/files/tests/fixtures/file-address.json", "producer": "files-wire::FileAddress", "legacy_b66": "producer_source_byte_equivalent"},
+    {"path": "forge/tests/fixtures/file-address.json", "producer": "files-wire::FileAddress", "legacy_b66": "producer_source_byte_equivalent"},
     {"path": "pages/tests/fixtures/page-address.json", "producer": "duck-address::pages::PageAddress", "legacy_b66": "producer_source_byte_equivalent"}
   ],
   "legacy_comparison": {

@@ -158,10 +158,9 @@ mod tests {
 
     #[test]
     fn local_decoder_reads_the_committed_producer_fixture() {
-        let blocks: Vec<Block> = serde_json::from_str(include_str!(
-            "../../support/composer/tests/fixtures/message-rich.json"
-        ))
-        .expect("SDK chat-message fixture decodes locally");
+        let blocks: Vec<Block> =
+            serde_json::from_str(include_str!("../tests/fixtures/message-rich.json"))
+                .expect("SDK chat-message fixture decodes locally");
         let Block::Paragraph(spans) = &blocks[0] else {
             panic!("first fixture block is not a paragraph");
         };
