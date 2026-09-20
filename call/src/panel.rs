@@ -195,10 +195,10 @@ async fn room(key: &RoomKey) -> Result<Room, String> {
     let title = info["name"].as_str().ok_or("missing call room")?.to_owned();
     let roster = info["huddle"]
         .as_array()
-        .ok_or("missing huddle roster")?
+        .ok_or("missing call roster")?
         .iter()
         .map(|seat| {
-            let party = seat["party"].as_str().ok_or("missing huddle identity")?;
+            let party = seat["party"].as_str().ok_or("missing call identity")?;
             let identity = canonical(party);
             let label = names
                 .get(&identity)
@@ -206,10 +206,7 @@ async fn room(key: &RoomKey) -> Result<Room, String> {
                 .unwrap_or_else(|| identity.clone());
             Ok(Person {
                 key: identity.clone(),
-                node: seat["node"]
-                    .as_str()
-                    .ok_or("missing huddle node")?
-                    .to_owned(),
+                node: seat["node"].as_str().ok_or("missing call node")?.to_owned(),
                 label,
                 is_you: identity == me,
             })
@@ -255,7 +252,7 @@ pub async fn invite(channel: String, room: String, key: String) -> Result<(), St
     composer::submit(
         id,
         &Send {
-            body: format!("{mention} come join the huddle in #{room}"),
+            body: format!("{mention} come join the call in #{room}"),
             attachments: Vec::new(),
         },
         &composer::Target::Post {
@@ -389,7 +386,7 @@ impl Panel {
         }
         body.push(kit::caption(
             "huddle/count",
-            format!("In the huddle · {}", room.roster.len()),
+            format!("In the call · {}", room.roster.len()),
         ));
         let rows = room.roster.iter().map(|person| {
             let peer = self.peers.iter().find(|peer| peer.peer == person.node);
@@ -434,7 +431,7 @@ impl Panel {
             true => kit::empty_state(
                 "huddle/roster-empty",
                 "Nobody here yet",
-                "Waiting for the huddle's participant list.",
+                "Waiting for the call's participant list.",
             ),
             false => kit::column("huddle/roster", rows),
         };
@@ -513,7 +510,7 @@ impl Panel {
                     Action::Channel,
                     Style::Text,
                 ),
-                button("huddle/leave", "Leave huddle", Action::Leave, Style::Danger),
+                button("huddle/leave", "Leave call", Action::Leave, Style::Danger),
             ],
         );
         // The kit's page, as every other view frames itself: the header,

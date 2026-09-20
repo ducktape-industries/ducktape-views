@@ -498,9 +498,9 @@ mod tests {
         let sentences = [
             (
                 "key_without_account",
-                "To join a huddle, create or join an account in Settings → Account.",
+                "To join a call, create or join an account in Settings → Account.",
             ),
-            ("not_in_huddle", "You are not in this huddle."),
+            ("not_in_huddle", "You are not in this call."),
             (
                 "no_call_hub",
                 "Voice is not on in this network: the node runs no call hub.",
