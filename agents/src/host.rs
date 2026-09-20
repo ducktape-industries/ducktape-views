@@ -607,7 +607,10 @@ fn run_origin(run: &serde_json::Value) -> String {
     if run["delegation_id"].is_string() {
         return "Agent delegation".into();
     }
-    format!("Message {}", run["anchor_seq"].as_i64().unwrap_or(0))
+    let Some(anchor_seq) = run["anchor_seq"].as_i64() else {
+        return "Not reported".into();
+    };
+    format!("Message {anchor_seq}")
 }
 
 fn outcome_word(outcome: &str) -> &'static str {
@@ -2544,6 +2547,13 @@ pub fn run_named(runs: &[RunRow], run_id: &str) -> RunRow {
         .unwrap_or_default()
 }
 
+/// The current log/control identity. C4 machine sessions will add a separate
+/// provider `session_id`; existing run-backed rows only prove this dispatch
+/// identity, so never manufacture a session id from it.
+pub fn session_identity(run: &RunRow) -> String {
+    run.dispatch_id.clone()
+}
+
 /// The run listed under `dispatch_id`; an empty row when the list has none.
 pub fn run_at(runs: &[RunRow], dispatch_id: &str) -> RunRow {
     runs.iter()
@@ -2855,6 +2865,14 @@ fn message_link(channel: &str, seq: Option<u64>, chain: &str) -> String {
 mod process_tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn a_run_without_origin_is_not_presented_as_a_message() {
+        assert_eq!(
+            run_origin(&json!({"run_id":"run-without-origin"})),
+            "Not reported"
+        );
+    }
 
     fn output(run: &mut LiveRun, event: serde_json::Value) {
         fold_output(

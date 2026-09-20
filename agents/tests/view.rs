@@ -658,6 +658,39 @@ fn the_runs_panel_lists_every_run_and_opens_one_journal_at_a_time() {
     assert!(!has_text(&frame, "Close run"));
 }
 
+#[test]
+fn the_session_table_folds_runs_under_agents_and_keeps_unknown_fields_explicit() {
+    let (frame, _) = registered("7");
+    let frame = tick_native(press(&frame, "Runs"));
+    for expected in [
+        "Kind",
+        "Model / executor",
+        "Last activity",
+        "Reviewer Bot · Agent · 2",
+        "Scribe · Agent · 0",
+        "Not reported",
+    ] {
+        assert!(
+            has_text(&frame, expected),
+            "missing {expected:?}: {:?}",
+            texts(&frame)
+        );
+    }
+    assert!(has_text(&frame, "#general · Message 12"));
+
+    let frame = tick_native(press(&frame, "Collapse Reviewer Bot"));
+    assert!(!has_text(&frame, "#general · Message 12"));
+    assert!(has_text(&frame, "Reviewer Bot · Agent · 2"));
+
+    let frame = tick_native(press(&frame, "Expand Reviewer Bot"));
+    assert!(has_text(&frame, "#general · Message 12"));
+    assert!(
+        frame.requests.is_empty(),
+        "folding is local: {:?}",
+        frame.requests
+    );
+}
+
 /// The journal's places draw as chips: one with an address opens through
 /// the app's open plane, one the protocol cannot address yet is a label.
 #[test]
