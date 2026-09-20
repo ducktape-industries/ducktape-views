@@ -204,7 +204,7 @@ fn a_join_notification_reads_the_first_seat_and_names_it_in_the_view() {
         assert_eq!(
             payload(request(&frame, "host.emit")),
             json!({"notice":{
-                "title":"#General","subtitle":"Reporter started a huddle","body":"Join from the room list.","thread":"room"
+                "title":"#General","subtitle":"Reporter started a call","body":"Join from the room list.","thread":"room"
             }})
         );
     });

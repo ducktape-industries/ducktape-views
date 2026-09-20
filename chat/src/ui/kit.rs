@@ -748,7 +748,7 @@ impl ChatView {
             Some(slots::message(leave())),
             wire::ButtonPreset::Subtle,
         );
-        for (button, label) in [(&mut show, "Show huddle"), (&mut leave, "Leave huddle")] {
+        for (button, label) in [(&mut show, "Show call"), (&mut leave, "Leave call")] {
             if let wire::Node::Button { label: name, .. } = button {
                 *name = Some(label.into());
             }
@@ -773,7 +773,7 @@ impl ChatView {
         let allowed = self.may_write();
         let mut button = native::button(
             key,
-            "Huddle",
+            "Call",
             allowed.then(|| slots::message(join())),
             wire::ButtonPreset::Subtle,
         );
@@ -781,11 +781,11 @@ impl ChatView {
             label, description, ..
         } = &mut button
         {
-            *label = Some("Start a huddle".into());
+            *label = Some("Start a call".into());
             if !allowed {
                 // pressing it only ever met the host's refusal; the step out
                 // of that is what the button says instead
-                *description = Some("Create an account to start a huddle".into());
+                *description = Some("Create an account to start a call".into());
             }
         }
         button

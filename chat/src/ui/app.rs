@@ -1375,7 +1375,7 @@ mod tests {
                 Some("ChatView/chat/huddle"),
                 Some("ChatView/chat/details"),
             ],
-            "the header is the title, then Huddle and Details: {header:?}"
+            "the header is the title, then Call and Details: {header:?}"
         );
         let wire::Node::Linear {
             width,

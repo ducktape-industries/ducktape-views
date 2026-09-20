@@ -267,7 +267,7 @@ pub fn huddle_started_notice(channel: &ChatChannel, enabled: bool) -> Option<Des
     }
     Some(DesktopNotice {
         title: format!("#{}", channel.name),
-        subtitle: format!("{} started a huddle", first.label),
+        subtitle: format!("{} started a call", first.label),
         body: "Join from the room list.".into(),
         thread: channel.id.clone(),
     })
@@ -352,7 +352,7 @@ mod tests {
         let started = huddle_started_notice(&room(vec![seat("Ada", false)]), true)
             .expect("the first seat is a banner");
         assert_eq!(started.title, "#general");
-        assert_eq!(started.subtitle, "Ada started a huddle");
+        assert_eq!(started.subtitle, "Ada started a call");
         assert_eq!(started.thread, "channel-a");
         assert!(huddle_started_notice(&room(vec![seat("Me", true)]), true).is_none());
         assert!(

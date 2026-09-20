@@ -15,6 +15,6 @@ pub use app::{ChatView, CopySurface, Message};
 ducktape_view_guest::export_app!(
     ChatView,
     "Chat",
-    "Channels, direct messages, threads and the live huddle of this workspace.",
+    "Channels, direct messages, threads and the live call of this workspace.",
     ["chat"]
 );

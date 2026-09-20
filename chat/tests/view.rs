@@ -455,7 +455,7 @@ fn a_huddle_lists_its_people_under_the_room() {
         let departed = tick_native(vec![item(props, &encoded(&seated))]);
         assert_eq!(avatar_background(&departed), avatar_background(&muted));
         assert!(
-            !has_text(&frame, "Huddle 2"),
+            !has_text(&frame, "Call 2"),
             "the count is a caption, not a badge"
         );
     });
@@ -1950,7 +1950,7 @@ fn a_key_with_no_account_reads_the_room_and_every_write_says_what_to_do() {
             on_press,
             description,
             ..
-        } = labelled(&frame, "Start a huddle")
+        } = labelled(&frame, "Start a call")
         else {
             panic!("the header lost its huddle button")
         };
@@ -1960,7 +1960,7 @@ fn a_key_with_no_account_reads_the_room_and_every_write_says_what_to_do() {
         );
         assert_eq!(
             description.as_deref(),
-            Some("Create an account to start a huddle"),
+            Some("Create an account to start a call"),
             "the disabled huddle gives no reason"
         );
 

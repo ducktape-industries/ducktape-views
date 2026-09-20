@@ -113,9 +113,9 @@ fn properties(bytes: &[u8]) -> Result<Props, String> {
 fn refused(refusal: host::Refusal) -> String {
     match refusal.reason.as_str() {
         "key_without_account" => {
-            "To join a huddle, create or join an account in Settings → Account.".into()
+            "To join a call, create or join an account in Settings → Account.".into()
         }
-        "not_in_huddle" => "You are not in this huddle.".into(),
+        "not_in_huddle" => "You are not in this call.".into(),
         "no_call_hub" => "Voice is not on in this network: the node runs no call hub.".into(),
         "node_unreachable" => "Your node did not answer.".into(),
         _ => host::said(refusal),
@@ -134,13 +134,13 @@ async fn roster(channel: &str) -> Result<Vec<String>, String> {
     let reply: Value = serde_json::from_slice(&reply).map_err(|error| error.to_string())?;
     reply["channel"]["huddle"]
         .as_array()
-        .ok_or("missing huddle roster")?
+        .ok_or("missing call roster")?
         .iter()
         .map(|seat| {
             seat["node"]
                 .as_str()
                 .map(str::to_owned)
-                .ok_or_else(|| "missing huddle node".into())
+                .ok_or_else(|| "missing call node".into())
         })
         .collect()
 }
