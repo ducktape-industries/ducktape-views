@@ -1846,7 +1846,7 @@ impl AgentsView {
     pub(crate) const PREFERRED_WINDOW_SIZE: &'static str = "none";
     /// This state's layout, digested — `snapshot_schema` holds it here.
     pub(crate) const SNAPSHOT_SCHEMA: &'static str =
-        "14b6a413af6f2949a94eae1d28dae8032790e5c6d40306f52a38efc2b6b19d24";
+        "23ebad7bdef93c572988332cb106e8738dd83cc977c851a2213795f07c3e708e";
     pub(crate) fn snapshot(&self) -> Result<Vec<u8>, String> {
         self.validate_snapshot()?;
         wire::Snapshot {
@@ -1865,6 +1865,7 @@ impl AgentsView {
             return Err("invalid Agents snapshot".into());
         };
         let mut state: Self = wire::decode(&state)?;
+        state.live.control = None;
         if matches!(state.control_state, host::ControlState::Sending) {
             state.control_state = host::ControlState::Idle;
             state.control_serial = state.control_serial.wrapping_add(1);
@@ -2076,6 +2077,22 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(view.live.answer, "");
+    }
+
+    #[test]
+    fn restored_transcript_keeps_text_but_requires_fresh_control_state() {
+        let (mut view, _) = AgentsView::boot();
+        view.live.answer = "retained transcript".into();
+        view.live.control_snapshot_received = true;
+        view.live.control = Some(host::RunControl {
+            turn: "old-turn".into(),
+            steers: true,
+            approvals: vec![("old-approval".into(), "Read".into())],
+        });
+        let restored = AgentsView::restore(&view.snapshot().unwrap()).unwrap();
+        assert_eq!(restored.live.answer, "retained transcript");
+        assert!(restored.live.control.is_none());
+        assert!(!restored.live.control_snapshot_received);
     }
 
     #[test]
