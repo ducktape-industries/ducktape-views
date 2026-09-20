@@ -64,17 +64,17 @@ async fn submit_bytes(target: &str, bytes: Vec<u8>) -> Result<(), host::Refusal>
 
 fn canonical(path: &str) -> Result<Vec<String>, String> {
     if !path.starts_with('/') {
-        return Err("files: path must be absolute (start with '/')".into());
+        return Err("path must be absolute (start with '/')".into());
     }
     if path.chars().nfc().collect::<String>() != path {
-        return Err("files: path is not NFC-normalized".into());
+        return Err("path is not NFC-normalized".into());
     }
     if path.contains('\0') {
-        return Err("files: path must not contain a NUL byte".into());
+        return Err("path must not contain a NUL byte".into());
     }
     if path.len() > MAX_PATH_BYTES {
         return Err(format!(
-            "files: path exceeds the {MAX_PATH_BYTES}-byte length limit"
+            "path exceeds the {MAX_PATH_BYTES}-byte length limit"
         ));
     }
     if path == "/" {
@@ -83,19 +83,17 @@ fn canonical(path: &str) -> Result<Vec<String>, String> {
     let mut segments = Vec::new();
     for segment in path[1..].split('/') {
         if segment.is_empty() || segment == "." || segment == ".." {
-            return Err("files: path contains an empty or dot segment".into());
+            return Err("path contains an empty or dot segment".into());
         }
         if segment.len() > MAX_NAME_BYTES {
             return Err(format!(
-                "files: segment name exceeds the {MAX_NAME_BYTES}-byte limit"
+                "segment name exceeds the {MAX_NAME_BYTES}-byte limit"
             ));
         }
         segments.push(segment.to_owned());
     }
     if segments.len() > MAX_DEPTH {
-        return Err(format!(
-            "files: path exceeds the maximum depth of {MAX_DEPTH}"
-        ));
+        return Err(format!("path exceeds the maximum depth of {MAX_DEPTH}"));
     }
     Ok(segments)
 }

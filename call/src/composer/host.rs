@@ -11,7 +11,7 @@ pub async fn id() -> Result<String, host::Refusal> {
 }
 
 pub async fn submit(id: String, send: &Send, target: &Target) -> Result<(), host::Refusal> {
-    let body = send.body.clone();
+    let body = send.body.lines().collect::<Vec<_>>().join("\n");
     if body.is_empty() || body.len() > 16 * 1024 {
         return Err(host::Refusal::new(
             "invalid_body",
