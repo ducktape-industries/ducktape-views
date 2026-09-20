@@ -3568,10 +3568,9 @@ async fn background_search(
     let mut hits = fold_hits(&reply, &names);
     for hit in &mut hits {
         hit.meta = format!("{} · #{}", hit.channel_id, hit.seq);
-        hit.text = ducktape_view_composer::message::draft_mentions(&hit.text, |party| {
+        hit.text = crate::message::draft_mentions(&hit.text, |party| {
             mention_label(&serde_json::to_value(party).expect("party encodes"), &names)
-        })
-        .0;
+        });
     }
     Ok(serde_json::json!({
         "hits": hits,

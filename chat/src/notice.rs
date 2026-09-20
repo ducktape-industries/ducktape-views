@@ -2,7 +2,7 @@
 use crate::host::{
     ChatChannel, Names, author_display, dm_channel_id, hex_encode, message_body, names_at, view,
 };
-use ducktape_view_composer::message::{Block, Mark, Party, resolve_assigned_mentions};
+use crate::message::{Block, Mark, Party, resolve_assigned_mentions};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

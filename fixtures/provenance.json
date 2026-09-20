@@ -1,0 +1,34 @@
+{
+  "sdk_revision": "8c764093d5974b4328c0b90de157d72597540020",
+  "generator": "fixtures/generate-producer-fixtures.sh",
+  "generator_project": "fixtures/producer-generator",
+  "production_graph": false,
+  "inputs": {
+    "model_program": {"agent_id": "chiefduck"},
+    "agent_provision_reply": {"account": 77, "request_digest": [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]},
+    "agent_provision_request": {"request_id": "chiefduck", "name": "ChiefDuck", "program_agent_id": "chiefduck"},
+    "register_model": {"account": 77, "agent_id": "chiefduck", "display_name": "ChiefDuck", "capability": "claude", "skills": [{"name": "chiefduck", "source_prefix": "/shared/skills/chiefduck", "load": "always"}]},
+    "update_model": {"agent_id": "reviewer-bot", "display_name": "Reviewer Bot", "capability": "claude", "skills": [{"name": "review", "source_prefix": "/shared/skills/review", "load": "always"}, {"name": "style", "source_prefix": "/shared/skills/style", "load": "always"}, {"name": "tests", "source_prefix": "/shared/skills/tests", "load": "on_demand"}]},
+    "pause_model": {"agent_id": "reviewer-bot"},
+    "message_parse": "Hello **world** <@7>\n> quote"
+  },
+  "fixtures": [
+    {"path": "agents/tests/fixtures/model-program.json", "producer": "runs-wire::model_program", "legacy_b66": "byte_equivalent"},
+    {"path": "agents/tests/fixtures/agent-provision.json", "producer": "agent-wire::AgentReply::Provision", "legacy_b66": "prior_fixture_malformed_31_byte_digest_regenerated_at_8c"},
+    {"path": "agents/tests/fixtures/provision-request.json", "producer": "agent-wire::AgentMsg::Provision", "legacy_b66": "new_at_8c"},
+    {"path": "agents/tests/fixtures/configure-model-register.json", "producer": "runs-wire::RunsMsg::ConfigureModel(ModelMsg::RegisterModel)", "legacy_b66": "new_at_8c"},
+    {"path": "agents/tests/fixtures/configure-model-update.json", "producer": "runs-wire::RunsMsg::ConfigureModel(ModelMsg::UpdateModel)", "legacy_b66": "new_at_8c"},
+    {"path": "agents/tests/fixtures/configure-model-pause.json", "producer": "runs-wire::RunsMsg::ConfigureModel(ModelMsg::PauseModel)", "legacy_b66": "new_at_8c"},
+    {"path": "support/composer/tests/fixtures/message-rich.json", "producer": "chat-message::parse_message", "legacy_b66": "byte_equivalent"},
+    {"path": "canvas/tests/fixtures/boards/", "producer": "boards-wire::Reply::Board and Operation::Edit", "legacy_b66": "producer_source_byte_equivalent"},
+    {"path": "support/files/tests/fixtures/file-address.json", "producer": "files-wire::FileAddress", "legacy_b66": "producer_source_byte_equivalent"},
+    {"path": "pages/tests/fixtures/page-address.json", "producer": "duck-address::pages::PageAddress", "legacy_b66": "producer_source_byte_equivalent"}
+  ],
+  "legacy_comparison": {
+    "from": "b66f47f1f4b0c869786ce195e382f2e83fd15277",
+    "to": "8c764093d5974b4328c0b90de157d72597540020",
+    "unchanged_producer_sources": ["boards-wire", "chat-message", "files-wire::address", "duck-address::pages"],
+    "model_program": "byte_identical",
+    "agent_provision_reply": "regenerated_because_legacy_fixture_had_31_digest_bytes"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "payload": {
+    "configure_model": {
+      "operation": {
+        "update_model": {
+          "agent_id": "reviewer-bot",
+          "capability": "claude",
+          "display_name": "Reviewer Bot",
+          "skills": [
+            {
+              "load": "always",
+              "name": "review",
+              "source_prefix": "/shared/skills/review"
+            },
+            {
+              "load": "always",
+              "name": "style",
+              "source_prefix": "/shared/skills/style"
+            },
+            {
+              "load": "on_demand",
+              "name": "tests",
+              "source_prefix": "/shared/skills/tests"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "target": "runs"
+}

@@ -1,5 +1,5 @@
 // Consumer-local board records and optimistic reducer helpers.
-// Serde tags/field order match SDK boards-wire at b66f47f1f4b0c869786ce195e382f2e83fd15277.
+// Serde tags/field order match SDK boards-wire at 8c764093d5974b4328c0b90de157d72597540020.
 const CAPACITY: &str = "capacity";
 const CORRUPT: &str = "corrupt";
 const EXHAUSTED: &str = "exhausted";

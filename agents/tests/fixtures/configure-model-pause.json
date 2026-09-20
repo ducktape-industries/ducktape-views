@@ -1,0 +1,12 @@
+{
+  "payload": {
+    "configure_model": {
+      "operation": {
+        "pause_model": {
+          "agent_id": "reviewer-bot"
+        }
+      }
+    }
+  },
+  "target": "runs"
+}
