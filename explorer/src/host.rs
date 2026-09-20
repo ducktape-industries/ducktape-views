@@ -477,6 +477,7 @@ pub struct Leg {
     pub kind: &'static str,
     pub label: &'static str,
     pub hits: Option<Vec<ExplorerHit>>,
+    pub capped: bool,
 }
 
 impl Leg {
@@ -485,6 +486,7 @@ impl Leg {
             kind,
             label,
             hits: None,
+            capped: false,
         }
     }
 
@@ -493,7 +495,13 @@ impl Leg {
             kind,
             label,
             hits: Some(hits),
+            capped: false,
         }
+    }
+
+    fn capped(mut self, capped: bool) -> Self {
+        self.capped = capped;
+        self
     }
 }
 
@@ -541,11 +549,15 @@ pub fn fold_search(legs: Vec<Leg>) -> SearchItem {
     let mut hits = Vec::new();
     let mut kinds = Vec::new();
     let mut silent: Vec<&str> = Vec::new();
+    let mut capped: Vec<&str> = Vec::new();
     for leg in legs {
         let Some(rows) = leg.hits else {
             silent.push(leg.label);
             continue;
         };
+        if leg.capped {
+            capped.push(leg.label);
+        }
         kinds.push(KindCount {
             kind: leg.kind.into(),
             label: leg.label.into(),
@@ -553,13 +565,22 @@ pub fn fold_search(legs: Vec<Leg>) -> SearchItem {
         });
         hits.extend(rows);
     }
-    let partial = match silent.is_empty() {
+    let mut partial = match silent.is_empty() {
         true => String::new(),
         false => format!(
             "{} did not answer — these results are incomplete.",
             silent.join(", ")
         ),
     };
+    if !capped.is_empty() {
+        if !partial.is_empty() {
+            partial.push(' ');
+        }
+        partial.push_str(&format!(
+            "{} results capped — narrow your search for more.",
+            capped.join(", ")
+        ));
+    }
     SearchItem {
         hits,
         kinds,
@@ -573,14 +594,21 @@ pub fn fold_search(legs: Vec<Leg>) -> SearchItem {
 async fn search_messages(phrase: String) -> Leg {
     let ask = match phrase.strip_prefix('#') {
         Some(tag) if !tag.is_empty() => json!({
-            "tag_search": { "tag": tag.to_lowercase(), "channel_id": null, "limit": SEARCH_HITS }
+            "tag_search": { "tag": tag.to_lowercase(), "channel_id": null,
+                "viewer_handles": [], "after": null, "limit": SEARCH_HITS }
         }),
-        _ => json!({ "search": { "text": phrase, "channel_id": null, "limit": SEARCH_HITS } }),
+        _ => json!({ "search": { "text": phrase, "channel_id": null,
+            "viewer_handles": [], "limit": SEARCH_HITS } }),
     };
     let Some(reply) = view("chat", ask).await else {
         return Leg::silent("message", "Messages");
     };
-    let hits = rows(&reply["hits"])
+    let is_tag = phrase
+        .strip_prefix('#')
+        .filter(|tag| !tag.is_empty())
+        .is_some();
+    let payload = &reply[if is_tag { "tag_hits" } else { "hits" }];
+    let hits = rows(&payload["hits"])
         .iter()
         .map(|hit| ExplorerHit {
             kind: "message".into(),
@@ -594,7 +622,10 @@ async fn search_messages(phrase: String) -> Leg {
             target: text(&hit["channel_id"]),
         })
         .collect();
-    Leg::answered("message", "Messages", hits)
+    Leg::answered("message", "Messages", hits).capped(
+        payload["capped"].as_bool().unwrap_or(false)
+            || payload["has_more"].as_bool().unwrap_or(false),
+    )
 }
 
 /// The pages index's text search, joined with the page list for titles.
@@ -607,9 +638,10 @@ async fn search_pages(phrase: String) -> Leg {
     let Some(reply) = view("pages", ask).await else {
         return Leg::silent("page", "Pages");
     };
-    let found = rows(&reply["hits"]);
+    let found = rows(&reply["hits"]["hits"]);
     if found.is_empty() {
-        return Leg::answered("page", "Pages", Vec::new());
+        return Leg::answered("page", "Pages", Vec::new())
+            .capped(reply["hits"]["capped"].as_bool().unwrap_or(false));
     }
     let titles = page_titles().await;
     let hits = found
@@ -633,7 +665,7 @@ async fn search_pages(phrase: String) -> Leg {
             }
         })
         .collect();
-    Leg::answered("page", "Pages", hits)
+    Leg::answered("page", "Pages", hits).capped(reply["hits"]["capped"].as_bool().unwrap_or(false))
 }
 
 /// How many cursor pages of the page list one title lookup walks before it

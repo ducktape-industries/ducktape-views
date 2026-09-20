@@ -32,6 +32,7 @@ pub struct PaletteView {
     pub(crate) serial: i64,
     pub(crate) chat: Vec<host::ChatHit>,
     pub(crate) pages: Vec<host::PageHit>,
+    pub(crate) search_capped: bool,
     /// a query is out and has not been answered
     pub(crate) searching: bool,
     /// the search's own error; empty is no error
@@ -52,7 +53,7 @@ pub enum Message {
 impl PaletteView {
     /// This state's layout, digested — `snapshot_schema` holds it here.
     const SNAPSHOT_SCHEMA: &'static str =
-        "fe0aadacba195936a2bc5afb515180f65d93c531f849f9826b252f6bfcbfd195";
+        "1e043c8660345bfcc674fda7fce9deafa5e89af413199e5eb7a46b38b5040769";
 
     fn state() -> Self {
         Self {
@@ -65,6 +66,7 @@ impl PaletteView {
             serial: 0,
             chat: Vec::new(),
             pages: Vec::new(),
+            search_capped: false,
             searching: false,
             error: String::new(),
             host_error: String::new(),
@@ -184,6 +186,7 @@ impl PaletteView {
 
     fn on_draft_changed(&mut self, text: String) -> Task<Message> {
         self.draft = text;
+        self.search_capped = false;
         self.searching = self.searchable().is_some();
         if !self.searching {
             self.query = String::new();
@@ -205,6 +208,7 @@ impl PaletteView {
         self.query = item.query;
         self.chat = item.chat;
         self.pages = item.pages;
+        self.search_capped = item.capped;
         self.error = item.error;
         Task::none()
     }
@@ -222,6 +226,7 @@ impl PaletteView {
         self.query = String::new();
         self.chat = Vec::new();
         self.pages = Vec::new();
+        self.search_capped = false;
         self.searching = false;
         self.error = String::new();
         Task::none()

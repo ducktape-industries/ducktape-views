@@ -340,8 +340,8 @@ fn search_hits_name_the_page_author_and_room_once() {
     let events = frame.requests.iter().map(|request| {
         let ask: serde_json::Value = serde_json::from_slice(&request.payload).unwrap();
         let reply = match ask["target"].as_str().unwrap_or_default() {
-            "chat" => serde_json::json!({"hits": [{"author": "acct:7", "text": "Message needle", "channel_id": "room-qa", "seq": 12}]}),
-            "pages" => serde_json::json!({"hits": [{"page_id": "page-qa", "block_id": "internal-block", "text": "Page needle", "kind": "paragraph"}]}),
+            "chat" => serde_json::json!({"hits": {"hits": [{"author": "acct:7", "text": "Message needle", "channel_id": "room-qa", "seq": 12}], "capped": false}}),
+            "pages" => serde_json::json!({"hits": {"hits": [{"page_id": "page-qa", "block_id": "internal-block", "text": "Page needle", "kind": "paragraph"}], "capped": false}}),
             "forge" => serde_json::json!({"repos": []}),
             "files" => serde_json::json!({"entries": []}),
             "tasks" => serde_json::json!({"tasks": {"tasks": []}}),
@@ -405,7 +405,7 @@ fn an_empty_answer_belongs_to_its_submitted_query_and_can_be_cleared() {
                 "files" => serde_json::json!({"entries": []}),
                 "tasks" => serde_json::json!({"tasks": {"tasks": []}}),
                 "runs" => serde_json::json!({"runs": []}),
-                _ => serde_json::json!({"hits": []}),
+                _ => serde_json::json!({"hits": {"hits": [], "capped": false}}),
             };
             answer(request.id, reply.to_string().as_bytes())
         })
@@ -449,10 +449,10 @@ fn a_search_that_lost_a_source_says_which_one_and_keeps_no_chip_for_it() {
     for request in &frame.requests {
         let ask: serde_json::Value = serde_json::from_slice(&request.payload).unwrap_or_default();
         let reply = match ask["target"].as_str().unwrap_or_default() {
-            "chat" => serde_json::json!({ "hits": [{
+            "chat" => serde_json::json!({ "hits": {"hits": [{
                 "channel_id": "general", "seq": 12, "author": "user:48cedb0d1122",
                 "text": "the needle is here"
-            }]}),
+            }], "capped": false}}),
             // the one source that did not answer
             "files" => {
                 events.push(refuse(request.id, "the files module timed out"));
@@ -461,7 +461,7 @@ fn a_search_that_lost_a_source_says_which_one_and_keeps_no_chip_for_it() {
             "forge" => serde_json::json!({ "repos": [] }),
             "tasks" => serde_json::json!({ "tasks": { "tasks": [] } }),
             "runs" => serde_json::json!({ "runs": [] }),
-            _ => serde_json::json!({ "hits": [] }),
+            _ => serde_json::json!({ "hits": {"hits": [], "capped": false} }),
         };
         events.push(answer(request.id, reply.to_string().as_bytes()));
     }
@@ -767,15 +767,15 @@ fn every_row_cell_keeps_one_line() {
             let ask: serde_json::Value =
                 serde_json::from_slice(&request.payload).unwrap_or_default();
             let reply = match ask["target"].as_str().unwrap_or_default() {
-                "chat" => serde_json::json!({ "hits": [{
+                "chat" => serde_json::json!({ "hits": {"hits": [{
                     "channel_id": "general", "seq": 12, "author": "user:48cedb0d1122",
                     "text": "the needle is in here, and this snippet is long enough to wrap"
-                }]}),
+                }], "capped": false}}),
                 "forge" => serde_json::json!({ "repos": [] }),
                 "files" => serde_json::json!({ "entries": [] }),
                 "tasks" => serde_json::json!({ "tasks": { "tasks": [] } }),
                 "runs" => serde_json::json!({ "runs": [] }),
-                _ => serde_json::json!({ "hits": [] }),
+                _ => serde_json::json!({ "hits": {"hits": [], "capped": false} }),
             };
             answer(request.id, reply.to_string().as_bytes())
         })

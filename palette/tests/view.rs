@@ -52,13 +52,13 @@ fn session() -> Vec<u8> {
     .expect("session encodes")
 }
 
-const CHAT_HITS: &str = r#"{"hits":[
+const CHAT_HITS: &str = r#"{"hits":{"hits":[
     {"channel_id":"general","seq":42,"author":"Alice","text":"Ship it?"}
-]}"#;
+],"capped":false}}"#;
 
-const PAGE_HITS: &str = r#"{"hits":[
+const PAGE_HITS: &str = r#"{"hits":{"hits":[
     {"page_id":"p-1","block_id":"b-9","text":"Shipping plan"}
-]}"#;
+],"capped":false}}"#;
 
 const PAGE_INDEX: &str = r#"{"pages":[{"id":"p-1","title":"Roadmap"}]}"#;
 
@@ -317,8 +317,14 @@ fn the_card_gives_way_to_a_narrow_window_and_its_states_are_the_kits() {
     let frame = tick_native(type_into(&failed, "palette/input", "nothing"));
     let frame = tick_native(vec![item(request(&frame, "clock.ticks").id, b"")]);
     let empty = tick_native(vec![
-        answer(view_asking(&frame, "chat", "search").id, br#"{"hits":[]}"#),
-        answer(view_asking(&frame, "pages", "search").id, br#"{"hits":[]}"#),
+        answer(
+            view_asking(&frame, "chat", "search").id,
+            br#"{"hits":{"hits":[],"capped":false}}"#,
+        ),
+        answer(
+            view_asking(&frame, "pages", "search").id,
+            br#"{"hits":{"hits":[],"capped":false}}"#,
+        ),
     ]);
     assert!(has_text(&empty, "Nothing matched"), "{:?}", texts(&empty));
 }

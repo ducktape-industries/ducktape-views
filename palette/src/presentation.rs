@@ -116,6 +116,16 @@ impl PaletteView {
                 kit::Tone::Danger,
             ));
         }
+        if self.search_capped {
+            return Some(kit::notice(
+                "palette/capped",
+                kit::wrapping(kit::text(
+                    "palette/capped-text",
+                    "Results capped; narrow your search for more.",
+                )),
+                kit::Tone::Warning,
+            ));
+        }
         let asked = !self.query.is_empty();
         let empty = self.chat.is_empty() && self.pages.is_empty();
         (asked && empty).then(|| {

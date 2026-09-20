@@ -564,9 +564,25 @@ fn a_reaction_leaves_as_a_signed_op_and_the_chip_does_not_wait_for_the_block() {
         assert_eq!(op["target"], "chat");
         assert_eq!(op["payload"]["add_reaction"]["channel_id"], "channel-a");
         assert_eq!(op["payload"]["add_reaction"]["emoji"], "👍");
+        let frame = tick_native(vec![answer(submit.id, b"")]);
+        let refresh = request(&frame, "rpc.view");
+        let ask: serde_json::Value = serde_json::from_slice(&refresh.payload).unwrap();
+        assert_eq!(ask["query"]["messages_around"]["channel_id"], "channel-a");
+        assert_eq!(ask["query"]["messages_around"]["seq"], 1);
+        assert_eq!(ask["query"]["messages_around"]["limit"], 1);
+        assert_eq!(
+            ask["query"]["messages_around"]["viewer_handles"],
+            serde_json::json!(["user:aa", "acct:7"])
+        );
+        let mut canonical = row(1, "first light");
+        canonical["reactions"] = serde_json::json!([
+            { "emoji": "👍", "count": 1, "reacted_by_me": true }
+        ]);
+        let reply = serde_json::json!({"messages": [canonical]});
+        let frame = tick_native(vec![answer(refresh.id, reply.to_string().as_bytes())]);
         assert!(
             has_text(&frame, "1"),
-            "the chip counts the tap at once: {:?}",
+            "canonical refresh was not rendered: {:?}",
             texts(&frame)
         );
     });
@@ -587,9 +603,14 @@ fn a_search_reads_the_index_and_lands_its_hits() {
         let ask: serde_json::Value = serde_json::from_slice(&read.payload).expect("a read decodes");
         assert_eq!(ask["target"], "chat");
         assert_eq!(ask["query"]["search"]["text"], "light");
-        let hits = serde_json::json!({ "hits": [row(1, "first light")] })
-            .to_string()
-            .into_bytes();
+        assert_eq!(
+            ask["query"]["search"]["viewer_handles"],
+            serde_json::json!(["user:aa", "acct:7"])
+        );
+        let hits =
+            serde_json::json!({ "hits": { "hits": [row(1, "first light")], "capped": false } })
+                .to_string()
+                .into_bytes();
         let frame = tick_native(vec![answer(read.id, &hits)]);
         // the hit names its room by name, never by the id the node keys it by
         for expected in ["#general", "message 1"] {
@@ -604,6 +625,99 @@ fn a_search_reads_the_index_and_lands_its_hits() {
 }
 
 #[test]
+fn an_identityless_search_sends_no_viewer_handles() {
+    on_a_deep_stack(|| {
+        let mut anonymous = session(true);
+        anonymous.me.clear();
+        anonymous.me_key.clear();
+        let (frame, _, _) = connected_room_with(&anonymous, roots());
+        let frame = tick_native(type_into(&frame, "Search messages…", "light"));
+        let frame = tick_native(ducktape_view_guest::testing::submit(
+            &frame,
+            "Search messages…",
+        ));
+        let read = request(&frame, "rpc.view");
+        let ask: serde_json::Value = serde_json::from_slice(&read.payload).unwrap();
+        assert_eq!(
+            ask["query"]["search"]["viewer_handles"],
+            serde_json::json!([])
+        );
+    });
+}
+
+#[test]
+fn a_capped_empty_search_explains_how_to_continue() {
+    on_a_deep_stack(|| {
+        let (frame, _) = connected_room();
+        let frame = tick_native(type_into(&frame, "Search messages…", "common"));
+        let frame = tick_native(ducktape_view_guest::testing::submit(
+            &frame,
+            "Search messages…",
+        ));
+        let read = request(&frame, "rpc.view");
+        let frame = tick_native(vec![answer(
+            read.id,
+            br#"{"hits":{"hits":[],"capped":true}}"#,
+        )]);
+        assert!(has_text(
+            &frame,
+            "Results capped; narrow your search for more."
+        ));
+    });
+}
+
+#[test]
+fn a_tag_search_loads_explicit_cursor_pages_without_duplicate_rows() {
+    on_a_deep_stack(|| {
+        let (frame, _) = connected_room();
+        let frame = tick_native(type_into(&frame, "Search messages…", "#rust"));
+        let frame = tick_native(ducktape_view_guest::testing::submit(
+            &frame,
+            "Search messages…",
+        ));
+        let first = request(&frame, "rpc.view");
+        let ask: serde_json::Value = serde_json::from_slice(&first.payload).unwrap();
+        assert_eq!(ask["query"]["tag_search"]["after"], serde_json::Value::Null);
+        let reply = serde_json::json!({
+            "tag_hits": {
+                "hits": [row(1, "rust one")],
+                "has_more": true,
+                "next_after": "opaque-1"
+            }
+        });
+        let frame = tick_native(vec![answer(first.id, reply.to_string().as_bytes())]);
+        assert!(has_text(
+            &frame,
+            "1 result for “#rust” · more results available"
+        ));
+
+        let frame = tick_native(press(&frame, "Load more results"));
+        let second = request(&frame, "rpc.view");
+        let ask: serde_json::Value = serde_json::from_slice(&second.payload).unwrap();
+        assert_eq!(ask["query"]["tag_search"]["after"], "opaque-1");
+        let reply = serde_json::json!({
+            "tag_hits": {
+                "hits": [row(1, "rust one"), row(2, "rust two")],
+                "has_more": false,
+                "next_after": null
+            }
+        });
+        let frame = tick_native(vec![answer(second.id, reply.to_string().as_bytes())]);
+        let shown = texts(&frame);
+        assert_eq!(
+            shown
+                .iter()
+                .filter(|text| text.as_str() == "rust one")
+                .count(),
+            1,
+            "cursor overlap is deduplicated: {shown:?}"
+        );
+        assert!(has_text(&frame, "rust two"));
+        assert!(!has_text(&frame, "Load more results"));
+    });
+}
+
+#[test]
 fn a_zero_hit_search_can_be_cleared_and_never_labels_a_different_draft() {
     on_a_deep_stack(|| {
         let (frame, _) = connected_room();
@@ -613,7 +727,10 @@ fn a_zero_hit_search_can_be_cleared_and_never_labels_a_different_draft() {
             "Search messages…",
         ));
         let read = request(&frame, "rpc.view").id;
-        let frame = tick_native(vec![answer(read, br#"{"hits":[]}"#)]);
+        let frame = tick_native(vec![answer(
+            read,
+            br#"{"hits":{"hits":[],"capped":false}}"#,
+        )]);
         assert!(has_text(&frame, "No messages match"));
         let frame = tick_native(type_into(&frame, "Search messages…", "different"));
         assert!(!has_text(&frame, "No messages match"));
@@ -627,7 +744,10 @@ fn a_zero_hit_search_can_be_cleared_and_never_labels_a_different_draft() {
             "Search messages…",
         ));
         let read = request(&frame, "rpc.view").id;
-        let frame = tick_native(vec![answer(read, br#"{"hits":[]}"#)]);
+        let frame = tick_native(vec![answer(
+            read,
+            br#"{"hits":{"hits":[],"capped":false}}"#,
+        )]);
         let frame = tick_native(press(&frame, "Clear message search"));
         assert!(!has_text(&frame, "No messages match"));
         assert!(has_text(&frame, "first light"));
