@@ -436,7 +436,7 @@ async fn agents_with_a_run_in_flight() -> BTreeSet<String> {
         .collect()
 }
 
-/// Every capability tag some node announces, sorted and deduped — the
+/// Executor tags some node announces, sorted and deduped — the
 /// executors a record can name and be dispatched on. A node that cannot
 /// answer the registry offers none, never a guess.
 async fn announced_capabilities() -> Vec<String> {
@@ -449,6 +449,8 @@ async fn announced_capabilities() -> Vec<String> {
         .unwrap_or_default()
         .iter()
         .flat_map(|entry| string_list(&entry[1]))
+        // Service kinds share registry entries with executor tags.
+        .filter(|tag| !matches!(tag.as_str(), "agent" | "compute" | "airlock"))
         .collect::<BTreeSet<String>>()
         .into_iter()
         .collect()
