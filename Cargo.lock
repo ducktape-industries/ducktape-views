@@ -136,16 +136,12 @@ checksum = "4e7648175b45a9a48536d676f68d918270699102aa8dab5496df06904c914600"
 name = "chat-view"
 version = "0.1.0"
 dependencies = [
- "base64",
- "duck-address",
  "futures",
  "serde",
  "serde_json",
  "sha2",
- "unicode-normalization",
  "unicode-segmentation",
  "view-guest",
- "view-wire",
 ]
 
 [[package]]
@@ -374,7 +370,6 @@ dependencies = [
 [[package]]
 name = "design"
 version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?rev=fb71df31ffed916d659fef0df81d792ccd21fdc8#fb71df31ffed916d659fef0df81d792ccd21fdc8"
 
 [[package]]
 name = "digest"
@@ -410,7 +405,6 @@ dependencies = [
 [[package]]
 name = "duck-address"
 version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#fb71df31ffed916d659fef0df81d792ccd21fdc8"
 dependencies = [
  "refusal-class",
 ]
@@ -1090,7 +1084,6 @@ dependencies = [
 [[package]]
 name = "refusal-class"
 version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?branch=dev#fb71df31ffed916d659fef0df81d792ccd21fdc8"
 
 [[package]]
 name = "regalloc2"
@@ -1457,10 +1450,10 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 [[package]]
 name = "view-guest"
 version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?rev=fb71df31ffed916d659fef0df81d792ccd21fdc8#fb71df31ffed916d659fef0df81d792ccd21fdc8"
 dependencies = [
  "design",
  "futures",
+ "serde",
  "serde_json",
  "view-wire",
  "wit-bindgen",
@@ -1469,7 +1462,6 @@ dependencies = [
 [[package]]
 name = "view-wire"
 version = "0.1.0"
-source = "git+https://github.com/ducktape-industries/ducktape-sdk?rev=fb71df31ffed916d659fef0df81d792ccd21fdc8#fb71df31ffed916d659fef0df81d792ccd21fdc8"
 dependencies = [
  "bincode",
  "design",

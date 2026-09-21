@@ -2,8 +2,7 @@
 
 mod binding;
 mod editing;
-pub mod host;
-mod message;
+pub mod send;
 pub use binding::{Event, Outcome, view};
 
 use ducktape_view_guest::{Editor, wire};
@@ -70,73 +69,6 @@ pub struct Draft {
 }
 
 impl Draft {
-    /// A draft holding one of everything, for the snapshot-schema trace the
-    /// views that carry a draft each run. Its editor document restores (the
-    /// byte a tracer makes up does not), and no collection or option is empty,
-    /// because a shape the sample does not reach is a shape the tag does not
-    /// describe. The literal is exhaustive on purpose: a field added to
-    /// `Draft` is a field the compiler makes you reach here too.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub fn schema_sample() -> Self {
-        let attachments = vec![
-            Attachment {
-                token: "t".into(),
-                name: "a".into(),
-                bytes: 1,
-                state: AttachmentState::Uploading,
-            },
-            Attachment {
-                token: "t".into(),
-                name: "a".into(),
-                bytes: 1,
-                state: AttachmentState::Ready { uri: "u".into() },
-            },
-            Attachment {
-                token: "t".into(),
-                name: "a".into(),
-                bytes: 1,
-                state: AttachmentState::Failed { reason: "r".into() },
-            },
-            Attachment {
-                token: "t".into(),
-                name: "a".into(),
-                bytes: 1,
-                state: AttachmentState::Unavailable,
-            },
-        ];
-        let mentions = vec![Mention {
-            range: 0..1,
-            token: "<@1>".into(),
-        }];
-        let send = Send {
-            body: "b".into(),
-            attachments: attachments.clone(),
-        };
-        let history = vec![History {
-            text: "b".into(),
-            mentions: mentions.clone(),
-            cursor: wire::EditorCursor {
-                position: wire::EditorPosition { line: 0, column: 1 },
-                selection: Some(wire::EditorPosition { line: 0, column: 0 }),
-            },
-        }];
-        Self {
-            editor: Editor::new("b"),
-            mentions,
-            attachments,
-            failed_send: Some(send.clone()),
-            submitted: Some(send.clone()),
-            in_flight: vec![send],
-            note: "n".into(),
-            paste: Some("p".into()),
-            clipboard: Some("c".into()),
-            menu_index: 0,
-            menu_dismissed: false,
-            undo: history.clone(),
-            redo: history,
-        }
-    }
-
     pub fn from_body(body: &str, roster: &[MentionChoice]) -> Self {
         let mut draft = Self::default();
         draft.seed(body, roster);

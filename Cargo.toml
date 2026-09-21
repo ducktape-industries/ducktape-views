@@ -6,9 +6,9 @@ members = ["canvas", "governance", "home", "inbox", "members", "agents", "node",
 
 [workspace.dependencies]
 futures = "0.3"
-ducktape-view-guest = { package = "view-guest", git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "fb71df31ffed916d659fef0df81d792ccd21fdc8" }
-design = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "fb71df31ffed916d659fef0df81d792ccd21fdc8", package = "design" }
-view-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", rev = "fb71df31ffed916d659fef0df81d792ccd21fdc8", package = "view-wire" }
+ducktape-view-guest = { package = "view-guest", git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev" }
+design = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "design" }
+view-wire = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "view-wire" }
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

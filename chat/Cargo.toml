@@ -5,23 +5,15 @@ edition = "2024"
 publish = false
 
 # A Rust-authored view, exported as a dynamically loaded WASM component by
-# `export_app!`; `unsafe_code` is not forbidden only because the component
+# `export_view!`; `unsafe_code` is not forbidden only because the component
 # exports need `#[unsafe(export_name)]`.
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-duck-address = { git = "https://github.com/ducktape-industries/ducktape-sdk", branch = "dev", package = "duck-address" }
-base64.workspace = true
+ducktape-view-guest.workspace = true
 futures.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-ducktape-view-guest.workspace = true
-sha2 = "0.10"
+sha2 = { version = "0.10", default-features = false }
 unicode-segmentation = "1"
-unicode-normalization = "0.1"
-
-[dev-dependencies]
-# The snapshot tag is a digest of this view's own state layout; the tracer
-# that derives it is host-only and never reaches the built component.
-view-wire = { workspace = true, features = ["schema"] }
